@@ -3,7 +3,7 @@
 <body><main>
   <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
   <div id="notice" role="status" aria-live="polite"></div>
-  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="health">健康检查</button></nav>
+  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="health">运行报告</button></nav>
   <form id="settings"><section id="groups" class="tab-panel">
     <div class="section-head"><div><h2>哪些群可以自然接话</h2><p>勾选后成为特殊接话群；未勾选的群继续按原有唤醒规则回复</p></div><button id="load-groups" type="button" class="secondary">刷新群列表</button></div>
     <div id="group-list" class="group-list" aria-label="特殊接话群">正在读取群列表…</div>
@@ -25,12 +25,18 @@
     <h2>定时私聊</h2><div id="fixed-friend-list" class="group-list"></div><details><summary>手动填写好友QQ号</summary><textarea id="fixed_private_ids" rows="2"></textarea></details>
     <h2>各目标的运行状态</h2><button type="button" id="refresh-schedule" class="secondary">刷新定时状态</button><div id="schedule-status" class="callout">保存选择后约10秒开始计时</div>
   </section>
+  <section id="character" class="tab-panel" hidden>
+    <h2>嘴欠白毛龙娘，挨怼就怂</h2><p>自称本龙，默认短句、二次元自拍；被怼先道歉，下一轮恢复调皮。真心求助认真回应</p>
+    <div class="card-grid"><article class="card"><h2>父亲身份</h2><label for="father_qq">父亲 QQ 号（留空表示不绑定）</label><input id="father_qq" type="text" inputmode="numeric" maxlength="20"><label for="father_nickname">父亲昵称（仅作本机备注）</label><input id="father_nickname" type="text" maxlength="80"><p>只按消息真实发送者的QQ识别；昵称和头像不授予身份，也不改变管理员权限</p></article>
+    <article class="card"><h2>偶尔带一个 Emoji</h2><label for="emoji_probability">每轮允许使用的概率（%）</label><input id="emoji_probability" type="number" min="0" max="100" required><p>默认18%，允许时由模型判断是否合适，最多一个。0表示禁用；严肃求助不添加</p></article></div>
+    <p class="callout">完整角色和审阅规则见插件 dragon_character.py；面板改动下一轮生效，无需重启</p>
+  </section>
   <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
   </form>
   <section id="health" class="tab-panel" hidden><div class="section-head"><div><h2>看看每一段连接是否正常</h2><p>检查 QQ/OneBot、AstrBot、模型 API 和功能组件，不会试发群消息或动态</p></div><button class="secondary" id="refresh-health">刷新结果</button></div>
-    <div class="health-actions"><button data-mode="Check">检查一次</button><button data-mode="Deep" class="secondary">深度检查</button><button data-mode="Repair" class="repair">检查并修复</button></div>
+    <div class="callout">全项目检查修复已独立：请在电脑的 QQBot 项目目录双击「一键检查修复.bat」。即使 AstrBot 控制台打不开，也能检查并修复；这里仅显示上次运行报告</div>
     <p id="job-status" role="status">尚未读取检查状态</p><div id="health-summary" class="callout"></div><div id="health-results"></div>
-    <p class="footnote">深度检查会实际调用当前模型和审阅。修复可能短暂重启故障服务，页面会等待重连。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
+    <p class="footnote">独立脚本会检查服务、QQ连接、模型和审阅，并重启可恢复的故障服务。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
   </section>
   <footer>设置保存后生效 · 特殊群默认不选 · 固定定时独立计时 · 管理员权限保持不变</footer>
 </main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./app.js"></script></body></html>

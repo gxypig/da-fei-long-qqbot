@@ -118,6 +118,8 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             "本轮话题方向": TOPICS[topic_index],
             "提示": "有近期会话就优先自然衔接；没有上下文时围绕本轮话题方向说一点具体的，不机械复制题目。动态一两句，私聊别像调查问卷。",
         }
+        from .dragon_character import proactive_note
+        system += proactive_note(scope, plugin._cfg, [x["text"][:200] for x in recent])
         provider = plugin.context.get_using_provider()
         if provider is None:
             return "没有可用的对话模型。"

@@ -1,8 +1,14 @@
 """Keep image creation/questions out of the existing-image search handler."""
 import re
+try:
+    from data.plugins.astrbot_plugin_proactive_agent.visual_intent import generation_kind
+except ImportError:
+    generation_kind = None
 
 
 def is_generation_request(text: str) -> bool:
+    if generation_kind is not None:
+        return generation_kind(text) != "none"
     text = str(text or "").strip().lower()
     # Ignore explicitly negated creation clauses ("不要画，找个现成的表情包").
     text = re.sub(r"(?:不要|别|不用|不需要)(?:再|给我|帮我)?(?:生成|画|绘制|创作|制作)[^，,。；;]*", "", text)

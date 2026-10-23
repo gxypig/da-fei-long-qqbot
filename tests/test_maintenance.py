@@ -182,6 +182,10 @@ class Permissions(unittest.TestCase):
 
 
 class ConversationContext(unittest.IsolatedAsyncioTestCase):
+    def event(self, text="绷不住了"):
+        extra={}
+        return SimpleNamespace(unified_msg_origin='group:1',get_sender_id=lambda:'2',get_message_str=lambda:text,
+            get_extra=lambda k:extra.get(k),set_extra=lambda k,v:extra.__setitem__(k,v))
     async def test_context_stays_in_its_chat_and_expires(self):
         plugin=object.__new__(Main)
         plugin.config={}
@@ -189,17 +193,19 @@ class ConversationContext(unittest.IsolatedAsyncioTestCase):
         plugin._recent_messages={'group:1':[{'time':time.time(),'text':'群里正在聊游戏'}, {'time':time.time()-9000,'text':'过期消息'}],
                                  'private:2':[{'time':time.time(),'text':'私聊秘密'}]}
         req=SimpleNamespace(prompt='绷不住了',system_prompt='原有角色设定')
-        await plugin.enrich_conversation(SimpleNamespace(unified_msg_origin='group:1'),req)
+        await plugin.enrich_conversation(self.event(),req)
         self.assertTrue(req.system_prompt.startswith('原有角色设定'))
         self.assertIn('群里正在聊游戏',req.system_prompt)
         self.assertNotIn('私聊秘密',req.system_prompt)
         self.assertNotIn('过期消息',req.system_prompt)
 
-    async def test_disable_context_preserves_original_prompt(self):
+    async def test_disabling_meme_context_keeps_persona_and_character(self):
         plugin=object.__new__(Main);plugin.config={'meme_context_enabled':False}
-        req=SimpleNamespace(system_prompt='原有角色设定')
-        await plugin.enrich_conversation(None,req)
-        self.assertEqual(req.system_prompt,'原有角色设定')
+        req=SimpleNamespace(prompt='你好',system_prompt='原有角色设定')
+        await plugin.enrich_conversation(self.event('你好'),req)
+        self.assertTrue(req.system_prompt.startswith('原有角色设定'))
+        self.assertIn('本龙',req.system_prompt)
+        self.assertNotIn('图库中相关梗的候选标签',req.system_prompt)
 
 
 class FakePlugin:

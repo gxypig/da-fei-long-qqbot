@@ -151,7 +151,7 @@ class ConversationHistory(unittest.IsolatedAsyncioTestCase):
         plugin.review_context = lambda origin: ["你好"]
         plugin.review_mode = lambda origin: "chat"
         event = SimpleNamespace(unified_msg_origin="aiocqhttp:FriendMessage:1", get_group_id=lambda: "",
-            get_sender_id=lambda: "1", get_platform_id=lambda: "aiocqhttp", stop_event=lambda: self.fail("should pass"))
+            get_sender_id=lambda: "1", get_platform_id=lambda: "aiocqhttp", get_extra=lambda k:None, stop_event=lambda: self.fail("should pass"))
         response = LLMResponse(role="assistant", completion_text="长篇", result_chain=MessageChain([Plain("长篇"), Image(file="https://example.org/image.png")]))
         context = SimpleNamespace(messages=[Message(role="assistant", content=[TextPart(text="长篇")])])
         await plugin.review_agent_reply(event, context, response)

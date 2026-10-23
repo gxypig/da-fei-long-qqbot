@@ -42,7 +42,7 @@
   "personality": {
     "description": "AI 的角色设定与动机，直接决定它会主动说什么",
     "type": "string",
-    "default": "你是主人的 QQ 私人助手，性格温和、偶尔俏皮。说话简短自然，像真实的朋友，而不是客服。"
+    "default": "大肥龙是成年二次元白毛龙娘，自称本龙，嘴欠犀利、被怼就怂，使用统一角色约定。"
   },
   "allow_group": {
     "description": "允许 AI 在群里主动发言",
@@ -162,5 +162,21 @@
       "deepseek",
       "tavily"
     ]
+  },
+  "father_qq": {
+    "type": "string",
+    "description": "龙娘父亲的QQ（角色关系，不改变管理员权限）",
+    "hint": "按真实发言人识别，留空不绑定；勿公开私人账号",
+    "default": ""
+  },
+  "father_nickname": {
+    "type": "string",
+    "description": "父亲昵称（仅本机备注）",
+    "default": ""
+  },
+  "emoji_probability": {
+    "type": "int",
+    "description": "每轮允许最多一个Emoji的概率（0-100）",
+    "default": 18
   }
 }

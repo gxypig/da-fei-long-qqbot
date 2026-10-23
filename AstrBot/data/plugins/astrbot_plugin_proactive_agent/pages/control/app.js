@@ -3,8 +3,8 @@
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
   const booleans = ['group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled'];
-  const numbers = ['group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes'];
-  const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids'];
+  const numbers = ['group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability'];
+  const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname'];
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function api(endpoint, body) {
     const result = await (body===undefined ? bridge.apiGet(endpoint) : bridge.apiPost(endpoint,body));
@@ -48,7 +48,7 @@
     const running=job?.status==='running';
     $('job-status').textContent=running?'正在检查，修复时可能短暂断线，请稍候…':job?.status==='failed'?'上次检查未完成，请查看本机日志':job?.status==='completed'?`上次任务已完成${job.exit_code===0?'':'，仍有项目需要处理'}`:'后台守护持续检查中';
     document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=running);
-    $('health-summary').textContent=report?`${report.ok?'本轮检查正常':'本轮有项目需要处理'} · ${new Date(report.time).toLocaleString('zh-CN')} · ${report.deep?'含真实模型实测':'连接与组件检查'}`:'还没有检查报告，点击「检查一次」开始';
+    $('health-summary').textContent=report?`${report.ok?'本轮检查正常':'本轮有项目需要处理'} · ${new Date(report.time).toLocaleString('zh-CN')} · ${report.deep?'含真实模型实测':'连接与组件检查'}`:'还没有检查报告，请在项目目录运行「一键检查修复.bat」';
     $('health-results').replaceChildren();
     (report?.checks||[]).forEach(r=>{
       const row=document.createElement('div');row.className='health-row';
@@ -65,11 +65,6 @@
     const deadline=Date.now()+900000;
     while(Date.now()<deadline){await new Promise(r=>setTimeout(r,3000));if(!await refreshHealth())break;}
     polling=false;
-  }
-  async function start(mode) {
-    document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=true);
-    try{await api('panel_health',{mode});notice(mode==='Repair'?'已开始检查修复，页面会自动等待服务重连':'检查已开始，结果会自动更新');await refreshHealth();poll();}
-    catch(e){notice(e.message,true);document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=false);}
   }
   function renderTargets() {
     for (const [list,field,items] of [['fixed-group-list','fixed_group_ids',groups],['fixed-friend-list','fixed_private_ids',friends]]) {
@@ -107,7 +102,6 @@
   $('probability-slider').addEventListener('input',()=>{$('group_chat_probability').value=$('probability-slider').value;});
   $('group_chat_probability').addEventListener('input',()=>{$('probability-slider').value=$('group_chat_probability').value;});
   $('refresh-health').addEventListener('click',refreshHealth);
-  document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>start(b.dataset.mode)));
   window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
   (async()=>{try{bridge=window.AstrBotPluginView||window.AstrBotPluginPage;if(!bridge)throw new Error('请从 AstrBot 控制台的插件页面打开');await bridge.ready();await loadSettings();await loadTargets();}catch(e){notice(e.message,true);}})();
 })();

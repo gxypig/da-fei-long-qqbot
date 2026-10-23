@@ -71,6 +71,7 @@ def install_image_compat():
             response.result_chain = MessageChain()
         response.result_chain.chain.extend(Image(file=ref) for ref in refs)
         response.raw_completion = completion
+        response.qqbot_generated_image = True
         return response
 
     ProviderOpenAIOfficial._parse_openai_completion = parse

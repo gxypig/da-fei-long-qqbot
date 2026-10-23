@@ -8,16 +8,16 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import uuid
 
 from quart import jsonify, request
 
 PROJECT = Path(__file__).resolve().parents[4]
 FIELDS = {
+    "father_qq": "", "father_nickname": "", "emoji_probability": 18,
     "group_chat_ids": "", "group_chat_probability": 10,
     "group_wake_words": "大肥龙,肥龙", "group_wake_anywhere": True,
-    "enable": True, "allow_group": True, "allow_private": False, "allow_qzone": True,
+    "enable": False, "allow_group": False, "allow_private": False, "allow_qzone": False,
     "interval_minutes": 30, "quiet_hours": "23:00-07:00",
     "discretionary_enabled": True,
     "fixed_messages_enabled": False, "fixed_group_ids": "", "fixed_private_ids": "",
@@ -39,6 +39,13 @@ def validate(data):
     for key, default in FIELDS.items():
         if type(values[key]) is not type(default):
             raise ValueError("设置类型不正确：" + key)
+    if not 0 <= values["emoji_probability"] <= 100:
+        raise ValueError("Emoji概率必须为0至100的整数")
+    values["father_qq"] = values["father_qq"].strip()
+    if values["father_qq"] and not re.fullmatch(r"[0-9]{5,20}", values["father_qq"]):
+        raise ValueError("父亲QQ请填写有效数字，或留空")
+    if len(values["father_nickname"]) > 80:
+        raise ValueError("昵称不能超过80字")
     if not 0 <= values["group_chat_probability"] <= 100:
         raise ValueError("接话概率必须为0至100的整数")
     if not 5 <= values["interval_minutes"] <= 1440:
@@ -106,7 +113,7 @@ class PanelMixin:
             ("panel_groups", self.panel_groups_api, ["GET"]),
             ("panel_friends", self.panel_friends_api, ["GET"]),
             ("panel_schedule", self.panel_schedule_api, ["GET"]),
-            ("panel_health", self.panel_health_api, ["GET", "POST"]),
+            ("panel_health", self.panel_health_api, ["GET"]),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
 
@@ -161,26 +168,5 @@ class PanelMixin:
     async def panel_health_api(self):
         if request.method == "GET":
             return jsonify({"status": "ok", "data": {"report": local_json("health-status.json"), "job": current_job()}})
-        body = await request.get_json(silent=True) or {}
-        mode = body.get("mode") if isinstance(body, dict) else None
-        if mode not in {"Check", "Deep", "Repair"}:
-            return jsonify({"status": "error", "message": "无效的检查类型"}), 400
-        async with self._panel_lock:
-            job = current_job()
-            if job and job.get("status") == "running":
-                return jsonify({"status": "error", "message": "检查正在执行，请等待结果"}), 409
-            job_id = str(uuid.uuid4())
-            job = {"id": job_id, "mode": mode, "status": "running", "started": datetime.now(timezone.utc).isoformat()}
-            # A short-lived launcher orphans the worker before any AstrBot repair;
-            # otherwise the exact descendant shutdown would kill its own repair job.
-            try:
-                save_job(job)
-                command = [sys.executable, str(PROJECT / "manage.py"), "panel-job", "--mode", mode, "--job-id", job_id]
-                kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS} if os.name == "nt" else {"start_new_session": True}
-                subprocess.Popen(command, cwd=str(PROJECT), stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **kwargs)
-            except OSError:
-                job.update(status="failed", message="检查任务未能启动")
-                save_job(job)
-                return jsonify({"status": "error", "message": "检查任务未能启动，请查看本机日志"}), 500
-            return jsonify({"status": "ok", "data": {"job_id": job_id}})
+        # The repair runner must survive AstrBot being offline. No panel execution.
+        return jsonify({"status": "error", "message": "请在项目目录运行一键检查修复.bat，面板仅展示最近报告"}), 405
