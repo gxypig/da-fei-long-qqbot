@@ -1,6 +1,31 @@
 # 部署细节与故障排查
 
-本说明对应本仓库固定的 AstrBot 4.29.1、主动插件 1.6.0、图库插件 2.8.6 本地修改版。上游文档：[AstrBot Docker](https://docs.astrbot.app/deploy/astrbot/docker.html)、[AstrBot 源码](https://github.com/AstrBotDevs/AstrBot)、[OneBot 接入](https://docs.astrbot.app/deploy/platform/aiocqhttp/)。升级前先看维护文档，不要直接覆盖运行数据。
+本说明对应本仓库固定的 AstrBot 4.29.1、主动插件 1.6.0、图库插件 2.8.6 本地修改版。上游文档：[AstrBot Docker](https://docs.astrbot.app/deploy/astrbot/docker.html)、[AstrBot 源码](https://github.com/AstrBotDevs/AstrBot)、[OneBot 接入](https://docs.astrbot.app/platform/aiocqhttp.html)。升级前先看维护文档，不要直接覆盖运行数据。
+
+2026-10-23 补充：本页把独立 QQ 接入端的准备、人工交接、配置、验收和排错展开。它不是“给一个网址就不需要任何账号、授权、扫码的全自动安装承诺”。首次使用请先看下面的责任表，再按路线执行。
+
+## 零、先决定部署路线与交接点
+
+| 当前条件 | 本项目的执行路线 | 到哪一步才能报告完成 |
+| --- | --- | --- |
+| Windows x64，尚无 QQ 接入端 | README 安装 AstrBot；账号主人按下文准备官方 SnowLuma，然后 agent 完成连接与验收 | QQ 登录、反向连接、实际私聊和群聊验证后 |
+| 已有合法安装并在线的 OneBot v11 接入端 | 复用该端；只新建指向本项目的反向连接，不迁移它的账号文件 | 标准聊天和所需扩展分别验收后 |
+| Linux 云主机，QQ 仍在 Windows | 第二/四节部署云端 AstrBot，第三节建立隧道，再按本页字段表连接 | 两台机器都在线、隧道与实际消息验证后 |
+| 只有无桌面的云主机，QQ 接入端也未安装 | 先完成 AstrBot，另行选择能在目标系统运行、许可允许的 QQ 接入端 | QQ 端与扫码环境未准备好时只能交付“框架已就绪，QQ待接入” |
+
+本仓库的 `compose.yaml` 只部署 AstrBot 和两个插件，**没有 QQ/SnowLuma 容器**。`manage.py` 和公开版的一键入口也只管理本项目 AstrBot，不会自动启动外部 QQ 或 SnowLuma。作者原电脑的私人整合启动器并未作为公开版部署入口发布。
+
+| 事项 | 谁负责、怎样交接 |
+| --- | --- |
+| 克隆源码、Python 环境、依赖、生成配置、启动 AstrBot | agent 可按授权执行；每阶段检查返回结果，失败不继续报成功 |
+| 模型 API 的地址、密钥、实际模型名 | 账号主人提供，或从其已授权配置中读取；写本地 `local/settings.json`，不要贴到公开 Issue |
+| 管理员 QQ 与机器人 QQ | 管理员填操作者个人 QQ；SnowLuma 登录实际承担回复的机器人 QQ，两者不要混淆 |
+| SnowLuma 许可与安装 | 无覆盖自动部署的书面授权时，由使用者按官方发行方式手动准备；不能让 agent 用脚本下载并部署专有组件来绕过这个交接点 |
+| 首次条款确认、登录/设备验证 | 账号主人阅读并操作；agent 不代扫码、不猜凭据、不预设“已经同意” |
+| 反向连接、插件页面、只读健康检查 | 接入端准备好后由 agent 继续；首次交接后不必重装已完成的 AstrBot |
+| 向 QQ/空间发测试内容 | 用户指定测试对象/可见范围后执行，未经授权只做模拟和只读检查 |
+
+用户暂时离开时，agent 可以继续完成不依赖登录的步骤；结束时明确“已完成阶段、缺少什么、从哪一步继续”，不要把整个任务笼统标成成功或让用户从头再装。以下默认仅部署一个机器人 QQ；多账号需要另行核对平台实例和目标绑定，不能把同一条配置盲目套给所有账号。
 
 ## 一、链路与边界
 
@@ -18,11 +43,106 @@ AstrBot :6185 → 管理页面、图库、定时分类、健康检查
 
 本仓库没有 Codex 反代，也不要求部署者登录作者用过的模型产品。标准 OneBot v11 没有统一的 QQ 空间发布接口；本插件调用 `send_qzone_msg` 扩展。**接入端不实现此扩展时，群聊/私聊照常使用，动态功能不可用，应关闭动态开关。** 不得把不支持接口误诊为整个 AstrBot 坏了。
 
-### SnowLuma
+### 1.1 为什么没有打包 SnowLuma
 
-作者本机采用 SnowLuma 2.1.0。其 [源码许可](https://github.com/SnowLuma/SnowLuma/blob/main/LICENSE) 与 [EULA](https://github.com/SnowLuma/SnowLuma/blob/main/EULA.md) 对专有组件、自动化部署和再分发有专门限制。本仓库不代为接受许可，不打包/修改/自动下载安装这些组件。需要使用时，由部署者自行阅读条款、取得所需授权并按照 [官方项目](https://github.com/SnowLuma/SnowLuma) 和 [发行页](https://github.com/SnowLuma/SnowLuma/releases) 完成安装，然后手动填写 OneBot 连接信息。
+作者本机采用 SnowLuma 2.1.0。核对的是其 [源码许可](https://github.com/SnowLuma/SnowLuma/blob/main/LICENSE) 和 [EULA 1.1（2026-07-21）第5条](https://github.com/SnowLuma/SnowLuma/blob/main/EULA.md#5-专有组件)：原生 `.node` / `.dll` / `.so` 属于单独的专有组件；第5.4条要求第三方安装包整合、Docker 镜像整合、自动化脚本部署事先获得著作权人的书面授权。
 
-连接端选型必须确认：运行系统、QQ 登录支持、OneBot v11 反向连接、图片收发、好友与群列表，以及需要时的空间扩展。不要因为兼容聊天接口就假定它支持所有扩展。
+本仓库没有取得这项书面授权，因此不包含这些二进制，也不提供替用户拉取并安装它们的脚本。“免费”“仅供学习”“保留作者署名”不能代替缺少的授权。这不等于禁止个人按许可使用官方发行包；本页说明的是使用者独立准备接入端之后，如何连接到本项目。将来若取得覆盖相应用途的书面许可，再重新评估整合方式，而不是从其他镜像复制组件。
+
+官方文档出现自动安装或容器示例，不代表本仓库已经取得相同的第三方分发/自动部署权利。遇到文档与许可适用范围不明确，应向权利人核实。也不要把“可查看源码”理解成所有组件都采用 GPL/AGPL。
+
+### 1.2 Windows x64：使用者手动准备接入端
+
+**这一小节由使用者在自己的电脑完成；agent 可以解释和检查状态，但本仓库不将它改成无人值守的专有组件部署脚本。** 官方参考：[2.1.0发行说明](https://github.com/SnowLuma/SnowLuma/releases/tag/v2.1.0)、[Windows手动部署](https://snowluma.github.io/zh/docs/guide/deploy/windows)。
+
+1. 准备 Windows x64 和从腾讯官方取得的桌面 NTQQ，确认可以正常打开。SnowLuma 需要匹配 QQ 版本；不要把“最新版”视作一定兼容，也不要为了试错删除 QQ 用户数据。遇到加载失败，核对对应发行说明与运行日志中的版本。
+2. 由使用者阅读该发行版附带的 EULA / 隐私说明，并决定是否使用。在官方发行页的 **Assets** 中选择与平台匹配的成品包；GitHub 自动生成的 **Source code (zip)** 是源码归档，不是可直接运行的完整发行包。
+3. 对本页对应的 **v2.1.0**，Windows完整包为 `SnowLuma-v2.1.0-win-x64.zip`；Lite包为 `SnowLuma-v2.1.0-win-x64-lite.zip`。完整版带 Node.js，优先使用；Lite 需要 **Node.js 24或以上**。通用旧教程中的 `.tar.gz`、Node 22示例不适用于这个版本，冲突时以对应发行页和包内 `check-node-version.cjs` 为准。Linux资产不能放到原生Windows运行。
+4. 手动解压到固定独立目录，例如 `C:\SnowLuma`，不要与 AstrBot 的 `data` 目录混合。确认解压后能看到 `launcher.bat`、`index.mjs`、`native` 和页面资源；没有这些通常是选错包或解压层级不对。新安装不得拷贝作者机器的 `config`、`data`、登录态和日志。
+5. 用与 QQ 相同的 Windows 用户及相同权限等级运行包内 `launcher.bat`，保留启动窗口查看错误。不要单独将其中一个提升为管理员来试错。若提示 Node 太旧，先核对实际调用的版本；PowerShell 的 `node` 不一定指向当前目录内的 `node.exe`，应按发行包启动方式使用自带运行时，不要随意替换原生组件。
+6. 使用自己的机器人 QQ 登录桌面客户端，按客户端要求完成扫码/设备确认。在 SnowLuma 面板查看正确的 QQ 进程和账号是否已加载、在线；如果自动加载未开启，使用面板相应的加载操作。不同版本自动加载默认值可能不同，**以实际状态为准**。只看到 QQ 窗口不能证明协议已接入。
+7. 打开 `http://127.0.0.1:5099/`。SnowLuma 的初始用户名通常为 `admin`，初始密码以本次首次启动日志为准。它与 AstrBot 6185 面板的密码是两套独立凭据，不能混用；复用旧数据目录不会因为重启而重新生成初始密码。密码只在本人本机查看，不复制完整日志到聊天或仓库。
+8. 完成后告诉接手 agent：SnowLuma版本、QQ版本、两个进程在线情况、所在机器、WebUI本地地址，以及是否已允许配置反向连接。无需交出QQ密码或把二维码放进公开文件。然后继续下一小节。
+
+关闭或重新开机后，外部 QQ/SnowLuma 仍要按它们自己的方式恢复；本仓库的“一键启动”只恢复 AstrBot。无人值守与授权问题解决前，不承诺整台电脑开机即可自动完成首次登录。
+
+### 1.3 AstrBot 与 SnowLuma 的字段如何对应
+
+先完成 [README.md](README.md) 的 AstrBot 安装与启动。bootstrap 已创建名为 `aiocqhttp` 的 OneBot v11 适配器，**优先编辑它，不要重复新建第二个6199监听器**。在 AstrBot 控制台的机器人/消息平台配置中核对它已启用。字段以实际界面或下表中的配置键定位，避免仅凭按钮名称猜测。
+
+| 要设置的项目 | AstrBot 一端 | SnowLuma 一端 |
+| --- | --- | --- |
+| 谁连接谁 | 作为反向 WebSocket 服务端监听 | 在机器人账号的网络配置添加 **反向 WebSocket / WebSocket Client**，不是 WebSocket Server |
+| 同机地址 | `ws_reverse_host=127.0.0.1`，`ws_reverse_port=6199` | `url=ws://127.0.0.1:6199/ws`，必须保留 `/ws` |
+| 启用 | `enable=true` | 对应连接 `enabled=true` |
+| 鉴权 | `ws_reverse_token` | 该 `wsClients` 项的 `accessToken`，与左侧完全相同 |
+| 角色 | 框架处理事件和API应答 | `role=Universal`，区分大小写 |
+| 消息格式 | 使用框架原有解析 | `messageFormat=array` |
+| 自己发出的消息 | 不作为新的普通用户消息循环处理 | `reportSelfMessage=false` |
+| 重连 | 等待协议端重连 | `reconnectIntervalMs=5000`（毫秒） |
+
+字段依据：[SnowLuma配置参考](https://snowluma.github.io/zh/docs/guide/configuration)、[对接机器人](https://snowluma.github.io/zh/docs/guide/connect-bot)、[AstrBot OneBot v11](https://docs.astrbot.app/platform/aiocqhttp.html)。
+
+Token取值：若初始化前在 `local/settings.json` 填了 `onebot_token`，使用这个值；若留空，bootstrap 会生成随机值，安装后在 AstrBot 配置界面本地查看。对应文件位置是 `AstrBot/data/cmd_config.json` 的 `platform` 数组中 `id=aiocqhttp` 的 `ws_reverse_token`。**只复制所需值到自己接入端的配置，不打印整份配置，不把值加到公开URL或提交Git。** 安装后再修改 `local/settings.json` 不会覆盖现有运行配置，改动应在控制台完成并同步两端。
+
+下面只是 `networks.wsClients` 数组中的**一个对象**，供核对字段；不是整份 SnowLuma 配置，不能用它覆盖其他账号/HTTP/WS配置。占位Token必须换成本人本机的真实值，优先在 WebUI 编辑并保存：
+
+```json
+{
+  "name": "astrbot-local",
+  "enabled": true,
+  "url": "ws://127.0.0.1:6199/ws",
+  "accessToken": "REPLACE_WITH_YOUR_OWN_ONEBOT_TOKEN",
+  "role": "Universal",
+  "messageFormat": "array",
+  "reportSelfMessage": false,
+  "reconnectIntervalMs": 5000
+}
+```
+
+账号配置 `config/onebot_<机器人QQ>.json` 会覆盖全局默认配置；修改前确认选中的是机器人账号。不要只改全局文件然后误以为所有账号都生效；也不要直接修改正在被界面写入的文件。若只能离线改配置，先停止该接入端、备份对应文件、按该版本格式修改，重启后复查；无需删除登录数据。
+
+| 实际网络布局 | SnowLuma反向连接地址 | 额外条件 |
+| --- | --- | --- |
+| QQ/SnowLuma与AstrBot都在本机、非容器 | `ws://127.0.0.1:6199/ws` | 两端进程均运行 |
+| SnowLuma在Windows，AstrBot在云端 | `ws://127.0.0.1:16199/ws` | 第三节的SSH隧道必须建立在Windows电脑上 |
+| SnowLuma在宿主机，AstrBot用本仓库Compose | `ws://127.0.0.1:6199/ws` | Compose将端口映射到同一宿主机回环 |
+| SnowLuma本身在另一个容器 | 不直接套用上面地址 | 它的127.0.0.1不是AstrBot；需按实际容器网络另行规划并复核许可，不属于本仓库默认Compose |
+
+5099是SnowLuma面板、6185是AstrBot面板、6199是本项目反向连接。3000/3001是接入端的HTTP/正向WS端口，不能把它们填成本项目的反向目标。仅为这条反向链路不必额外对公网开放3000/3001；已有其他客户端使用时保留其配置，不擅自关闭。
+
+### 1.4 按阶段验收，失败时停在对应阶段
+
+**A. AstrBot框架就绪**：能登录6185、能看到两个自带插件。Windows在仓库目录执行 `.venv\Scripts\python.exe manage.py check`；Linux为 `.venv/bin/python manage.py check`；容器用 `docker compose exec astrbot python manage.py check`。报告写到 `logs/health-status.json`。QQ未接入时 `onebot=false`、检查命令非零退出是合理的未完成状态，不代表要删除配置重装。
+
+**B. QQ协议在线**：SnowLuma显示目标账号在线；保存反向配置后，AstrBot日志出现OneBot连接成功信息，健康报告 `onebot=true`。如果只看到WebSocket握手、但平台仍离线，核对账号是否真正登录及API应答是否可用。不要把HTTP访问 `/ws` 得到400/426当成协议损坏，它需要WebSocket客户端。
+
+**C. 模型可用**：运行 `manage.py deep`，看“模型API实际生成”是否成功；此检查可能产生少量API费用，不向QQ发消息。二次审阅未选用时报告“跳过”是正常结果。API地址、模型权限、额度错误与QQ连接错误分别处理。
+
+**D. 消息回路可用**：获得用户授权后，由另一个QQ向机器人私聊发一条普通消息，再在测试群分别测试@与句中唤醒词；确认只回复一次、没有发到其他会话。本人无法主动给自己发普通私聊作为等价测试，机器人QQ与测试QQ需明确区分。把能聊天与图片、搜索、空间分别验收，不能一项通过就写“全部正常”。
+
+**E. 可选功能验收**：按第五节测试图片理解/图库标签、生图、新梗记忆、审阅开关、固定多目标发送。公开仓库不含作者私人图库，要使用自己有权使用的测试图。生图依赖真正支持图片输出的模型或工具，文字模型只能生成描述；搜索key没配置就记录“联网梗记忆未启用”。
+
+固定发送测试只勾选授权的测试对象，先设置5分钟短间隔，检查每个目标各自出现下次发送时间；等一轮确认多个目标都能收到，再恢复用户要求的间隔。先检查总开关、渠道开关、免打扰；不要为了测试向所有好友群发。空间使用 `send_qzone_msg` 扩展，[官方接口说明](https://snowluma.github.io/zh/docs/api/qzone/send_qzone_msg) 不等于该账号的空间状态已经验证；授权后先按仅自己可见范围测试。接口不支持就关闭动态，报告聊天可用、动态不支持。
+
+现有验证范围：作者Windows部署的聊天链路可用；公开版曾在隔离目录启动AstrBot和两个插件、验证配置与鉴权，并通过自动测试；**没有在另一台空白Windows或真实云主机上重新完成SnowLuma安装/扫码/全功能发送验收**。后续agent必须在目标机器补齐B至E阶段，不引用本说明替代现场证据。
+
+### 1.5 接手 agent 的交付格式
+
+```text
+仓库提交 / 系统 / Python / AstrBot / 接入端 / QQ版本：
+部署方式与两个控制台入口（不带密码）：
+框架阶段A：通过/失败/未测，证据与时间
+QQ连接阶段B：通过/失败/未测，失败原因
+模型阶段C：通过/失败/未测
+私聊与测试群阶段D：通过/失败/未授权测试
+图片、搜索、审阅、固定定时、动态阶段E：分别列状态
+仍需账号主人完成：具体一步，不笼统写“自行配置”
+下一步：从本页哪个阶段继续
+启动、停止、备份位置：包含独立QQ端的管理方式
+```
+
+要换成其他OneBot端，先核对它的许可、平台支持、好友/群列表与图片收发，再单独确认空间扩展；不要在用户要求完整复刻时静默换掉接入端并隐去功能差异。
 
 ## 二、Linux 主机直接部署
 
@@ -121,6 +241,16 @@ docker compose down
 
 | 症状 | 优先检查 | 自动修复边界 |
 | --- | --- | --- |
+| 下载后没有launcher/native或启动即缺模块 | 是否误下Source code归档、选错系统/架构、漏解压一层 | 回到对应官方发行页；不要从不明包拼接原生组件 |
+| Node版本检查失败 | v2.1.0要求24+；Lite需自备运行时；核对实际调用的node | 不按旧通用教程降到22；以当前包检查器为准 |
+| 5099打不开，6185却能打开 | 两个独立进程；公开版启动器只启动AstrBot | 本项目守护不会自动安装/启动SnowLuma |
+| 5099能登录但找不到QQ/Hook加载失败 | 同一Windows用户、权限一致、QQ是否运行、版本是否兼容、加载开关 | 看对应加载日志；不关闭杀毒软件或系统防护来强行运行 |
+| SnowLuma首次密码找不到 | 是否旧数据目录；首次启动日志、本地保存的密码 | 不把删除config/data当成重置密码方案，按官方恢复方式处理 |
+| 反向连接401/403或不断断开 | wsClients的Token与AstrBot运行配置是否一致；是否误用WebUI密码/HTTP端口Token | 两端只改对应项，不把鉴权关掉“修复” |
+| 连接拒绝/超时 | AstrBot是否运行，目标机和6199是否正确；跨机隧道是否仍在线 | 修路径与进程，不直接把所有端口开放公网 |
+| 改了连接仍不生效 | 选中的机器人账号、账号级覆盖、是否保存启用、是否误建wsServer | 保留其他配置；只保留一个指向该实例的有效连接 |
+| 每条消息重复回复或机器人自说自话 | 同账号是否连接多个AstrBot、多个重复wsClients、自身消息上报 | 核对后停掉重复实例/连接，reportSelfMessage保持false |
+| 迁到云端文字正常、图片失败 | 图片URL是否能从接收端访问、是否传了另一台机器的本地路径、模型是否看图 | 两端文件系统不同；按接入端支持的URL/base64/受限共享方式核验，不能只用文字测试替代 |
 | 提示管理员权限不足 | `admins_id` 是否填个人 QQ；用该 QQ 发指令 | 不从群内消息猜测管理员 |
 | 设 30 分钟却不发 | 固定分类是否开启、勾选、渠道允许；是否免打扰 | 原 AI 自由模式可不发，固定模式才逐个执行 |
 | 第一人收到，第二人没收到 | 固定状态是否失败/等待，API 耗时、QQ 是否允许私聊 | 每个目标独立重试，不共用名额 |
