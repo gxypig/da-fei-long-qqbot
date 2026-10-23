@@ -216,7 +216,7 @@ class FakePlugin:
         self.sent = []
         self.payloads = []
         self.settings = {"enable": True, "allow_group": True, "allow_private": True, "allow_qzone": True}
-        self.context = SimpleNamespace(get_config=lambda: {}, persona_manager=SimpleNamespace(get_persona_v3_by_id=lambda _: None), get_using_provider=lambda: self, send_message=self.send)
+        self.context = SimpleNamespace(get_config=lambda **kw: {}, persona_manager=SimpleNamespace(get_persona_v3_by_id=lambda _: None), get_using_provider_async=AsyncMock(return_value=self), send_message=self.send)
         self.bad_target = bad_target
         self.logger = SimpleNamespace(info=lambda *args: None)
     def _cfg(self,k,default=None): return self.settings.get(k,default)
@@ -270,7 +270,8 @@ class Proactive(unittest.IsolatedAsyncioTestCase):
 
     async def test_group_context_excludes_private_content(self):
         p=FakePlugin();await decide(p,'test',dry_run=True)
-        self.assertEqual(p.payloads[0]['同一会话近期消息'],['群话题'])
+        self.assertEqual([x['文字'] for x in p.payloads[0]['同一会话近期消息']], ['群话题'])
+        p.context.get_using_provider_async.assert_awaited_once_with(umo='aiocqhttp:GroupMessage:10')
         self.assertNotIn('私聊秘密',json.dumps(p.payloads,ensure_ascii=False))
 
 

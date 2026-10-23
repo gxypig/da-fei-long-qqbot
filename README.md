@@ -19,9 +19,10 @@
 ## 包含什么
 
 - AstrBot **4.29.1**：安装时从 PyPI 获取固定版本；仓库不重复打包 AstrBot 全部源码。
-- `astrbot_plugin_proactive_agent` **1.7.0**：本项目维护的主动行为、梗记忆、唤醒规则、图片响应兼容和审阅插件，完整源码随仓库提供。
+- `astrbot_plugin_proactive_agent` **1.8.0**：主动行为、梗记忆、唤醒规则、图片兼容和可选审阅；主动消息进入持久化上下文，发送前核对收件人，群回复只发正文，内部绑定真实发送者。
 - `astrbot_plugin_smart_imagechat_hub` **2.8.6 + 本地修改**：青尘工作室的图库插件，保留 GPL-3.0 许可、作者信息、原 README 与源码。本版增加更丰富标签、旧图重打标失败保留、私聊生图与图库检索分流等修正。
-- 两个插件的页面、样式和后端代码均自带，安装后无需再从插件市场下载。
+- `astrbot_plugin_bili_scroll` **1.0.0**：基于 dsh-bili-scroll 思路改造的免登录B站浏览、视频原网址分享、逐对象定时分享和控制面板，保留上游MIT署名。
+- 三个插件的页面、样式和后端代码均自带，安装后无需再从插件市场下载。
 - 通用 API 配置。**不需要 Codex、不需要本机模型反代、不包含任何作者账号或密钥。**
 - Windows 一键入口，跨平台启动/停止/诊断脚本，Docker 部署文件。
 
@@ -134,7 +135,7 @@ AstrBot → 扩展功能 → **大肥龙控制面板**：
 ## 源码与维护
 
 ```text
-AstrBot/data/plugins/   两个插件完整程序源码与页面
+AstrBot/data/plugins/   三个插件完整程序源码与页面
 bootstrap.py           验证配置、安装依赖、生成独立运行配置
 manage.py              启停、守护、诊断与面板检查任务
 tools/repair_dashboard.py  已验证 AstrBot 4.29.1 页面加载兼容补丁

@@ -1,0 +1,42 @@
+{
+  "enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "开启刷B站"
+  },
+  "auto_enabled": {
+    "type": "bool",
+    "default": false,
+    "description": "开启定时分享（仅勾选对象）"
+  },
+  "keywords": {
+    "type": "string",
+    "default": "搞笑,抽象,动画",
+    "description": "兴趣词，逗号分隔"
+  },
+  "interval_minutes": {
+    "type": "int",
+    "default": 120,
+    "description": "每个目标分享间隔（分钟，15至10080）"
+  },
+  "group_ids": {
+    "type": "string",
+    "default": "",
+    "description": "分享群号，逗号分隔"
+  },
+  "private_ids": {
+    "type": "string",
+    "default": "",
+    "description": "分享好友QQ，逗号分隔"
+  },
+  "quiet_hours": {
+    "type": "string",
+    "default": "23:00-07:00",
+    "description": "免打扰，留空关闭"
+  },
+  "platform_id": {
+    "type": "string",
+    "default": "aiocqhttp",
+    "description": "OneBot平台ID"
+  }
+}

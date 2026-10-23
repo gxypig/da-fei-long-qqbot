@@ -67,6 +67,17 @@ def request_scope(origin):
     return scope if scope and scope["origin"] == origin else None
 
 
+@contextmanager
+def chat_delivery(origin):
+    """A video-share command sends chat content, not an administrative receipt."""
+    scope = request_scope(origin) or {'origin': origin, 'recent': [], 'character': {}}
+    token = _request_scope.set({**scope, 'management': False})
+    try:
+        yield
+    finally:
+        _request_scope.reset(token)
+
+
 def sent_text(origin, original):
     receipt = _receipt.get()
     if receipt and receipt["origin"] == origin and receipt["original"] == original:
@@ -107,6 +118,9 @@ class ReplyReviewer:
                     feedback = []
                     for attempt in range(3):
                         issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
+                        video_links = re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', text)
+                        if video_links and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', candidate) != video_links:
+                            issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))
                         self.stats["model_calls"] += 1
                         data = json_object(await self.generate(
                             REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + (character_note(state) if state else ""),
@@ -137,6 +151,11 @@ class ReplyReviewer:
                             # An erroneous pass from the model cannot bypass local guards.
                             # Ask for an actual rewrite, then independently review it.
                             continue
+                        # Keep the verified video URL outside prose rewriting. The
+                        # restored candidate still goes through independent review.
+                        if video_links:
+                            replacement = re.sub(r'https?://[^\s<>]+', '', replacement).strip()
+                            replacement += '\n' + '\n'.join(video_links)
                         candidate = casual_punctuation(limit_emoji(replacement.strip(), state, mode), mode)
                         feedback = []
                         if len(candidate) > 1200:

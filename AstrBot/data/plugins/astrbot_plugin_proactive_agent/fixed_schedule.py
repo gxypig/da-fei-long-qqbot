@@ -11,6 +11,8 @@ from .conversation_review import delivery_policy, sent_text
 from .conversation_style import STYLE
 from .chat_punctuation import casual_punctuation
 from .proactive_policy import TOPICS
+from .sent_memory import conversation_id, remember_sent
+from .route_guard import explicit_route
 
 STATE_KEY = "fixed_schedule_v1"
 
@@ -114,6 +116,7 @@ class FixedScheduler:
         lane, target = key.split(":", 1)
         kind = "GroupMessage" if lane == "group" else "FriendMessage"
         origin = "qzone" if lane == "qzone" else f"{p._cfg('platform_id', 'aiocqhttp')}:{kind}:{target}"
+        cid = None if lane == 'qzone' else await conversation_id(p, origin)
         state = await p.get_kv_data(STATE_KEY, {})
         recent = [] if lane == "qzone" else [x["text"][:200] for x in p._recent_messages.get(origin, [])
                                             if self.clock() - x["time"] < 7200][-8:]
@@ -140,7 +143,7 @@ class FixedScheduler:
                 raise RuntimeError("设置或免打扰已变更，取消发送")
 
         await check()
-        with delivery_policy(check):
+        with explicit_route(origin), delivery_policy(check):
             if lane == "qzone":
                 # Fixed Qzone deliberately uses its own interval, independent of the
                 # legacy discretionary cooldown; the outgoing review is still applied.
@@ -148,4 +151,7 @@ class FixedScheduler:
             else:
                 if await p.context.send_message(origin, p._build_chain(content, [])) is False:
                     raise RuntimeError("平台未接受消息")
-        return sent_text(origin, content)
+        content = sent_text(origin, content)
+        if lane != 'qzone':
+            await remember_sent(p, origin, cid, content, 'fixed')
+        return content

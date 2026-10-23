@@ -7,5 +7,6 @@
   "dashboard_password": "YOUR_STRONG_PASSWORD",
   "onebot_token": "",
   "search_api_key": "",
-  "review_enabled": false
+  "review_enabled": false,
+  "onebot_console_url": ""
 }

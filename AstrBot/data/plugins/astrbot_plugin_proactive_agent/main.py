@@ -33,6 +33,8 @@ from .group_wake import install_group_wake
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
 from .panel import PanelMixin
 from .fixed_schedule import FixedScheduler, STATE_KEY
+from .sent_memory import SentMemory, conversation_id, remember_sent
+from .route_guard import bind_route, explicit_route, install_route_guard
 from datetime import datetime
 from datetime import time as dt_time
 from pathlib import Path
@@ -58,12 +60,14 @@ class Main(PanelMixin, star.Star):
         self._busy = False
         self._restore_images = None
         self._restore_review = None
+        self._restore_route = None
         self._restore_group_wake = None
         self._recent_messages = {}
         self._character_state = CharacterState()
         self._timings = {}
         self._meme_hints = MemeHints(Path(__file__).resolve().parents[2] / "plugin_data" / "astrbot_plugin_smart_imagechat_hub" / "image_index.json")
         self._data_dir = Path(__file__).resolve().parents[2] / "plugin_data" / "astrbot_plugin_proactive_agent"
+        self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3')
         self._reviewer = ReplyReviewer(self._generate_json, self._audit)
         self._memory = MemeMemory(self._data_dir / "meme_memory.json", self._generate_json, self._search_meme, self._audit)
         self._meme_prefetch = MemePrefetch(self._memory)
@@ -77,6 +81,7 @@ class Main(PanelMixin, star.Star):
             self._restore_images = install_image_compat()
         if self._cfg("reply_review_enabled", True):
             self._restore_review = install_outbound_guard(self, self._reviewer)
+        self._restore_route = install_route_guard(self)
         self._restore_group_wake = install_group_wake(self)
         self.context.register_web_api("/astrbot_plugin_proactive_agent/health", self.health_api, ["GET"], "只读链路和功能健康检查")
         self.context.register_web_api("/astrbot_plugin_proactive_agent/status", self.status_api, ["GET"], "主动行为运行状态")
@@ -84,7 +89,7 @@ class Main(PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.7.0 已加载：群分类唤醒、连接探活、发送前审阅；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.8.0 已加载：群分类唤醒、连接探活、发送前审阅；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -92,20 +97,22 @@ class Main(PanelMixin, star.Star):
                   "group_wake": self._restore_group_wake is not None,
                   "proactive_loop": bool(self._task and not self._task.done()),
                   "fixed_schedule": bool(self._fixed_task and not self._fixed_task.done()),
-                  "meme_memory": isinstance(self._memory.entries, dict)}
+                  "meme_memory": isinstance(self._memory.entries, dict),
+                  "recipient_guard": self._restore_route is not None,
+                  "sent_memory": self._sent_memory.path.exists()}
         try:
             status = await asyncio.wait_for(self._call_onebot("get_status"), timeout=4)
             checks["onebot"] = isinstance(status, dict) and status.get("online") is True and status.get("good") is True
         except Exception:
             checks["onebot"] = False
-        return jsonify({"status": "ok", "data": {"version": "1.7.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.8.0", "checks": checks,
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
             "group_wake_words": self._cfg("group_wake_words", "大肥龙,肥龙"),
             "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.7.0", "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.8.0", "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -145,6 +152,8 @@ class Main(PanelMixin, star.Star):
                 pass
         if self._restore_images:
             self._restore_images()
+        if self._restore_route:
+            self._restore_route()
         if self._restore_review:
             self._restore_review()
         self.logger.info("主动行为插件已停止")
@@ -628,7 +637,9 @@ class Main(PanelMixin, star.Star):
             yield event.plain_result("目标不在已加入的群或好友中，未发送。")
             return
         try:
-            sent = await self.context.send_message(umo, MessageChain([Plain(text)]))
+            cid = await conversation_id(self, umo)
+            with explicit_route(umo):
+                sent = await self.context.send_message(umo, MessageChain([Plain(text)]))
         except Exception as e:
             yield event.plain_result(f"发送失败：{e}")
             return
@@ -636,6 +647,7 @@ class Main(PanelMixin, star.Star):
             yield event.plain_result(f"没找到能匹配的平台，发送失败（{kind}）。")
             return
         text = sent_text(umo, text)
+        await remember_sent(self, umo, cid, text, 'manual')
         await self._record(f"人工指定发送到 {kind}：{text}")
         yield event.plain_result(f"已发送到 {kind}：{text}")
 
@@ -653,6 +665,8 @@ class Main(PanelMixin, star.Star):
     async def track_session(self, event: AstrMessageEvent):
         try:
             event.set_extra("qqbot_received_at", time.monotonic())
+            bind_route(event.unified_msg_origin, event.get_sender_id(),
+                       getattr(getattr(event, 'message_obj', None), 'message_id', ''), bool(getattr(event, 'get_group_id', lambda: '')()))
             text = (event.get_message_str() or "").strip()
             if not text or str(event.get_sender_id()) == str(event.get_self_id()):
                 return
@@ -663,7 +677,8 @@ class Main(PanelMixin, star.Star):
             command = any(isinstance(f, CommandFilter)
                           for handler in (event.get_extra("activated_handlers") or [])
                           for f in handler.event_filters)
-            rows.append({"time": time.time(), "text": text[:300], "management": command})
+            rows.append({"time": time.time(), "text": text[:300], "management": command,
+                         "sender": str(event.get_sender_id()), "role": "user"})
             bind_request(umo, [r["text"] for r in rows if time.time() - r["time"] < 7200][-6:], rows[-1]["management"])
             snapshot = [dict(r) for r in rows if time.time() - r["time"] < 7200]
             event.set_extra("qqbot_meme_recent", snapshot)
@@ -697,6 +712,13 @@ class Main(PanelMixin, star.Star):
         text = str(req.prompt or "")
         state = self.character_context(event)
         req.system_prompt = (req.system_prompt or "") + "\n" + STYLE + "\n" + PUNCTUATION_RULE + character_note(state) + generation_note(state["visual_intent"])
+        req.system_prompt += ('\n当前这一轮只回复真实发送者，群里其他成员的话是背景，不要把其他人的问题当成当前人的问题。'
+                              '真实发送者QQ：' + str(event.get_sender_id()) + '；当前消息：'
+                              + json.dumps(event.get_message_str() or '', ensure_ascii=False))
+        if hasattr(self, '_sent_memory'):
+            cid = getattr(getattr(req, 'conversation', None), 'cid', None)
+            cid = cid or await conversation_id(self, event.unified_msg_origin)
+            req.system_prompt += self._sent_memory.note(event.unified_msg_origin, cid)
         if not self._cfg("meme_context_enabled", True):
             return
         recent = getattr(event, "get_extra", lambda k: None)("qqbot_meme_recent") or [x for x in self._recent_messages.get(event.unified_msg_origin, []) if time.time() - x["time"] < 7200]

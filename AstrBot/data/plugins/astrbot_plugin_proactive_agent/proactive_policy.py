@@ -7,6 +7,8 @@ from datetime import datetime
 
 from .conversation_style import STYLE
 from .conversation_review import sent_text, delivery_policy
+from .sent_memory import conversation_id, remember_sent
+from .route_guard import explicit_route
 
 # Public topic directions only: sharing the cursor never shares private chat text.
 TOPICS = (
@@ -82,7 +84,7 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             target_id, target_name = min(targets, key=priority)
             umo = f"{platform}:{kind}:{target_id}"
             recent = [x for x in plugin._recent_messages.get(umo, []) if now - x["time"] < 7200][-8:]
-        cfg = plugin.context.get_config()
+        cfg = plugin.context.get_config(umo=umo or None)
         persona_id = cfg.get("agent_runner", {}).get("config", {}).get("persona", {}).get("persona_id")
         persona_text = ""
         try:
@@ -113,14 +115,15 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
         payload = {
             "现在": datetime.now().strftime("%Y-%m-%d %H:%M"), "触发": trigger,
             "允许渠道": lane, "目标ID": target_id, "目标名称": target_name,
-            "同一会话近期消息": [x["text"][:200] for x in recent],
+            "同一会话近期消息": [{"说话人": x.get("sender", target_id), "距今分钟": round((now-x["time"])/60), "文字": x["text"][:200]} for x in recent],
             "这个目标最近已发送": recent_actions.get(scope, [])[-4:],
             "本轮话题方向": TOPICS[topic_index],
-            "提示": "有近期会话就优先自然衔接；没有上下文时围绕本轮话题方向说一点具体的，不机械复制题目。动态一两句，私聊别像调查问卷。",
+            "提示": "这是主动开启话题，不是在回复一条新消息。旧消息只作兴趣参考；超过10分钟的旧话题需要自然交代缘由，不能突然像刚被对方提问一样接话。不要捏造对方刚说了什么。动态一两句，私聊别像调查问卷。",
         }
         from .dragon_character import proactive_note
         system += proactive_note(scope, plugin._cfg, [x["text"][:200] for x in recent])
-        provider = plugin.context.get_using_provider()
+        cid = None if lane == 'qzone' else await conversation_id(plugin, scope)
+        provider = await plugin.context.get_using_provider_async(umo=umo or None)
         if provider is None:
             return "没有可用的对话模型。"
         response = await provider.text_chat(prompt=json.dumps(payload, ensure_ascii=False), system_prompt=system)
@@ -166,7 +169,7 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
                 allowed = plugin._id_set(plugin._cfg("group_ids" if lane == "group" else "private_ids", ""))
                 if allowed and target_id not in allowed:
                     raise RuntimeError("审阅期间目标已移出范围，未发送")
-        with delivery_policy(final_delivery_check):
+        with explicit_route(scope), delivery_policy(final_delivery_check):
             if lane == "qzone":
                 if not await plugin._qzone_allowed():
                     return "动态仍在冷却时间，取消发送。"
@@ -178,6 +181,8 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
                 state.setdefault(lane, {})[target_id] = time.time()
         state["last_send"] = time.time()
         content = sent_text(scope, content)
+        if lane != 'qzone':
+            await remember_sent(plugin, scope, cid, content, 'discretionary')
         await plugin.put_kv_data("proactive_state", state)
         recent_actions[scope] = (recent_actions.get(scope, []) + [content])[-4:]
         await plugin.put_kv_data("proactive_recent_content", recent_actions)

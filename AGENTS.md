@@ -17,9 +17,9 @@
 3. 阅读源文件与 LICENSE，核对 `SOURCE_MANIFEST.json`。选择 Windows、本机 Linux 或 Docker 路线，不混用虚拟环境解释器。
 4. 复制 `settings.example.json` 到 `local/settings.json`，填授权的配置。该文件包含秘密，只在本机写入，不打印全文、不要提交 Git。
 5. Windows：`py -3.12 bootstrap.py --check`，再 `py -3.12 bootstrap.py --install`。Linux：用 `python3.12`。Docker：填好设置后 `docker compose build` 与 `docker compose up -d`。
-6. 非 Docker 用项目 `.venv` 解释器运行 `manage.py start`。首次安装将两个插件源码直接加载，无需市场安装。bootstrap 拒绝覆盖既有配置是保护行为，不能为了消除报错而删除数据；改用控制台编辑。
+6. 非 Docker 用项目 `.venv` 解释器运行 `manage.py start`。首次安装将三个插件源码直接加载，无需市场安装。bootstrap 拒绝覆盖既有配置是保护行为，不能为了消除报错而删除数据；改用控制台编辑。
 7. 在用户已安装并授权的 QQ 接入端填写反向 WS：同机 `ws://127.0.0.1:6199/ws`；跨机按 DEPLOYMENT.md 建立受限隧道。token 两端一致。严禁把管理接口无鉴权公开到公网。
-8. 以 admin 和用户自己设定的密码登录，检查两个插件加载。面板空白只对已匹配的4.29.1资源运行 `tools/repair_dashboard.py`；遇未知版本停止补丁，不删除沙箱或鉴权。
+8. 以 admin 和用户自己设定的密码登录，检查三个插件加载。面板空白只对已匹配的4.29.1资源运行 `tools/repair_dashboard.py`；遇未知版本停止补丁，不删除沙箱或鉴权。
 9. 运行 `manage.py deep`（Docker内执行相同命令），查看 JSON 报告。外部API失败时不要无限重启；QQ扫码/余额/接口不支持应给准确原因。
 10. 根据用户授权做真实验收：个人私聊、授权测试群、图片标签、生图能力、梗搜索与记忆、审阅开启/关闭、固定多目标发送、动态扩展。公开动态和向别人发测试消息需明确授权，未授权时使用模拟测试并如实注明。
 11. 完成后给用户：面板入口、启动/停止方法、已验证项目、未验证项目、数据位置、备份路径、实际版本。不要把密钥放在结果中。

@@ -7,6 +7,7 @@
 | AstrBot 4.29.1 | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot)，AstrBot 开源贡献者；[版本源码](https://github.com/AstrBotDevs/AstrBot/tree/v4.29.1) | 通过 PyPI 安装，AGPL-3.0-or-later；遵守上游 [LICENSE](https://github.com/AstrBotDevs/AstrBot/blob/v4.29.1/LICENSE) 和适用通知 |
 | 智能图片对话插件 2.8.6 | [QingchenWait/astrbot_plugin_smart_imagechat_hub](https://github.com/QingchenWait/astrbot_plugin_smart_imagechat_hub)，青尘工作室 | 包含修改版完整程序源码与页面；目录内原 GPL-3.0 LICENSE 保留，原作者和仓库地址保留 |
 | 主动插件、部署脚本、本仓库文档 | 本项目维护者 gxypig；开发使用过 DeepSeek harness 与 Codex 等 AI 辅助工具 | 可适用权利范围内按仓库根目录 AGPL-3.0-or-later 发布；不宣称原创了 AstrBot、图库上游或其依赖 |
+| 大肥龙刷B站插件 | [holoiallo/dsh-bili-scroll](https://github.com/holoiallo/dsh-bili-scroll) `03beb9c38ba592926f80b74170c73b94f7124b3d`；原作者 c1overzz；上游内嵌 bilibili-mcp 作者 AGI_Ananas | AstrBot改造版，保留两份MIT许可与署名；改造范围见插件目录 NOTICE.md；不包含账号登录、评论、私信、投稿和视频下载 |
 | AstrBot 插件页面兼容补丁 | 针对 AstrBot 4.29.1 的局部修改 | 只提供匹配检查及补丁脚本，保留鉴权与 iframe 沙箱；上游源码链接与 AGPL 义务保留 |
 | Python 与 PyPI 依赖 | 各软件包原作者，具体依赖随 AstrBot 包元数据解析 | 不把所有依赖改称本项目许可；原许可与声明继续有效，可用 `pip show` / `pip freeze` 查看安装版本 |
 | SnowLuma | [SnowLuma/SnowLuma](https://github.com/SnowLuma/SnowLuma)，SnowLumaDevs | **不包含、不自动安装、不修改、不再分发**。需要者自行按其 [LICENSE](https://github.com/SnowLuma/SnowLuma/blob/main/LICENSE) / [EULA](https://github.com/SnowLuma/SnowLuma/blob/main/EULA.md) 使用、取得必要授权 |

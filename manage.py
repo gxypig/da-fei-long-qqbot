@@ -42,6 +42,11 @@ def check(deep=False):
     except Exception as exc:
         rows.append({'name':'AstrBot','ok':False,'detail':'控制台健康接口不可达：'+type(exc).__name__,
                      'next_step':'运行 python manage.py start，查看 logs/astrbot.log'})
+    try:
+        bili=api('/api/plug/astrbot_plugin_bili_scroll/status')['data']
+        rows.append({'name':'B站分享任务','ok':bool(bili.get('loop_running')),'detail':'仅检查任务，不发送消息'})
+    except Exception as exc:
+        rows.append({'name':'B站分享任务','ok':False,'detail':type(exc).__name__,'next_step':'在插件页面检查是否已启用刷B站插件'})
     if deep:
         try:
             config=json.loads((ROOT/'AstrBot/data/cmd_config.json').read_text(encoding='utf-8-sig'))
@@ -160,6 +165,19 @@ def panel_job(mode, job_id):
     write_json(LOGS/'panel-health-job.json',result)
 
 
+def open_consoles():
+    # Desktop-only. The server supervisor and panel jobs never open a browser.
+    if os.name != 'nt':
+        return
+    onebot = ''
+    settings = ROOT/'local/settings.json'
+    if settings.exists():
+        onebot = json.loads(settings.read_text(encoding='utf-8-sig')).get('onebot_console_url', '')
+    command=['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File', str(ROOT/'scripts/open-consoles.ps1')]
+    if onebot: command += ['-OneBotUrl', onebot]
+    subprocess.run(command, check=False)
+
+
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['start','stop','status','check','deep','repair','supervise','panel-job'])
@@ -171,6 +189,8 @@ if __name__=='__main__':
     elif args.action=='supervise': supervise()
     elif args.action=='status': print('running' if running() else 'stopped')
     elif args.action=='panel-job': panel_job(args.mode,args.job_id)
-    elif args.action=='repair': panel_job('Repair','manual'); print('See logs/health-status.json')
+    elif args.action=='repair':
+        try: panel_job('Repair','manual'); print('See logs/health-status.json')
+        finally: open_consoles()
     else:
         report=check(args.action=='deep'); print(json.dumps(report,ensure_ascii=True,indent=2)); sys.exit(0 if report['ok'] else 1)

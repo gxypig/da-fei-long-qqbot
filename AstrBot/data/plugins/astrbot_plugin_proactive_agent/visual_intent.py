@@ -17,7 +17,7 @@ def generation_kind(text):
     if not create and show:
         subject = show.group(1)
         # Show a subject, not '看看你怎么解释/有没有空/是不是懂了'.
-        if not re.search(r"怎么|如何|什么|为什么|是不是|能不能|有没有|会不会|是否|说的|说啥|什么意思|解释|分析|意见|想法|办法|水平|本事|实力|厉害|战绩|成绩|操作|段位|分数|在不在|有空|聊|做题|代码|报错|日志|配置|链接|文章|题目|作业|答案|表情包|梗图|图库|现成", subject):
+        if not re.search(r"怎么|如何|什么|为什么|是不是|能不能|有没有|会不会|是否|说的|说啥|什么意思|解释|分析|意见|想法|办法|水平|本事|实力|厉害|战绩|成绩|操作|段位|分数|在不在|有空|聊|做题|代码|报错|日志|配置|链接|文章|题目|作业|答案|表情包|梗图|图库|现成|视频|b站|哔哩|bilibili|bv[0-9a-z]{10}", subject):
             create = True
     if not create:
         return "none"

@@ -76,7 +76,7 @@ def configure(settings, *, root=ROOT, container=False):
         config_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
         if os.name != 'nt': config_file.chmod(0o600)
         directory = data / 'config'; directory.mkdir(exist_ok=True)
-        for name in ('astrbot_plugin_proactive_agent', 'astrbot_plugin_smart_imagechat_hub'):
+        for name in ('astrbot_plugin_proactive_agent', 'astrbot_plugin_smart_imagechat_hub', 'astrbot_plugin_bili_scroll'):
             schema = json.loads((data/'plugins'/name/'_conf_schema.json').read_text(encoding='utf-8'))
             def defaults(fields):
                 return {k: defaults(v['items']) if v.get('type') == 'object' and isinstance(v.get('items'),dict)
@@ -85,7 +85,7 @@ def configure(settings, *, root=ROOT, container=False):
             if name.endswith('proactive_agent'):
                 values.update(enable=False, allow_group=False, allow_private=False, allow_qzone=False,
                     reply_review_enabled=bool(settings.get('review_enabled', False)), meme_search_provider='tavily')
-            else:
+            elif name.endswith('smart_imagechat_hub'):
                 values['default_image_caption_provider_id'] = vision_id
             target = directory/(name+'_config.json')
             target.write_text(json.dumps(values,ensure_ascii=False,indent=2),encoding='utf-8')
