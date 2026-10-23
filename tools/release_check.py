@@ -24,7 +24,9 @@ def files(root=ROOT):
 
 
 def manifest(root=ROOT):
-    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+    # Git's text attributes normalize CRLF on commit/checkout. Hash canonical LF
+    # so the same reviewed source verifies on Windows, Linux and Download ZIP.
+    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest()
             for p in files(root) if p.relative_to(root).as_posix().startswith(ALLOWED_DATA)}
 
 
@@ -56,7 +58,7 @@ if __name__=='__main__':
     path=ROOT/'SOURCE_MANIFEST.json'
     actual=manifest()
     if args.write_manifest and not errors:
-        path.write_text(json.dumps({'format':1,'files':actual},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        path.write_text(json.dumps({'format':1,'normalization':'CRLF-to-LF','files':actual},ensure_ascii=False,indent=2)+'\n',encoding='utf-8',newline='\n')
     if not path.exists() or json.loads(path.read_text(encoding='utf-8'))['files']!=actual:
         errors.append('Plugin manifest is missing or changed; review source then regenerate')
     if errors: raise SystemExit('\n'.join(errors))
