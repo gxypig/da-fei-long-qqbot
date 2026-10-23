@@ -1,0 +1,10 @@
+.git
+.venv
+local
+logs
+backups
+**/__pycache__
+AstrBot/data/cmd_config.json
+AstrBot/data/config
+AstrBot/data/plugin_data
+AstrBot/data/*.db*

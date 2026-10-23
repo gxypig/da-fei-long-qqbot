@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥龙控制面板</title><link rel="stylesheet" href="./style.css"></head>
+<body><main>
+  <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="health">健康检查</button></nav>
+  <form id="settings"><section id="groups" class="tab-panel">
+    <div class="section-head"><div><h2>哪些群可以自然接话</h2><p>勾选后成为特殊接话群；未勾选的群继续按原有唤醒规则回复</p></div><button id="load-groups" type="button" class="secondary">刷新群列表</button></div>
+    <div id="group-list" class="group-list" aria-label="特殊接话群">正在读取群列表…</div>
+    <details><summary>手动填写或检查群号</summary><label for="group_chat_ids">特殊群号，多个用逗号分隔</label><textarea id="group_chat_ids" rows="2" placeholder="未选择特殊群"></textarea></details>
+    <div class="card-grid"><article class="card"><h2>普通消息接话概率</h2><p>只作用于特殊群，每条文字独立判断</p><div class="probability"><input id="probability-slider" type="range" min="0" max="100" step="1" aria-label="接话概率滑块"><div><input id="group_chat_probability" type="number" min="0" max="100" required aria-label="接话概率"> <span>%</span></div></div><div class="scale"><span>0% 只按唤醒规则</span><span>100% 每条文字接话</span></div><div class="callout">@大肥龙或说唤醒词，始终绕过概率判断</div></article>
+    <article class="card"><h2>唤醒词</h2><label for="group_wake_words">多个词用逗号分隔</label><input id="group_wake_words" type="text" maxlength="200"><label class="toggle"><input id="group_wake_anywhere" type="checkbox">允许唤醒词出现在句中、句尾</label><p class="example">例如「今天大肥龙想吃什么」也能唤醒<br>命令前缀 / 仍只在句首生效</p></article></div>
+  </section>
+  <section id="proactive" class="tab-panel" hidden>
+    <div class="section-head"><div><h2>没人呼叫时，也可以主动开口</h2><p>这里管理定时主动行为，与特殊群的每句话概率接话相互独立</p></div></div>
+    <article class="card"><label class="toggle master"><input id="enable" type="checkbox">开启定时主动行为</label><div class="channel-grid"><label class="toggle"><input id="allow_group" type="checkbox">主动在群里发言</label><label class="toggle"><input id="allow_private" type="checkbox">主动私聊好友</label><label class="toggle"><input id="allow_qzone" type="checkbox">主动发 QQ 动态</label></div></article>
+    <div class="card-grid"><article class="card"><label class="toggle"><input id="discretionary_enabled" type="checkbox">保留 AI 自由主动模式</label><h2>自由模式检查间隔</h2><label for="interval_minutes">每隔多少分钟判断一次是否适合开口</label><div class="inline"><input id="interval_minutes" type="number" min="5" max="1440" required><span>分钟</span></div><p>到点会做判断，不保证每轮都发；原有发送冷却保留</p></article><article class="card"><h2>免打扰时段</h2><label for="quiet_hours">使用 24 小时制，留空表示不限制</label><input id="quiet_hours" type="text" placeholder="23:00-07:00"><p>约束定时主动行为，不阻止被唤醒后的正常回复</p></article></div>
+  </section>
+  <section id="fixed" class="tab-panel" hidden>
+    <div class="section-head"><div><h2>每个勾选对象，都有自己的定时安排</h2><p>到点给所有勾选群和好友分别生成消息，不共用发送名额；同一个对象不会再被自由模式重复选中</p></div><button id="load-targets" type="button" class="secondary">刷新好友和群</button></div>
+    <div class="card-grid"><article class="card"><label class="toggle master"><input id="fixed_messages_enabled" type="checkbox">开启固定消息</label><label for="fixed_message_interval_minutes">群聊和私聊发送间隔（分钟）</label><input id="fixed_message_interval_minutes" type="number" min="5" max="10080" required><p>每个目标首次勾选或改间隔后，等待一个完整间隔。生成和审阅会有少量耗时；单个失败独立重试</p></article>
+    <article class="card"><label class="toggle master"><input id="fixed_qzone_enabled" type="checkbox">开启固定动态</label><label for="fixed_qzone_interval_minutes">动态发布间隔（分钟）</label><input id="fixed_qzone_interval_minutes" type="number" min="5" max="10080" required><p>动态使用独立时钟，不占用消息名额，也不受原来自由动态冷却限制</p></article></div>
+    <div class="callout">仍遵守「主动行为」总开关、群聊/私聊/动态渠道开关和免打扰。免打扰期间不发，恢复后每个到期目标最多补一次。未勾选任何对象就不发送消息</div>
+    <h2>定时群聊</h2><div id="fixed-group-list" class="group-list"></div><details><summary>手动填写群号</summary><textarea id="fixed_group_ids" rows="2"></textarea></details>
+    <h2>定时私聊</h2><div id="fixed-friend-list" class="group-list"></div><details><summary>手动填写好友QQ号</summary><textarea id="fixed_private_ids" rows="2"></textarea></details>
+    <h2>各目标的运行状态</h2><button type="button" id="refresh-schedule" class="secondary">刷新定时状态</button><div id="schedule-status" class="callout">保存选择后约10秒开始计时</div>
+  </section>
+  <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
+  </form>
+  <section id="health" class="tab-panel" hidden><div class="section-head"><div><h2>看看每一段连接是否正常</h2><p>检查 QQ/OneBot、AstrBot、模型 API 和功能组件，不会试发群消息或动态</p></div><button class="secondary" id="refresh-health">刷新结果</button></div>
+    <div class="health-actions"><button data-mode="Check">检查一次</button><button data-mode="Deep" class="secondary">深度检查</button><button data-mode="Repair" class="repair">检查并修复</button></div>
+    <p id="job-status" role="status">尚未读取检查状态</p><div id="health-summary" class="callout"></div><div id="health-results"></div>
+    <p class="footnote">深度检查会实际调用当前模型和审阅。修复可能短暂重启故障服务，页面会等待重连。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
+  </section>
+  <footer>设置保存后生效 · 特殊群默认不选 · 固定定时独立计时 · 管理员权限保持不变</footer>
+</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./app.js"></script></body></html>

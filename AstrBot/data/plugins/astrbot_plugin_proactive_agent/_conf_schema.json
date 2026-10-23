@@ -1,0 +1,166 @@
+{
+  "group_chat_ids": {
+    "description": "特殊接话群号，逗号分隔；空表示没有，其他群仍只按原有唤醒规则回复",
+    "type": "string",
+    "default": ""
+  },
+  "group_chat_probability": {
+    "description": "特殊群每条普通文字接话概率（0至100）；@或唤醒词不受此概率限制",
+    "type": "int",
+    "default": 10
+  },
+  "group_wake_words": {
+    "description": "群聊文字唤醒词，逗号分隔；支持句中唤醒，不改变命令前缀",
+    "type": "string",
+    "default": "大肥龙,肥龙"
+  },
+  "group_wake_anywhere": {
+    "description": "群聊文字唤醒词允许出现在句中或句尾；/等符号命令前缀仍只在句首有效",
+    "type": "bool",
+    "default": true
+  },
+  "enable": {
+    "description": "总开关：是否允许 AI 主动行动",
+    "type": "bool",
+    "default": false
+  },
+  "platform_id": {
+    "description": "协议端适配器 ID（本机是 aiocqhttp，一般不用改）",
+    "type": "string",
+    "default": "aiocqhttp"
+  },
+  "interval_minutes": {
+    "description": "AI 唤醒间隔（分钟）。每次唤醒由 AI 自己决定发不发、发什么；嫌频繁就调大",
+    "type": "int",
+    "default": 60
+  },
+  "quiet_hours": {
+    "description": "免打扰时段，例如 23:00-07:00（留空表示不限制）",
+    "type": "string",
+    "default": "23:00-07:00"
+  },
+  "personality": {
+    "description": "AI 的角色设定与动机，直接决定它会主动说什么",
+    "type": "string",
+    "default": "你是主人的 QQ 私人助手，性格温和、偶尔俏皮。说话简短自然，像真实的朋友，而不是客服。"
+  },
+  "allow_group": {
+    "description": "允许 AI 在群里主动发言",
+    "type": "bool",
+    "default": false
+  },
+  "group_ids": {
+    "description": "允许发言的群号，逗号分隔；留空表示所有群都可以",
+    "type": "string",
+    "default": ""
+  },
+  "allow_private": {
+    "description": "允许 AI 主动私聊好友",
+    "type": "bool",
+    "default": false
+  },
+  "private_ids": {
+    "description": "允许私聊的 QQ 号，逗号分隔；留空表示所有好友都可以",
+    "type": "string",
+    "default": ""
+  },
+  "allow_qzone": {
+    "description": "允许 AI 发 QQ 空间说说",
+    "type": "bool",
+    "default": false
+  },
+  "qzone_ugc_right": {
+    "description": "说说可见范围：1=所有人可见，4=好友可见，64=仅自己可见",
+    "type": "int",
+    "default": 64
+  },
+  "qzone_min_gap_hours": {
+    "description": "两条说说之间至少间隔多少小时",
+    "type": "int",
+    "default": 6
+  },
+  "qzone_images_enabled": {
+    "description": "允许 AI 在说说里带图片（图片需为可访问的链接或本机绝对路径）",
+    "type": "bool",
+    "default": false
+  },
+  "image_fallback": {
+    "description": "兼容模型返回的图片：随原会话直接回复，不额外生成、不隐藏普通错误",
+    "type": "bool",
+    "default": true
+  },
+  "min_action_gap_minutes": {
+    "type": "int",
+    "description": "任意两次主动发送的最短间隔（分钟）",
+    "default": 60
+  },
+  "group_min_gap_minutes": {
+    "type": "int",
+    "description": "对同一个群主动发言的最短间隔（分钟）",
+    "default": 120
+  },
+  "private_min_gap_minutes": {
+    "type": "int",
+    "description": "对同一个好友主动私聊的最短间隔（分钟）",
+    "default": 180
+  },
+  "meme_context_enabled": {
+    "type": "bool",
+    "description": "结合本会话上下文和图库标签自然接梗；不确定出处不编造",
+    "default": true
+  },
+  "meme_memory_enabled": {
+    "type": "bool",
+    "description": "遇到新梗自动联网核实并保存含义、用法和来源；90天后重新查证",
+    "default": true
+  },
+  "discretionary_enabled": {
+    "description": "保留AI自由主动模式；固定分类不共用其冷却",
+    "type": "bool",
+    "default": true
+  },
+  "fixed_messages_enabled": {
+    "description": "启用固定定时消息，所有勾选目标独立发送",
+    "type": "bool",
+    "default": false
+  },
+  "fixed_group_ids": {
+    "description": "固定定时群号，空表示不发送任何群",
+    "type": "string",
+    "default": ""
+  },
+  "fixed_private_ids": {
+    "description": "固定定时好友QQ号，空表示不发送任何好友",
+    "type": "string",
+    "default": ""
+  },
+  "fixed_message_interval_minutes": {
+    "description": "固定消息间隔分钟，5至10080，每个目标独立计时",
+    "type": "int",
+    "default": 30
+  },
+  "fixed_qzone_enabled": {
+    "description": "启用独立的固定动态时间，不受自由模式冷却影响",
+    "type": "bool",
+    "default": false
+  },
+  "fixed_qzone_interval_minutes": {
+    "description": "固定动态间隔分钟，5至10080，与私聊群聊独立",
+    "type": "int",
+    "default": 360
+  },
+  "reply_review_enabled": {
+    "description": "可选AI二次审阅，变更后重载插件生效；关闭减少模型调用",
+    "type": "bool",
+    "default": false
+  },
+  "meme_search_provider": {
+    "description": "梗记忆联网来源：deepseek 或 tavily，密钥在 AstrBot 联网搜索配置填写",
+    "type": "string",
+    "default": "tavily",
+    "options": [
+      "deepseek",
+      "tavily"
+    ]
+  }
+}

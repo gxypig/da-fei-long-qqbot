@@ -1,0 +1,11 @@
+{
+  "api_base": "https://YOUR_API_HOST/v1",
+  "api_key": "YOUR_API_KEY",
+  "model": "YOUR_CHAT_MODEL",
+  "vision_model": "",
+  "admin_qq": "YOUR_PERSONAL_QQ_NUMBER",
+  "dashboard_password": "YOUR_STRONG_PASSWORD",
+  "onebot_token": "",
+  "search_api_key": "",
+  "review_enabled": false
+}

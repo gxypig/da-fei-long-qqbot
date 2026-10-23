@@ -1,0 +1,144 @@
+# 大肥龙 QQBot
+
+一个以 AstrBot 为基础的 QQ 聊天机器人部署项目。包含自然聊天、图片对话与表情图库、公共梗记忆、按群概率接话、独立定时群聊/私聊/动态、可选的 AI 发送前二次审阅，以及控制台管理页面。
+
+本仓库用于作者自用、学习和非商业部署经验分享，不是 QQ、腾讯、AstrBot 或插件作者的官方整合发行版。**上游软件各自的许可继续有效；“学习用途”不免除版权、隐私、平台规则或使用责任，也不收回 GPL/AGPL 赋予的权利。** 来源和各部分许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 第一次来这里
+
+| 你想做什么 | 从哪里开始 |
+| --- | --- |
+| 让 AI agent 代部署 | 把本仓库地址交给 agent，并让它先读 [AGENTS.md](AGENTS.md) |
+| 在 Windows 电脑运行 | 下面的 Windows 完整步骤 |
+| 准备部署到云服务器 | [DEPLOYMENT.md](DEPLOYMENT.md) 的 Linux / Docker / QQ 连接方案 |
+| 配置定时发消息、概率接话 | AstrBot 左侧「扩展功能 → 大肥龙控制面板」 |
+| 排查不能聊天或不能生图 | [DEPLOYMENT.md](DEPLOYMENT.md) 的验收与故障表 |
+| 查看可用命令 | [COMMANDS.md](COMMANDS.md) |
+| 更新、备份、回滚 | [MAINTENANCE.md](MAINTENANCE.md) |
+
+## 包含什么
+
+- AstrBot **4.29.1**：安装时从 PyPI 获取固定版本；仓库不重复打包 AstrBot 全部源码。
+- `astrbot_plugin_proactive_agent` **1.6.0**：本项目维护的主动行为、梗记忆、唤醒规则、图片响应兼容和审阅插件，完整源码随仓库提供。
+- `astrbot_plugin_smart_imagechat_hub` **2.8.6 + 本地修改**：青尘工作室的图库插件，保留 GPL-3.0 许可、作者信息、原 README 与源码。本版增加更丰富标签、旧图重打标失败保留、私聊生图与图库检索分流等修正。
+- 两个插件的页面、样式和后端代码均自带，安装后无需再从插件市场下载。
+- 通用 API 配置。**不需要 Codex、不需要本机模型反代、不包含任何作者账号或密钥。**
+- Windows 一键入口，跨平台启动/停止/诊断脚本，Docker 部署文件。
+
+不包含 QQ 客户端、任何 QQ 账号登录态、私人图库、对话记录、第三方模型额度。**SnowLuma 的专有组件和自动安装流程不随仓库分发**，原因和手动连接方式见部署文档。QQ 接入端需要你自行合法安装、登录并接到 OneBot v11 接口。
+
+## Windows：从零安装
+
+### 1. 准备环境
+
+1. 安装 [Python 3.12](https://www.python.org/downloads/)（64 位）。安装时勾选 Python Launcher。推荐 3.12，避免最新 Python 的部分依赖缺少预编译包。
+2. 安装 [Git](https://git-scm.com/downloads/win)。也可以在本页点击 **Code → Download ZIP**，解压后进入目录。
+3. QQ 连接端独立准备：按其官方说明安装、登录 QQ，开启 OneBot v11 **反向 WebSocket**。不要把作者的运行目录或账号文件复制过去。
+4. 准备一个兼容 OpenAI Chat Completions 的 API 地址、密钥和可用模型名。图库打标需要支持图片理解的模型；生图需要支持图片输出的模型/工具，普通文字模型不会因为装了本项目就获得画图能力。
+
+```powershell
+git clone https://github.com/gxypig/da-fei-long-qqbot.git
+cd da-fei-long-qqbot
+py -3.12 --version
+py -3.12 bootstrap.py
+```
+
+最后一步会生成 `local/settings.json` 并提示填写，这是正常的。不要继续使用占位值。
+
+### 2. 填写自己的配置
+
+用记事本打开 `local/settings.json`。它已被 Git 忽略，不要上传。
+
+| 字段 | 填什么 |
+| --- | --- |
+| `api_base` | 服务商给出的 API 基础地址，一般以 `/v1` 结束；不要填网页聊天地址或 `/chat/completions` 全路径 |
+| `api_key` | 自己的密钥，不要粘贴在群聊、截图、Issue 或公开仓库 |
+| `model` | API 实际提供的模型 ID，不是随意取的展示名称 |
+| `vision_model` | 同一服务商下支持看图的模型 ID；留空则使用聊天模型，前提是聊天模型本身支持看图 |
+| `admin_qq` | 管理机器人的**个人 QQ 号**，不是机器人 QQ 号 |
+| `dashboard_password` | 自己设置的面板密码，至少 12 位，包含大小写字母和数字 |
+| `onebot_token` | 与 QQ 连接端相同的连接密码；留空会生成随机值，可在生成的配置中本地查看 |
+| `search_api_key` | 可选：自己的 Tavily 搜索密钥。没有密钥时不伪造查证，联网学新梗不可用，普通聊天仍可用 |
+| `review_enabled` | `true` 安装时启用 AI 二次审阅，`false` 不启用；默认 `false` |
+
+JSON 字符串必须用双引号，最后一项后面不要多逗号。不要把密码写进命令行参数。检查配置只会验证字段，不会向 QQ 发消息：
+
+```powershell
+py -3.12 bootstrap.py --check
+py -3.12 bootstrap.py --install
+```
+
+也可以双击 **一键安装.bat**。第一次安装需要下载较多依赖，请等待完成；下载失败保留现有环境，可以处理网络后重试。脚本拒绝覆盖已有 `AstrBot/data/cmd_config.json`，重复运行不会清空聊天记录或重置管理员。安装完成后改配置请到 AstrBot 控制台，初始 `settings.json` 不会自动覆盖运行配置。
+
+### 3. 启动并连接 QQ
+
+双击 **一键启动.bat**，或：
+
+```powershell
+.venv\Scripts\python.exe manage.py start
+```
+
+打开 <http://127.0.0.1:6185>，用户名 `admin`，密码是自己填写的 `dashboard_password`。
+
+在 QQ 连接端配置：
+
+- 连接类型：OneBot v11 **反向 WebSocket / WebSocket Client**。
+- URL：`ws://127.0.0.1:6199/ws`（仅当 QQ 端和 AstrBot 在同一台主机）。
+- Token：与 `AstrBot/data/cmd_config.json` 中该适配器的 `ws_reverse_token` 相同。
+- 保存、启用连接；确认 AstrBot 日志显示连接成功。
+- SnowLuma 手动安装情况下，其控制台通常为 <http://127.0.0.1:5099>，实际以自己的安装配置为准。
+
+不要将 6185、6199、QQ 接入端的管理/API 端口直接开放到公网。跨机器/容器连接见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
+### 4. 在面板选择功能
+
+AstrBot → 扩展功能 → **大肥龙控制面板**：
+
+1. **群聊规则**：普通群继续按 @ 或唤醒词回复；勾选特殊群后，每条普通文字按设置概率接话。@ 和唤醒词不走概率。文字唤醒词可在句中、句尾。
+2. **主动行为**：总开关、群聊/私聊/动态渠道开关、免打扰；可保留原来的 AI 自由主动模式。自由模式的检查间隔不是发送承诺，仍有原有冷却。
+3. **固定定时发送**：勾选要接收消息的群和好友；设置消息间隔，例如 `30` 分钟。每个目标独立执行，同一轮所有到期目标都会发送，不共用名额。动态有独立开关和独立间隔，例如 `360` 分钟。
+4. **健康检查**：连接检查、真实 API 生成/审阅检查、有限的自动修复，不会向 QQ 或空间发测试内容。
+
+固定定时首次启用、首次勾选或改间隔后，等待一个完整间隔；每约 10 秒检查到期状态。生成和审阅有耗时，多个目标按最多两个并行任务处理。免打扰期间暂停，恢复后每个目标最多补一次，不刷历史积压。失败分别退避重试；断电时已发出但未确认的请求不立即重放，避免重复轰炸，不能保证跨网络故障的严格“恰好一次”。
+
+新安装的主动行为默认关闭，固定目标默认空。请先明确对象再开启。动态可见范围默认仅自己（`64`）；确认内容和接入端支持后再自行调整。
+
+### 5. 二次审阅可以不装进运行流程
+
+初始配置 `review_enabled: false` 就不启用审阅钩子、不额外调用审阅模型；其他聊天、图库、记忆、定时功能保留。审阅实现源码仍随插件分发，便于查看和后续启用，不需要独立下载包。
+
+后续在 AstrBot 插件配置中改 `reply_review_enabled` 并**重载插件或重启**。开启时每条待发文字经模型检查，必要时改写并复查；管理参数和附件保持，失败不直接放出未通过的草稿。它会增加模型费用和等待时间。风格判定是概率性的，不能保证每句话符合每个人的口味。
+
+提示词源码：`AstrBot/data/plugins/astrbot_plugin_proactive_agent/conversation_review.py` 和 `chat_style_policy.py`。公开版提供通用聊天表达规则，不包含作者私人的提示词定制。
+
+### 6. 图库和梗记忆
+
+「智能图片对话」页面上传自己有权使用的图片。打标由配置的图片理解模型负责，新旧图片沿用多维标签规则；已有图片可在页面选择重新打标，失败保留旧标签，人工标签保留。仓库不附赠他人的私人图片库。
+
+“画一张猫”进入模型生图请求；“找个无语表情包”查已有图库。是否真正能生图取决于你的模型/工具；图片响应兼容层负责将服务商实际返回的图片发回正确会话，不假装生成，也不拿旧图库图顶替。
+
+新梗先查公共梗记忆，缺失或过期再搜索、核实、保存含义/用法/来源。公开版默认 Tavily，需要自己的搜索 key；本机原部署的 DeepSeek 搜索模式也保留可选。查不到就标为未核实，不编造来源。仅保存公共知识；用于生成回复的上下文按会话隔离。
+
+### 7. 结束与验收
+
+```powershell
+.venv\Scripts\python.exe manage.py deep
+.venv\Scripts\python.exe manage.py stop
+```
+
+分别对应一键检查修复、一键结束。停止只影响这个部署启动的 AstrBot；不会强行关掉你的 QQ、浏览器、其他 Python 或共享代理。QQ 连接端按自己的官方方式启动和结束。
+
+深度检查会实际消费少量模型调用，报告在 `logs/health-status.json`。还应自己私聊测试、在授权测试群试 @/句中唤醒、上传一张图片检查标签。**需要扫码、密钥、账号资格、外部模型额度或第三方授权的步骤，agent 和脚本不能凭空代替。**
+
+## 源码与维护
+
+```text
+AstrBot/data/plugins/   两个插件完整程序源码与页面
+bootstrap.py           验证配置、安装依赖、生成独立运行配置
+manage.py              启停、守护、诊断与面板检查任务
+tools/repair_dashboard.py  已验证 AstrBot 4.29.1 页面加载兼容补丁
+tests/                 不发送真实QQ消息的回归测试
+Dockerfile / compose.yaml  云端部署模板
+```
+
+版本、来源、修改范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。维护步骤见 [MAINTENANCE.md](MAINTENANCE.md)。源码以可检查的形式提供；没有内置作者的 API，没有隐藏的付费激活，也不会上传用户数据来“帮助部署”。

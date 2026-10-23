@@ -1,0 +1,16 @@
+.venv/
+local/
+logs/
+backups/
+__pycache__/
+*.pyc
+.env
+AstrBot/data/*
+!AstrBot/data/plugins/
+AstrBot/data/plugins/*/data/
+*.db
+*.db-*
+*.log
+dist/
+AstrBot/.astrbot
+AstrBot/astrbot.lock

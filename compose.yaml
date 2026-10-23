@@ -1,0 +1,17 @@
+services:
+  astrbot:
+    build: .
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      ASTRBOT_DISABLE_METRICS: "1"
+    ports:
+      - "127.0.0.1:6185:6185"
+      - "127.0.0.1:6199:6199"
+    volumes:
+      - ./local:/app/local:ro
+      - bot_data:/app/AstrBot/data
+      - ./logs:/app/logs
+    stop_grace_period: 30s
+volumes:
+  bot_data:
