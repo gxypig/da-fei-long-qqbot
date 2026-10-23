@@ -178,5 +178,10 @@
     "type": "int",
     "description": "每轮允许最多一个Emoji的概率（0-100）",
     "default": 18
+  },
+  "review_low_latency": {
+    "type": "bool",
+    "default": true,
+    "description": "审查低延迟：同一模型的短任务推理档；保留逐条审查和改写复查，仅对兼容模型生效，不修改主聊天或梗学习"
   }
 }

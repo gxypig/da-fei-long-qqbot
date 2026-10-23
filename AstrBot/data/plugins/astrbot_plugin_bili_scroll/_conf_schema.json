@@ -11,8 +11,32 @@
   },
   "keywords": {
     "type": "string",
-    "default": "搞笑,抽象,动画",
-    "description": "兴趣词，逗号分隔"
+    "default": "",
+    "description": "兴趣词，逗号分隔；搬屎模式留空使用原版赤石词池"
+  },
+  "mode": {
+    "type": "string",
+    "default": "chishi",
+    "options": [
+      "chishi",
+      "normal"
+    ],
+    "description": "选片模式：chishi搬屎（原版规则），normal普通搜索"
+  },
+  "up_list": {
+    "type": "string",
+    "default": "互联网粪王,你爱咋想咋想吧,地球online神人集合,坤坤是条闲鱼,抽象搬运工258,番茄青蛙-,funnybite,沈井彬-擒史皇",
+    "description": "赤石UP名单，最多12个UID或精确昵称，逗号分隔"
+  },
+  "mygo": {
+    "type": "bool",
+    "default": true,
+    "description": "启用原版MyGO抽象召回通道"
+  },
+  "bait": {
+    "type": "bool",
+    "default": false,
+    "description": "编造诱饵（原版可选项，仅动漫游戏等娱乐钩子）；关闭时使用反话安利"
   },
   "interval_minutes": {
     "type": "int",
@@ -38,5 +62,71 @@
     "type": "string",
     "default": "aiocqhttp",
     "description": "OneBot平台ID"
+  },
+  "use_account": {
+    "type": "bool",
+    "default": false,
+    "description": "使用扫码登录的账号浏览（关闭时匿名）"
+  },
+  "account_cruise": {
+    "type": "string",
+    "default": "off",
+    "description": "账号巡航：off关闭/custom自定义/normal每30分钟/crazy每5分钟",
+    "options": [
+      "off",
+      "custom",
+      "normal",
+      "crazy"
+    ]
+  },
+  "account_interval": {
+    "type": "int",
+    "default": 30,
+    "description": "自定义账号巡航间隔（分钟，5至10080）"
+  },
+  "auto_comment": {
+    "type": "bool",
+    "default": false,
+    "description": "自动在选中视频下评论并@指定的人"
+  },
+  "mention_names": {
+    "type": "string",
+    "default": "",
+    "description": "@的精确B站昵称，逗号分隔，最多5人，不带@"
+  },
+  "comment_per_round": {
+    "type": "int",
+    "default": 1,
+    "description": "每轮分享视频数（1至5）"
+  },
+  "dm_mode": {
+    "type": "string",
+    "default": "off",
+    "description": "私信：off关闭/only只私信/both私信与已开启的评论",
+    "options": [
+      "off",
+      "only",
+      "both"
+    ]
+  },
+  "dm_uid": {
+    "type": "string",
+    "default": "",
+    "description": "接收私信的B站UID（不是QQ号）"
+  },
+  "reply_comments": {
+    "type": "bool",
+    "default": false,
+    "description": "只回复自己评论下面的直接回复（近7天）"
+  },
+  "reply_per_round": {
+    "type": "int",
+    "default": 1,
+    "description": "每轮最多回复数（1至5）"
+  },
+  "favorite_id": {
+    "type": "string",
+    "default": "",
+    "description": "自动收藏到本人收藏夹ID，留空关闭"
   }
 }

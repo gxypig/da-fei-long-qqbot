@@ -1,4 +1,4 @@
-"""Anonymous, read-only Bilibili discovery; no account cookies or write API.
+"""Read-only Bilibili discovery, anonymous or explicitly selected login.
 
 Inspired by dsh-bili-scroll's candidate pool/comment scoring, reimplemented for
 AstrBot. See NOTICE.md for upstream revisions and MIT attributions.
@@ -16,7 +16,8 @@ import aiohttp
 BVID = re.compile(r'BV[0-9A-Za-z]{10}\Z')
 API = 'https://api.bilibili.com'
 PATHS = {'/x/web-interface/popular', '/x/web-interface/search/type',
-         '/x/web-interface/view', '/x/v2/reply'}
+         '/x/web-interface/view', '/x/v2/reply', '/x/space/arc/search',
+         '/x/web-interface/archive/related'}
 
 
 def clean(value, limit=200):
@@ -28,7 +29,7 @@ def video(row):
     bvid = str(row.get('bvid', ''))
     if not BVID.fullmatch(bvid):
         return None
-    duration = row.get('duration', 0)
+    duration = row.get('duration') or row.get('length') or 0
     if isinstance(duration, str) and ':' in duration:
         parts = duration.split(':')
         duration = sum(int(x) * 60 ** i for i, x in enumerate(reversed(parts)) if x.isdigit())
@@ -40,8 +41,9 @@ def video(row):
             'url': f'https://www.bilibili.com/video/{bvid}', 'title': clean(row.get('title')),
             'author': clean((row.get('owner') or {}).get('name') or row.get('author'), 80),
             'description': clean(row.get('desc') or row.get('description'), 500),
-            'duration': duration, 'published': int(row.get('pubdate') or 0),
-            'replies': int((row.get('stat') or {}).get('reply') or row.get('review') or 0)}
+            'duration': duration, 'published': int(row.get('pubdate') or row.get('created') or 0),
+            'play': int((row.get('stat') or {}).get('view') or row.get('play') or 0),
+            'replies': int((row.get('stat') or {}).get('reply') or row.get('review') or row.get('comment') or 0)}
 
 
 def score(item, comments, now=None):
@@ -60,12 +62,21 @@ class BiliUnavailable(RuntimeError):
 
 
 class BiliClient:
-    def __init__(self):
+    def __init__(self, account=None, use_account=lambda: False):
+        self.account, self.use_account = account, use_account
         self.session = None
         self.cache = {}
         self.lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(2)
         self.visitor_ready = False
+        self.visitor_lock = asyncio.Lock()
+
+    @property
+    def anonymous(self):
+        return not (self.account and self.use_account() and self.account.ready)
+
+    def identity(self):
+        return ('anonymous',) if self.anonymous else self.account.identity()
 
     async def close(self):
         if self.session:
@@ -74,6 +85,9 @@ class BiliClient:
     async def get(self, path, params):
         if path not in PATHS:
             raise ValueError('Only approved public read endpoints are supported')
+        if not self.anonymous:
+            async with self.slots:
+                return await self.account.get(path, params)
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10),
                 headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.bilibili.com/'},
@@ -82,15 +96,17 @@ class BiliClient:
         # only the cookies returned by its normal public search page; no account,
         # browser profile, copied cookies, generated tokens or persisted login.
         if path.endswith('/search/type') and not self.visitor_ready:
-            try:
-                async with self.session.get('https://search.bilibili.com/all',
-                        params={'keyword': params.get('keyword', '')}, allow_redirects=False) as page:
-                    if page.status != 200:
-                        raise BiliUnavailable(f'B站匿名搜索页面 HTTP {page.status}')
-                    await page.content.read(65536)
-                    self.visitor_ready = True
-            except (aiohttp.ClientError, TimeoutError) as exc:
-                raise BiliUnavailable('B站匿名搜索初始化失败，稍后再试') from exc
+            async with self.visitor_lock:
+                if not self.visitor_ready:
+                    try:
+                        async with self.session.get('https://search.bilibili.com/all',
+                                params={'keyword': params.get('keyword', '')}, allow_redirects=False) as page:
+                            if page.status != 200:
+                                raise BiliUnavailable(f'B站匿名搜索页面 HTTP {page.status}')
+                            await page.content.read(65536)
+                            self.visitor_ready = True
+                    except (aiohttp.ClientError, TimeoutError) as exc:
+                        raise BiliUnavailable('B站匿名搜索初始化失败，稍后再试') from exc
         async with self.slots:
             try:
                 async with self.session.get(API + path, params=params, allow_redirects=False) as response:
@@ -108,10 +124,19 @@ class BiliClient:
             except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
                 raise BiliUnavailable('B站网络或响应异常，请稍后重试') from exc
 
-    async def discover(self, keyword='', excluded=()):
+    async def discover(self, keyword='', excluded=(), *, mode='normal', up_list='', mygo=True):
+        if mode == 'chishi':
+            from .scout import scout
+            return await scout(self, keyword, excluded, up_list, mygo)
+        if mode != 'normal':
+            raise ValueError('未知选片模式')
+        return await self.normal_discover(keyword, excluded)
+
+    async def normal_discover(self, keyword='', excluded=()):
         keyword = clean(keyword, 40)
+        key = ('normal', self.identity(), keyword)
         async with self.lock:
-            cached = self.cache.get(keyword)
+            cached = self.cache.get(key)
             if not cached or time.time() - cached[0] > 300:
                 rows, warnings = [], []
                 if keyword:
@@ -143,13 +168,17 @@ class BiliClient:
                     return item
 
                 items = await asyncio.gather(*(inspect(x) for x in items))
-                self.cache[keyword] = (time.time(), sorted(items, key=lambda x: -x['score']), warnings)
+                if key[1] != self.identity():
+                    raise BiliUnavailable('浏览账号在读取期间发生变化，请重新预览')
+                self.cache[key] = (time.time(), sorted(items, key=lambda x: -x['score']), warnings)
                 # Do not let arbitrary user searches grow memory without a bound.
                 while len(self.cache) > 32:
                     self.cache.pop(next(iter(self.cache)))
-                cached = self.cache[keyword]
+                cached = self.cache[key]
+            if key[1] != self.identity():
+                raise BiliUnavailable('浏览账号已变化，请重新预览')
             return {'items': copy.deepcopy([v for v in cached[1] if v['bvid'] not in excluded]),
-                    'warnings': list(cached[2]), 'anonymous': True}
+                    'warnings': list(cached[2]), 'anonymous': self.anonymous, 'mode': 'normal'}
 
     async def detail(self, bvid):
         if not BVID.fullmatch(bvid):

@@ -219,7 +219,10 @@ class OutboundGuard:
             media = sum(s.get("type") in {"image", "video", "record", "file"} for s in message if isinstance(s, dict))
         if not slots:
             return payload
-        text = "\n".join(container[key] for container, key in slots)
+        # The agent hook merges the reviewed text into the first Plain component
+        # and clears the rest. Empty components have no visible text; including
+        # them here adds spurious newlines and needlessly invalidates its receipt.
+        text = "\n".join(container[key] for container, key in slots if container[key])
         checked = text if consume_approval(origin, text) else await self.reviewer.review(text, origin=origin, recent=recent, mode=mode, media=media)
         if checked != text:
             # Preserve all recipients, at/reply/image segments and forward node metadata.
