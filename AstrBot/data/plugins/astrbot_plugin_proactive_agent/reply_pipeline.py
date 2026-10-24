@@ -210,4 +210,5 @@ class ReplyPipelineMixin:
                 'target_seconds': self._cfg('reply_latency_target_seconds', 30),
                 'work': work.status() if work else {}, 'learning': learning.snapshot() if learning else {},
                 'prediction': getattr(self, '_prediction_stats', {}), 'emoji': emoji,
+                  'context_window': dict(getattr(getattr(self, '_context_window', None), 'stats', {})),
                 'timings': self._latency_summary()}

@@ -32,6 +32,7 @@ FIELDS = {
     "reply_audit_sample_percent": 10, "emoji_late_grace_seconds": 3,
     "reply_latency_target_seconds": 30, "model_concurrency": 2,
     "reply_hedge_after_seconds": 15,
+    "context_window_enabled": False, "context_recent_turns": 12, "context_recent_tokens": 6000,
 }
 
 
@@ -78,6 +79,8 @@ def validate(data):
         ("reply_latency_target_seconds", 5, 120, "正文回复目标秒数"),
         ("model_concurrency", 1, 4, "模型并发数"),
         ("reply_hedge_after_seconds", 0, 30, "慢请求补救等待秒数"),
+        ("context_recent_turns", 4, 40, "近期完整对话轮数"),
+        ("context_recent_tokens", 2000, 16000, "近期上下文估算预算"),
     ]:
         if not minimum <= values[key] <= maximum:
             raise ValueError(f"{label}须为{minimum}至{maximum}的整数")

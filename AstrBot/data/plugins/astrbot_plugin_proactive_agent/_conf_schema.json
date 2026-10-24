@@ -220,7 +220,10 @@
     "description": "启用可选二次审阅时的审查策略：all 全部审查，speed_first 速度优先；不改变 reply_review_enabled 开关",
     "type": "string",
     "default": "all",
-    "options": ["all", "speed_first"]
+    "options": [
+      "all",
+      "speed_first"
+    ]
   },
   "reply_prediction_enabled": {
     "description": "启用回复预测，供延迟优化调度使用",
@@ -273,6 +276,24 @@
     "description": "简单闲聊低推理档（试验）",
     "type": "bool",
     "default": false,
-    "hint": "默认关闭，本机对照暂未证明稳定加速。只改变兼容模型的简单闲聊推理档，功能链不变；复杂任务、多模态、用户显式参数保留。不兼容时回退。"
+    "hint": "默认关闭，长多图历史实测未证明单独启用能提速。兼容GPT-5/6，历史图片保留；当前多模态、工具续写和用户显式推理参数保留原档。不兼容时回退。"
+  },
+  "context_window_enabled": {
+    "description": "智能压缩长聊天上下文",
+    "type": "bool",
+    "default": false,
+    "hint": "只压缩送给模型的视图，完整聊天仍保留。近期完整轮次与当前任务不拆开，旧话题提供摘录并在空闲时生成摘要；明确追问旧事时恢复完整上下文。"
+  },
+  "context_recent_turns": {
+    "description": "近期完整对话最多保留轮数",
+    "type": "int",
+    "default": 12,
+    "hint": "4至40轮；遇到图片等较大内容会按预算减少，但至少保留最近4轮和完整当前任务。"
+  },
+  "context_recent_tokens": {
+    "description": "近期上下文估算预算",
+    "type": "int",
+    "default": 6000,
+    "hint": "2000至16000，估算值，不包含人设、工具定义与旧事摘要。当前任务、最少4轮或明确历史查询可超出预算。"
   }
 }

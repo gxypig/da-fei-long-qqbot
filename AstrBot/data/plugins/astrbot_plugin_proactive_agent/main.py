@@ -25,6 +25,7 @@ from .image_compat import install_image_compat
 from .dragon_character import CharacterState, character_note, limit_emoji, photo_caption, limit_father_address
 from .group_flow import GroupFlow, install_group_flow
 from .chat_lane import install_chat_lane, simple_chat, MARKER as CHAT_FAST_MARKER
+from .context_window import install_context_window
 from .live_journal import LiveJournal, install_live_journal
 from .dashboard_live_patch import repair as repair_live_dashboard
 from .visual_intent import generation_kind, generation_note
@@ -82,7 +83,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._data_dir = Path(__file__).resolve().parents[2] / "plugin_data" / "astrbot_plugin_proactive_agent"
         self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3')
         self._live_journal = LiveJournal(self._data_dir / 'live-messages.sqlite3')
-        self._restore_live = self._restore_chat_lane = None
+        self._restore_live = self._restore_chat_lane = self._restore_context_window = None
         self._reviewer = ReplyReviewer(self._generate_json, self._audit)
         self._memory = MemeMemory(self._data_dir / "meme_memory.json", self._generate_json, self._search_meme, self._audit)
         self._meme_prefetch = MemePrefetch(self._memory)
@@ -105,7 +106,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             self.logger.warning('即时对话页面补丁未启用：%s', str(exc))
         if self._cfg("image_fallback", True):
             self._restore_images = install_image_compat()
-        self._restore_chat_lane = install_chat_lane(self._cfg)
+        self._restore_context_window = install_context_window(self)
+        self._restore_chat_lane = install_chat_lane(self._cfg, self._audit)
         if self._cfg("reply_review_enabled", True):
             self._restore_review = install_outbound_guard(self, self._reviewer)
         self._restore_route = install_route_guard(self)
@@ -120,7 +122,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.12.0 已加载：并行预判、配图恢复、工具调度；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.13.0 已加载：并行预判、配图恢复、工具调度；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -138,7 +140,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         except Exception:
             checks["onebot"] = False
         checks['idle_learning'] = bool(self._learning.snapshot().get('worker_running', False))
-        return jsonify({"status": "ok", "data": {"version": "1.12.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.13.0", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -146,7 +148,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats, "group_flow": self._group_flow.stats}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.12.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.13.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -169,6 +171,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
 
     async def terminate(self) -> None:
+        window = getattr(self, '_context_window', None)
+        if window:
+            await window.close()
         await self._learning.close()
         await self._close_reply_pipeline()
         if self._restore_work:
@@ -178,6 +183,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         await self._work.close()
         if self._restore_chat_lane:
             self._restore_chat_lane()
+        if getattr(self, '_restore_context_window', None):
+            self._restore_context_window()
         if self._restore_group_flow:
             self._restore_group_flow()
         if self._fixed_task and not self._fixed_task.done():
@@ -258,8 +265,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             path = self._data_dir / "conversation-audit.jsonl"
             if path.exists() and path.stat().st_size > 2_000_000:
                 path.replace(path.with_suffix(".previous.jsonl"))
+            record = dict(fields)
+            if "kind" in record:
+                record["work_kind"] = record.pop("kind")
+            record.update(time=datetime.now().isoformat(timespec="seconds"), kind=kind)
             with path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"time": datetime.now().isoformat(timespec="seconds"), "kind": kind, **fields}, ensure_ascii=False) + "\n")
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
             if fields.get("status") == "blocked":
                 self.logger.warning("发送前审阅阻止了未通过的文字：%s", fields.get("error"))
         except OSError:

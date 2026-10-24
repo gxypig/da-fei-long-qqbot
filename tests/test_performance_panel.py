@@ -32,6 +32,9 @@ DEFAULTS = {
     "reply_latency_target_seconds": 30,
     "model_concurrency": 2,
     "reply_hedge_after_seconds": 15,
+    "context_window_enabled": False,
+    "context_recent_turns": 12,
+    "context_recent_tokens": 6000,
 }
 RANGES = {
     "reply_audit_sample_percent": (0, 100),
@@ -39,6 +42,8 @@ RANGES = {
     "reply_latency_target_seconds": (5, 120),
     "model_concurrency": (1, 4),
     "reply_hedge_after_seconds": (0, 30),
+    "context_recent_turns": (4, 40),
+    "context_recent_tokens": (2000, 16000),
 }
 PREFIX = "/astrbot_plugin_proactive_agent/"
 

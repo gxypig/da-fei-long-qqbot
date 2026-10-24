@@ -203,10 +203,17 @@ class EmojiProbabilityAPI(unittest.IsolatedAsyncioTestCase):
 
     async def test_instance_change_while_waiting_does_not_write_retired_gallery(self):
         revision = (await self.current())["revision"]
+        waiting = asyncio.Event()
+        class ObservedLock(asyncio.Lock):
+            async def acquire(self):
+                if self.locked():
+                    waiting.set()
+                return await super().acquire()
+        self.gallery._lock = ObservedLock()
         await self.gallery._lock.acquire()
         pending = asyncio.create_task(self.save(50, revision))
         try:
-            await asyncio.sleep(.02)
+            await asyncio.wait_for(waiting.wait(), 5)
             self.assertFalse(pending.done())
             self.meta = None
         finally:

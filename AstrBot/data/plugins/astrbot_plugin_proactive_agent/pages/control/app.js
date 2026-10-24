@@ -4,8 +4,8 @@
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
   let statusRequest, learningBusy = false, learningRollbackAvailable = false;
   let emojiRevision, emojiWritable = false, emojiDirty = false, emojiBusy = false;
-  const booleans = ['group_flow_enabled','chat_low_latency','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
-  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds'];
+  const booleans = ['group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
+  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function api(endpoint, body) {
@@ -98,6 +98,8 @@
     todo:'待办', todos:'待办', status:'状态', count:'次数', total:'总计', hits:'命中', misses:'未命中',
     cancelled:'已取消', skipped:'已跳过', error:'错误', last_error:'最近错误',
     target_seconds:'目标（秒）', concurrency:'并发数', model_concurrency:'模型并发数',
+    projected:'已压缩请求', recall_full:'旧事查询恢复完整历史', summary_used:'摘要命中',
+    summarized:'已整理摘要', summary_failed:'摘要生成失败', summary_paused:'摘要让出聊天名额',
     foreground:'前台任务', background:'后台任务', learning:'学习', prediction:'预测', scheduler:'模型调度',
     reply:'正文回复', chat:'聊天', tool:'工具任务', tools:'工具任务',
     created_at:'创建时间', updated_at:'更新时间', last_run:'最近运行',
@@ -177,6 +179,7 @@
     renderSnapshot('performance-work',performance?.work,'尚未提供调度状态');
     renderSnapshot('performance-prediction',performance?.prediction,'尚未提供预测统计');
     renderSnapshot('performance-emoji',performance?.emoji,'尚未提供表情统计');
+    renderSnapshot('performance-context',performance?.context_window,'尚未提供压缩统计');
     renderSnapshot('performance-timings',performance?.timings,'尚未提供耗时数据');
     renderLearning(performance?.learning);
     return available;

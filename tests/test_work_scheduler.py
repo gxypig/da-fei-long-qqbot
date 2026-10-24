@@ -1324,6 +1324,39 @@ class HedgeTests(unittest.IsolatedAsyncioTestCase):
         await task
         self.assertEqual([params['system_prompt'] for _, params in self.calls], ['prefix', 'prefix'])
 
+    async def test_real_runner_cancellation_event_with_waiter_is_shared_without_copying_future(self):
+        abort = asyncio.Event()
+        waiter = asyncio.create_task(abort.wait())
+        self.parents.append(waiter)
+        await until(lambda: bool(abort._waiters))
+        async def operation(index, p, params):
+            self.assertIs(params['abort_signal'], abort)
+            if index == 0:
+                await asyncio.Future()
+            return FakeResponse('complete')
+        self.operation = operation
+        task = self.start(abort_signal=abort)
+        await self.trigger()
+        self.assertEqual((await task).completion_text, 'complete')
+        self.assertEqual(self.stats()['hedged'], 1)
+        self.assertFalse(abort.is_set())
+        abort.set()
+        await waiter
+
+    async def test_runner_context_marker_is_cleaned_even_when_disabled_and_in_stream(self):
+        contexts = [{'role': 'system', 'content': 'fixed\n' + TAIL_GUARD_MARKER},
+                    {'role': 'user', 'content': 'current'}]
+        for enabled in (False, True):
+            self.cfg['latency_optimization_enabled'] = enabled
+            with self.runtime.reply_work(Event()):
+                await self.provider.text_chat(contexts=contexts)
+                chunks = [item async for item in self.provider.text_chat_stream(contexts=contexts)]
+            self.assertEqual(len(chunks), 1)
+            self.assertEqual(self.calls[-1][1]['contexts'][0]['content'], 'fixed\n')
+            self.assertEqual(self.stream_calls[-1][2]['contexts'][0]['content'], 'fixed\n')
+        self.assertIn(TAIL_GUARD_MARKER, contexts[0]['content'])
+        self.assertEqual(self.stats()['hedged'], 0)
+
     async def test_single_turn_uses_one_backup_across_later_calls_and_facades(self):
         later, release = asyncio.Event(), asyncio.Event()
         async def operation(index, *args):

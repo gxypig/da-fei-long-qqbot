@@ -94,6 +94,10 @@ async def build_runner(provider, case, tool_set, *, event=None, hooks=None,
     request = ProviderRequest(prompt=case.get('prompt'), system_prompt=case.get('system_prompt', ''),
         contexts=copy.deepcopy(case.get('contexts', [])), func_tool=tool_set,
         model=provider.provider_config.get('model'))
+    if case.get('session_id'):
+        request.session_id = case['session_id']
+    if case.get('conversation_id'):
+        request.conversation = SimpleNamespace(cid=case['conversation_id'], token_usage=case.get('token_usage', 0))
     runner = ToolLoopAgentRunner()
     await runner.reset(provider=provider, request=request,
         run_context=ContextWrapper(context=SimpleNamespace(event=event)),
