@@ -183,5 +183,37 @@
     "type": "bool",
     "default": true,
     "description": "审查低延迟：同一模型的短任务推理档；保留逐条审查和改写复查，仅对兼容模型生效，不修改主聊天或梗学习"
+  },
+  "father_address_probability": {
+    "description": "每轮允许称呼父亲的概率，0至100",
+    "type": "int",
+    "default": 20
+  },
+  "auto_quote_enabled": {
+    "description": "群聊自动引用当前消息，主动发送不引用",
+    "type": "bool",
+    "default": false
+  },
+  "meme_separate_probability": {
+    "description": "聊天表情包独立发送概率，0总合并，100总分开",
+    "type": "int",
+    "default": 50
+  },
+  "group_flow_enabled": {
+    "description": "合并同人待回复闲聊，丢弃过时概率接话",
+    "type": "bool",
+    "default": true
+  },
+  "group_passive_max_age": {
+    "description": "概率接话最长等待秒数，5至120；明确唤醒不丢弃",
+    "type": "int",
+    "default": 25,
+    "hint": "只淘汰仍在排队且已有更新候选的概率闲聊；最新候选、正在生成/审阅的回复、明确唤醒和功能任务保留"
+  },
+  "chat_low_latency": {
+    "description": "简单闲聊低推理档（试验）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭，本机对照暂未证明稳定加速。只改变兼容模型的简单闲聊推理档，功能链不变；复杂任务、多模态、用户显式参数保留。不兼容时回退。"
   }
 }

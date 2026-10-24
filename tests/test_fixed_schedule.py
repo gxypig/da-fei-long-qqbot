@@ -92,6 +92,7 @@ class FixedScheduleTests(unittest.IsolatedAsyncioTestCase):
         real = FixedScheduler(self.p, lambda: self.now)
         await real.generate_and_send('private:201',1800)
         self.assertEqual(self.p.context.send_message.await_args.args[0], 'aiocqhttp:FriendMessage:201')
+        provider.text_chat.return_value = SimpleNamespace(completion_text='游戏存档名后面的最终版到底能排到几代')
         await real.generate_and_send('qzone:',3600)
         self.p._post_qzone.assert_awaited_once()
         self.assertEqual(__import__('json').loads(provider.text_chat.await_args.kwargs['prompt'])['recent_conversation'], [])

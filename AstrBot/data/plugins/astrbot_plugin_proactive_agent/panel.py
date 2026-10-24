@@ -15,6 +15,8 @@ from quart import jsonify, request
 PROJECT = Path(__file__).resolve().parents[4]
 FIELDS = {
     "father_qq": "", "father_nickname": "", "emoji_probability": 18,
+    "father_address_probability": 20, "auto_quote_enabled": False, "meme_separate_probability": 50,
+    "group_flow_enabled": True, "group_passive_max_age": 25, "chat_low_latency": False,
     "group_chat_ids": "", "group_chat_probability": 10,
     "group_wake_words": "大肥龙,肥龙", "group_wake_anywhere": True,
     "enable": False, "allow_group": False, "allow_private": False, "allow_qzone": False,
@@ -41,6 +43,11 @@ def validate(data):
             raise ValueError("设置类型不正确：" + key)
     if not 0 <= values["emoji_probability"] <= 100:
         raise ValueError("Emoji概率必须为0至100的整数")
+    for key in ['father_address_probability', 'meme_separate_probability']:
+        if not 0 <= values[key] <= 100:
+            raise ValueError('概率必须为0至100的整数：' + key)
+    if not 5 <= values['group_passive_max_age'] <= 120:
+        raise ValueError('概率接话最长等待须为5至120秒')
     values["father_qq"] = values["father_qq"].strip()
     if values["father_qq"] and not re.fullmatch(r"[0-9]{5,20}", values["father_qq"]):
         raise ValueError("父亲QQ请填写有效数字，或留空")

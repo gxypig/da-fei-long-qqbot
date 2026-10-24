@@ -55,6 +55,12 @@ class SentMemory:
                 '对方可能正在接这些话题；先结合时间和最新发言理解，不要假装没发过。\n'
                 + json.dumps(rows, ensure_ascii=False))
 
+    def proactive_recent(self, origin):
+        with self.connect() as db:
+            rows = db.execute("SELECT text FROM sent WHERE origin=? AND kind IN ('fixed','discretionary') AND at>=? ORDER BY id DESC LIMIT 24",
+                              (origin, self.clock() - 7 * 86400)).fetchall()
+        return [r[0] for r in reversed(rows)]
+
 
 async def conversation_id(plugin, origin):
     manager = getattr(plugin.context, 'conversation_manager', None)

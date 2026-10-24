@@ -9,6 +9,7 @@ from .conversation_style import STYLE
 from .conversation_review import sent_text, delivery_policy
 from .sent_memory import conversation_id, remember_sent
 from .route_guard import explicit_route
+from .proactive_variety import variety, TooSimilar
 
 # Public topic directions only: sharing the cursor never shares private chat text.
 TOPICS = (
@@ -117,7 +118,8 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             "允许渠道": lane, "目标ID": target_id, "目标名称": target_name,
             "同一会话近期消息": [{"说话人": x.get("sender", target_id), "距今分钟": round((now-x["time"])/60), "文字": x["text"][:200]} for x in recent],
             "这个目标最近已发送": recent_actions.get(scope, [])[-4:],
-            "本轮话题方向": TOPICS[topic_index],
+            "本轮话题方向": await variety(plugin).topic(scope, reserve=not dry_run),
+            "本目标近期主动正文（语义也不能重复，换几个字不算）": variety(plugin).history(scope),
             "提示": "这是主动开启话题，不是在回复一条新消息。旧消息只作兴趣参考；超过10分钟的旧话题需要自然交代缘由，不能突然像刚被对方提问一样接话。不要捏造对方刚说了什么。动态一两句，私聊别像调查问卷。",
         }
         from .dragon_character import proactive_note
@@ -169,16 +171,30 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
                 allowed = plugin._id_set(plugin._cfg("group_ids" if lane == "group" else "private_ids", ""))
                 if allowed and target_id not in allowed:
                     raise RuntimeError("审阅期间目标已移出范围，未发送")
-        with explicit_route(scope), delivery_policy(final_delivery_check):
-            if lane == "qzone":
-                if not await plugin._qzone_allowed():
-                    return "动态仍在冷却时间，取消发送。"
-                await plugin._post_qzone(content, [])
-            else:
-                sent = await plugin.context.send_message(umo, plugin._build_chain(content, []))
-                if sent is False:
-                    raise RuntimeError("平台未接受主动消息")
-                state.setdefault(lane, {})[target_id] = time.time()
+        async def send(checked):
+            await final_delivery_check()
+            with explicit_route(scope), delivery_policy(final_delivery_check):
+                if lane == 'qzone':
+                    await plugin._post_qzone(checked, [])
+                elif await plugin.context.send_message(umo, plugin._build_chain(checked, [])) is False:
+                    raise RuntimeError('平台未接受主动消息')
+        for attempt in range(3):
+            try:
+                content = await variety(plugin).deliver(scope, content, send)
+                break
+            except TooSimilar:
+                if attempt == 2:
+                    await plugin._record('主动正文连续重复，本目标留待下轮，不重复发送')
+                    return '主动正文与近期重复，未发送'
+                payload.update(本轮话题方向=await variety(plugin).topic(scope), 前稿=content,
+                               修正='换个完全不同的话题，只返回正文，不用JSON，禁止同义复述')
+                replacement = await provider.text_chat(prompt=json.dumps(payload, ensure_ascii=False),
+                    system_prompt=system + '\n本轮是重写正文，不再输出决策JSON，只输出正文')
+                content = plugin._clean(getattr(replacement, 'completion_text', '') or '')
+                if not content:
+                    return '主动重写正文为空，未发送'
+        if lane != 'qzone':
+            state.setdefault(lane, {})[target_id] = time.time()
         state["last_send"] = time.time()
         content = sent_text(scope, content)
         if lane != 'qzone':

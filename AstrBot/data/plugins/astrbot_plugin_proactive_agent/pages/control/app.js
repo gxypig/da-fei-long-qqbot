@@ -2,8 +2,8 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
-  const booleans = ['group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled'];
-  const numbers = ['group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability'];
+  const booleans = ['group_flow_enabled','chat_low_latency','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled'];
+  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname'];
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function api(endpoint, body) {

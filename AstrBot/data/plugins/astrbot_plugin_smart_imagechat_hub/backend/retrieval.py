@@ -774,7 +774,15 @@ class RetrievalMixin:
             )
             return
         image_tags = self._tags_from_item(image_item)
-        if cfg["embed_in_conversation"]:
+        # The optional dragon panel adds a mixed mode. With no companion plugin,
+        # retain the gallery's original fixed combined/separate setting.
+        embed = cfg["embed_in_conversation"]
+        meta = self.context.get_registered_star('astrbot_plugin_proactive_agent')
+        companion = meta.star_cls if meta and meta.activated else None
+        if companion:
+            probability = max(0, min(100, int(companion._cfg('meme_separate_probability', 50))))
+            embed = random.random() * 100 >= probability
+        if embed:
             self._log_proactive_emoji_debug(
                 cfg,
                 "embedding selected image into LLM result: %s",

@@ -73,7 +73,7 @@ class CharacterTests(unittest.TestCase):
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
     def plugin(self):
-        p=object.__new__(Main);p.config={"father_qq":"12345","meme_context_enabled":False,"reply_review_enabled":False}
+        p=object.__new__(Main);p.config={"father_qq":"12345","father_address_probability":100,"meme_context_enabled":False,"reply_review_enabled":False}
         p._recent_messages={}
         return p
 

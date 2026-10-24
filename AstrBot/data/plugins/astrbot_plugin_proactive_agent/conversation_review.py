@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from aiocqhttp import CQHttp, Message
 from .chat_style_policy import CHAT_STYLE_POLICY, output_issues
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
-from .dragon_character import character_note, speech_issues, limit_emoji
+from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address
 
 
 REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句话是否像正在 QQ 中随口聊天”，不只是正确、简短或礼貌。
@@ -114,7 +114,7 @@ class ReplyReviewer:
             async with asyncio.timeout(self.timeout):
                 async with self._slots:
                     state = character if character is not None else (request_scope(origin) or {}).get("character", {})
-                    candidate = casual_punctuation(limit_emoji(text, state, mode), mode)
+                    candidate = casual_punctuation(limit_father_address(limit_emoji(text, state, mode), state, mode), mode)
                     feedback = []
                     for attempt in range(3):
                         issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
@@ -123,9 +123,10 @@ class ReplyReviewer:
                             issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))
                         self.stats["model_calls"] += 1
                         data = json_object(await self.generate(
-                            REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + (character_note(state) if state else ""),
+                            REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + (character_note(state) if state else "")
+                            + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
                             {"mode": mode, "同一会话近期消息": list(recent)[-6:],
-                             "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-3:]],
+                             "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
                              "待发文字": candidate, "附件数": media, "审阅轮次": attempt + 1,
                              "必须修正的问题": list(dict.fromkeys(issues + feedback))}, origin,
                         ))
@@ -156,7 +157,7 @@ class ReplyReviewer:
                         if video_links:
                             replacement = re.sub(r'https?://[^\s<>]+', '', replacement).strip()
                             replacement += '\n' + '\n'.join(video_links)
-                        candidate = casual_punctuation(limit_emoji(replacement.strip(), state, mode), mode)
+                        candidate = casual_punctuation(limit_father_address(limit_emoji(replacement.strip(), state, mode), state, mode), mode)
                         feedback = []
                         if len(candidate) > 1200:
                             raise ValueError("Review replacement too long")

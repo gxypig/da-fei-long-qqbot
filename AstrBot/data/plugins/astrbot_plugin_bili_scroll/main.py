@@ -275,13 +275,16 @@ class Main(star.Star):
 
     async def share(self, origin, keyword='', event=None, final_check=None, mode=None):
         async with self.lock(origin):
+            receipt = event.get_extra('qqbot_bili_sent') if event else None
+            if receipt and receipt.get('keyword') == keyword and receipt.get('mode') == mode:
+                return '已向当前会话分享了视频链接；不要再发送一次，也不要复述文案'
             if not self.values()['enabled']:
                 return '刷B站功能已关闭'
             key = 'seen:' + origin
             seen = await self.get_kv_data(key, [])
             data = await self.discover(keyword, excluded=seen, mode=mode)
             if not data['items']:
-                return '暂时没有找到匹配且没分享过的视频' + ('；' + '；'.join(data['warnings']) if data['warnings'] else '')
+                return ('本轮前一个视频已经发送成功；这次追加搜索' if receipt else '') + '暂时没有找到匹配且没分享过的视频' + ('；' + '；'.join(data['warnings']) if data['warnings'] else '')
             item = data['items'][0]
             cid = await conversation_id(self, origin)
             text = await self.make_copy(item, origin)
@@ -303,6 +306,8 @@ class Main(star.Star):
                         if await self.context.send_message(origin, MessageChain([Plain(text)])) is False:
                             raise RuntimeError('没有匹配的平台，未发送')
             actual = sent_text(origin, text)
+            if event is not None:
+                event.set_extra('qqbot_bili_sent', {'keyword': keyword, 'mode': mode, 'text': actual, 'url': item['url']})
             await remember_sent(self, origin, cid, actual, 'bilibili')
             try:
                 await self.put_kv_data(key, (seen + [item['bvid']])[-100:])
@@ -331,9 +336,19 @@ class Main(star.Star):
         try:
             if mode not in {'', 'normal', 'chishi'}:
                 return '选片模式只能是chishi或normal'
-            return await self.share(event.unified_msg_origin, clean(keyword, 40), event, mode=mode or None)
+            result = await self.share(event.unified_msg_origin, clean(keyword, 40), event, mode=mode or None)
+            if event.get_extra('qqbot_bili_sent') and self.single_video_request(event.get_message_str() or ''):
+                # All visible work is already done and journaled. Stop only a
+                # single-purpose video request; composite tasks keep their tools.
+                event.stop_event()
+            return result
         except Exception:
             return '本次分享未能确认成功，不要声称已发出，也不要立刻重试'
+
+    @staticmethod
+    def single_video_request(text):
+        return (bool(re.search(r'视频|[Bb]站|bilibili|搬屎|赤石', text))
+                and not re.search(r'然后|并且|顺便|同时|之后|再帮|还要|以及|总结|分析|下载|画|生成|提醒|发给|两[个条]|[2-9]个|[；;\n]', text))
 
     def targets(self):
         v = self.values()

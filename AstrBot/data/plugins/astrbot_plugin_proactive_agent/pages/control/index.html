@@ -10,6 +10,7 @@
     <details><summary>手动填写或检查群号</summary><label for="group_chat_ids">特殊群号，多个用逗号分隔</label><textarea id="group_chat_ids" rows="2" placeholder="未选择特殊群"></textarea></details>
     <div class="card-grid"><article class="card"><h2>普通消息接话概率</h2><p>只作用于特殊群，每条文字独立判断</p><div class="probability"><input id="probability-slider" type="range" min="0" max="100" step="1" aria-label="接话概率滑块"><div><input id="group_chat_probability" type="number" min="0" max="100" required aria-label="接话概率"> <span>%</span></div></div><div class="scale"><span>0% 只按唤醒规则</span><span>100% 每条文字接话</span></div><div class="callout">@大肥龙或说唤醒词，始终绕过概率判断</div></article>
     <article class="card"><h2>唤醒词</h2><label for="group_wake_words">多个词用逗号分隔</label><input id="group_wake_words" type="text" maxlength="200"><label class="toggle"><input id="group_wake_anywhere" type="checkbox">允许唤醒词出现在句中、句尾</label><p class="example">例如「今天大肥龙想吃什么」也能唤醒<br>命令前缀 / 仍只在句首生效</p></article></div>
+    <article class="card"><h2>跟上群聊节奏</h2><label class="toggle"><input id="chat_low_latency" type="checkbox">简单闲聊低推理档（试验，默认关闭）</label><p>仅供对比不同接口的速度，当前实测未证明稳定提速。保留梗记忆、工具和二次审阅；复杂任务沿用原设置</p><label class="toggle"><input id="group_flow_enabled" type="checkbox">合并同一个人的待回复闲聊，过时的概率接话不补发</label><label for="group_passive_max_age">概率接话最长等待（秒）</label><input id="group_passive_max_age" type="number" min="5" max="120" required><p>默认25秒，只清理排队中已有更新候选的旧闲聊；最新候选和已经开始的回复保留。明确@、唤醒、视频和画图等任务保留，接话概率仍按群分类设置</p><label class="toggle"><input id="auto_quote_enabled" type="checkbox">群聊回复自动引用对应消息</label><p>默认关闭。打开后引用当前发言人的那条消息；主动发送和后续单独表情包不自动引用</p></article>
   </section>
   <section id="proactive" class="tab-panel" hidden>
     <div class="section-head"><div><h2>没人呼叫时，也可以主动开口</h2><p>这里管理定时主动行为，与特殊群的每句话概率接话相互独立</p></div></div>
@@ -29,7 +30,8 @@
     <h2>嘴欠白毛龙娘，挨怼就怂</h2><p>自称本龙，默认短句、二次元自拍；被怼先道歉，下一轮恢复调皮。真心求助认真回应</p>
     <div class="card-grid"><article class="card"><h2>父亲身份</h2><label for="father_qq">父亲 QQ 号（留空表示不绑定）</label><input id="father_qq" type="text" inputmode="numeric" maxlength="20"><label for="father_nickname">父亲昵称（仅作本机备注）</label><input id="father_nickname" type="text" maxlength="80"><p>只按消息真实发送者的QQ识别；昵称和头像不授予身份，也不改变管理员权限</p></article>
     <article class="card"><h2>偶尔带一个 Emoji</h2><label for="emoji_probability">每轮允许使用的概率（%）</label><input id="emoji_probability" type="number" min="0" max="100" required><p>默认18%，允许时由模型判断是否合适，最多一个。0表示禁用；严肃求助不添加</p></article></div>
-    <p class="callout">完整角色和审阅规则见插件 dragon_character.py；面板改动下一轮生效，无需重启</p>
+    <div class="card-grid"><article class="card"><h2>偶尔称呼父亲</h2><label for="father_address_probability">每轮允许称呼爸 / 老爸的概率（%）</label><input id="father_address_probability" type="number" min="0" max="100" required><p>默认20%。父亲关系始终保留，只调整称呼频率；0表示直接说话，不加称呼</p></article><article class="card"><h2>表情包发送方式</h2><label for="meme_separate_probability">表情包另发一条的概率（%）</label><input id="meme_separate_probability" type="number" min="0" max="100" required><p>默认50%，其余与文字放在一起。0总是合并，100总是分开；只作用于聊天自动配的图库表情，不影响生图附件</p></article></div>
+    <p class="callout">设置下一轮生效，无需重启；主动消息分别选话题，并检查本对象历史与近期重复正文</p>
   </section>
   <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
   </form>

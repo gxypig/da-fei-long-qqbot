@@ -43,6 +43,13 @@ def install_group_wake(plugin):
     async def process(stage, event):
         enabled = stage.ctx.astrbot_config.get("plugin_set", ["*"])
         if (enabled == ["*"] or "astrbot_plugin_proactive_agent" in enabled) and await SessionPluginManager.is_plugin_enabled_for_session(event.unified_msg_origin, "astrbot_plugin_proactive_agent"):
+            if hasattr(plugin, '_live_journal') and event.get_platform_id() == plugin._cfg('platform_id', 'aiocqhttp'):
+                try:
+                    plugin._live_journal.incoming(event)
+                except Exception as exc:
+                    plugin._live_journal.error = type(exc).__name__
+            if hasattr(plugin, '_group_flow'):
+                plugin._group_flow.observe(event)
             reason = group_wake_reason(event, stage.ctx.astrbot_config, plugin._cfg)
             if reason:
                 event.is_at_or_wake_command = True
