@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import unicodedata
+from contextlib import nullcontext
+from copy import deepcopy
 
 from .chat_style_policy import output_issues
 from .dragon_character import speech_issues
@@ -129,7 +131,9 @@ class ReplyPipelineMixin:
         async def predict():
             from .work_scheduler import model_work
             try:
-                with model_work('auxiliary'):
+                work = getattr(self, '_work', None)
+                admission = work.prediction_work(event) if work else nullcontext()
+                with model_work('auxiliary'), admission:
                     async with asyncio.timeout(12):
                         answer = json_object(await self._generate_json(PREDICTION_SYSTEM, payload, event.unified_msg_origin))
                 if answer.get('risk') not in {'low', 'high', 'unknown'}: raise ValueError('Invalid risk')
@@ -186,8 +190,24 @@ class ReplyPipelineMixin:
 
     def performance_status(self):
         work, learning = getattr(self, '_work', None), getattr(self, '_learning', None)
+        emoji = {}
+        get_stars = getattr(getattr(self, 'context', None), 'get_all_stars', None)
+        if callable(get_stars):
+            for star in get_stars() or ():
+                if (getattr(star, 'activated', False)
+                        and (getattr(star, 'name', '') == 'astrbot_plugin_smart_imagechat_hub'
+                             or getattr(star, 'root_dir_name', '') == 'astrbot_plugin_smart_imagechat_hub')):
+                    imagehub = getattr(star, 'star_cls', None)
+                    stats = getattr(imagehub, '_latency_emoji_stats', None)
+                    if isinstance(stats, dict):
+                        get_config = getattr(imagehub, '_proactive_emoji_config', None)
+                        config = get_config() if callable(get_config) else {}
+                        emoji = {'trigger_probability': config.get('trigger_probability') if isinstance(config, dict) else None,
+                                 'stats': deepcopy(stats)}
+                    break
         return {'enabled': self._cfg('latency_optimization_enabled', False),
                 'review_policy': self._cfg('review_policy', 'all'),
                 'target_seconds': self._cfg('reply_latency_target_seconds', 30),
                 'work': work.status() if work else {}, 'learning': learning.snapshot() if learning else {},
-                'prediction': getattr(self, '_prediction_stats', {}), 'timings': self._latency_summary()}
+                'prediction': getattr(self, '_prediction_stats', {}), 'emoji': emoji,
+                'timings': self._latency_summary()}

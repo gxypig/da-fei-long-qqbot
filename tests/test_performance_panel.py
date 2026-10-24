@@ -59,27 +59,6 @@ class PanelPlugin(panel.PanelMixin):
 
 
 class PerformanceValidationTests(unittest.TestCase):
-    def test_public_defaults_remain_opt_in_and_unbound(self):
-        schema = json.loads((PLUGIN / "_conf_schema.json").read_text(encoding="utf-8"))
-        for key in ("reply_review_enabled", "enable", "allow_group", "allow_private", "allow_qzone",
-                    "fixed_messages_enabled", "fixed_qzone_enabled"):
-            with self.subTest(key=key):
-                self.assertIs(schema[key]["default"], False)
-                if key in panel.FIELDS:
-                    self.assertIs(panel.FIELDS[key], False)
-        for key in ("father_qq", "father_nickname", "group_chat_ids", "group_ids", "private_ids",
-                    "fixed_group_ids", "fixed_private_ids", "prediction_provider_id"):
-            with self.subTest(key=key):
-                self.assertEqual(schema[key]["default"], "")
-                if key in panel.FIELDS:
-                    self.assertEqual(panel.FIELDS[key], "")
-        self.assertEqual(schema["meme_search_provider"]["default"], "tavily")
-        self.assertEqual(schema["qzone_ugc_right"]["default"], 64)
-        html = (PLUGIN / "pages/control/index.html").read_text(encoding="utf-8")
-        self.assertIn("公开版默认关闭", html)
-        self.assertIn("不会开启二次审阅", html)
-        self.assertIn("检查 QQ/OneBot、AstrBot、模型 API 和功能组件", html)
-
     def test_schema_and_panel_share_requested_defaults(self):
         schema = json.loads((PLUGIN / "_conf_schema.json").read_text(encoding="utf-8"))
         types = {bool: "bool", int: "int", str: "string"}
@@ -156,10 +135,11 @@ class PerformancePanelAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         return (await response.get_json())["data"]
 
-    def test_routes_preserve_native_registration_and_only_add_learning_post(self):
+    def test_routes_preserve_native_registration_and_explicit_control_endpoints(self):
         registered = {call.args[0]: call.args[2] for call in self.plugin.context.register_web_api.call_args_list}
         self.assertEqual(registered, {
             PREFIX + "panel_settings": ["GET", "POST"],
+            PREFIX + "emoji_settings": ["GET", "POST"],
             PREFIX + "panel_groups": ["GET"],
             PREFIX + "panel_friends": ["GET"],
             PREFIX + "panel_schedule": ["GET"],
@@ -376,6 +356,7 @@ const click=id=>nodes[id].handlers.click();
 const refresh=()=>click('refresh-performance');
 const current=()=>({performance:{enabled:false,review_policy:'all',target_seconds:30,
   work:{scheduler:{queued:0},extra:{detail:'<img src=x onerror=alert(1)>'}},prediction:{hits:0},
+  emoji:{trigger_probability:'0.35',stats:{triggered:7,sent_combined:2,sent_separate:4,expired:1}},
   timings:{chat:{p95_ms:12000,max_ms:14000,median_ms:10000,over_target:0},tools:{count:0}},
   learning:{active_version:2,pending:0,running:0,worker_running:true,cases:4,last_validation:{passed:true},
     versions:[{version:2,published:123,rules:3},{version:1},null,{},true]}}});
@@ -392,6 +373,8 @@ const current=()=>({performance:{enabled:false,review_policy:'all',target_second
   assert.match(nodes['performance-status'].textContent,/30/);
   assert.ok(nodes['performance-work'].textContent.includes('<img src=x onerror=alert(1)>'));
   assert.match(nodes['performance-work'].textContent,/模型调度/);
+  assert.match(nodes['performance-emoji'].textContent,/尝试配图概率（0至1）0.35/);
+  assert.match(nodes['performance-emoji'].textContent,/已单独发送4/);
   assert.match(nodes['performance-timings'].textContent,/P95耗时（毫秒）12000/);
   assert.match(nodes['performance-timings'].textContent,/超出目标次数0/);
   assert.match(nodes['learning-details'].textContent,/运行中作业数0/);

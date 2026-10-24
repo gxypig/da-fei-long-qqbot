@@ -36,6 +36,7 @@ REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句�
 _receipt = ContextVar("qqbot_review_receipt", default=None)
 _request_scope = ContextVar("qqbot_review_request", default=None)
 _delivery_check = ContextVar("qqbot_delivery_check", default=None)
+_attachment_check = ContextVar("qqbot_attachment_check", default=None)
 _approved = ContextVar("qqbot_review_approved", default=None)
 
 
@@ -61,6 +62,21 @@ def delivery_policy(check):
         yield
     finally:
         _delivery_check.reset(token)
+
+
+@contextmanager
+def attachment_policy(check):
+    """Synchronous attachment-only check after review and before transport.
+
+    ``check(action, params)`` may remove its own attachments in place and returns
+    None. Text and recipients have already passed review and must be retained.
+    The callback runs in the sending task; nested/concurrent scopes are isolated.
+    """
+    token = _attachment_check.set(check)
+    try:
+        yield
+    finally:
+        _attachment_check.reset(token)
 
 
 def bind_request(origin, recent, management, character=None):
@@ -258,6 +274,9 @@ def install_outbound_guard(plugin, reviewer):
         if platform is not None and getattr(platform, "bot", None) is bot:
             original = copy.deepcopy(params)
             params = await guard.prepare(action, params)
+            attachment_check = _attachment_check.get()
+            if attachment_check:
+                attachment_check(action, params)
             check = _delivery_check.get()
             if check and action.removesuffix("_async") in {"send_msg", "send_private_msg", "send_group_msg", "send_qzone_msg"}:
                 await check()

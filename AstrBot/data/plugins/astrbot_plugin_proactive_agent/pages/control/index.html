@@ -31,6 +31,7 @@
     <div class="card-grid"><article class="card"><h2>父亲身份</h2><label for="father_qq">父亲 QQ 号（留空表示不绑定）</label><input id="father_qq" type="text" inputmode="numeric" maxlength="20"><label for="father_nickname">父亲昵称（仅作本机备注）</label><input id="father_nickname" type="text" maxlength="80"><p>只按消息真实发送者的QQ识别；昵称和头像不授予身份，也不改变管理员权限</p></article>
     <article class="card"><h2>偶尔带一个 Emoji</h2><label for="emoji_probability">每轮允许使用的概率（%）</label><input id="emoji_probability" type="number" min="0" max="100" required><p>默认18%，允许时由模型判断是否合适，最多一个。0表示禁用；严肃求助不添加</p></article></div>
     <div class="card-grid"><article class="card"><h2>偶尔称呼父亲</h2><label for="father_address_probability">每轮允许称呼爸 / 老爸的概率（%）</label><input id="father_address_probability" type="number" min="0" max="100" required><p>默认20%。父亲关系始终保留，只调整称呼频率；0表示直接说话，不加称呼</p></article><article class="card"><h2>表情包发送方式</h2><label for="meme_separate_probability">表情包另发一条的概率（%）</label><input id="meme_separate_probability" type="number" min="0" max="100" required><p>默认50%，其余与文字放在一起。0总是合并，100总是分开；只作用于聊天自动配的图库表情，不影响生图附件</p></article></div>
+    <article class="card"><h2>自动表情包概率</h2><label for="emoji-probability-percent">每轮尝试配图库表情包的概率（%）</label><input id="emoji-probability-percent" form="emoji-settings-form" type="number" min="0" max="100" step="any" required disabled aria-describedby="emoji-probability-hint"><p id="emoji-probability-hint">读取图库当前设置。自动配图开启后，0%停止自动配图，100%每轮尝试；仍需图片适合语气、正文发送成功。与上面的文字 Emoji（例如😅）概率、表情包另发一条的概率分别设置，不影响明确找图或生图请求。</p><div class="inline"><button id="save-emoji-probability" type="submit" form="emoji-settings-form" disabled>保存表情包概率</button><button id="reload-emoji-probability" type="button" class="secondary">重新读取表情包概率</button></div><p id="emoji-probability-status" role="status" aria-live="polite">正在读取图库设置…</p><p>此项单独保存，直接写入图库原配置；仅图库插件未加载或未激活时不可修改。自动配图关闭时可预先设置概率，保存不会自动开启。</p></article>
     <p class="callout">设置下一轮生效，无需重启；主动消息分别选话题，并检查本对象历史与近期重复正文</p>
   </section>
   <section id="performance" class="tab-panel" hidden>
@@ -47,6 +48,7 @@
     <article class="card"><h2>回复预测</h2><label class="toggle"><input id="reply_prediction_enabled" type="checkbox">允许回复预测（默认开启，供延迟优化调度使用）</label><label for="prediction_provider_id">预测模型提供商 ID</label><input id="prediction_provider_id" type="text" placeholder="留空使用插件默认提供商" autocomplete="off"><p>更改后保存设置，后续预测读取新的提供商选择。</p></article>
     <h2 class="status-heading">当前运行状态</h2><p id="performance-status" role="status" aria-live="polite">打开本页后读取运行状态</p>
     <div class="card-grid"><article class="card"><h2>调度工作</h2><div id="performance-work">暂无状态</div></article><article class="card"><h2>预测统计</h2><div id="performance-prediction">暂无状态</div></article></div>
+    <article class="card"><h2>表情包发送情况</h2><p>概率沿用智能图片对话插件设置，每轮只抽一次。需要图片适合语气、正文发送成功才会配图；计数从本次加载插件开始</p><div id="performance-emoji">尚未提供表情统计</div></article>
     <article class="card"><h2>正文与工具耗时</h2><p>按服务返回的分类展示；正文目标计到真实发送，工具任务单列，不混算。</p><div id="performance-timings">暂无耗时数据</div></article>
     <p class="footnote">首次升级后请重载插件。若状态提示服务尚未就绪，重载后刷新；状态刷新不会覆盖尚未保存的设置。</p>
   </section>
@@ -59,6 +61,7 @@
   </section>
   <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
   </form>
+  <form id="emoji-settings-form"></form>
   <section id="health" class="tab-panel" hidden><div class="section-head"><div><h2>看看每一段连接是否正常</h2><p>检查 QQ/OneBot、AstrBot、模型 API 和功能组件，不会试发群消息或动态</p></div><button class="secondary" id="refresh-health">刷新结果</button></div>
     <div class="callout">全项目检查修复已独立：请在电脑的 QQBot 项目目录双击「一键检查修复.bat」。即使 AstrBot 控制台打不开，也能检查并修复；这里仅显示上次运行报告</div>
     <p id="job-status" role="status">尚未读取检查状态</p><div id="health-summary" class="callout"></div><div id="health-results"></div>

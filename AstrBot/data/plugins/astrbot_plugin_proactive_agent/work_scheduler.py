@@ -36,6 +36,7 @@ TAIL_GUARD_MARKER = '[QQBOT_CASUAL_TAIL_GUARD_V1]'
 _kind = ContextVar('qqbot_model_work_kind', default=None)
 _lease = ContextVar('qqbot_model_work_lease', default=None)
 _reply = ContextVar('qqbot_reply_work', default=None)
+_prediction_turn = ContextVar('qqbot_prediction_admission', default=None)
 _DONE = object()
 _HEDGE_SKIPPED = object()
 _STATE_KEY = '_qqbot_work_state'
@@ -97,6 +98,52 @@ def provider_key(provider):
     return f'{identity[0]}:{digest}'
 
 
+def _copy_fields(value, **updates):
+    if isinstance(value, dict):
+        return {**value, **updates}
+    model_copy = getattr(value, 'model_copy', None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    copied = copy.copy(value)
+    for key, item in updates.items():
+        setattr(copied, key, item)
+    return copied
+
+
+def _strip_system_content(content):
+    """Copy only marked system text; retain typed parts and their metadata."""
+    if isinstance(content, str):
+        return content.replace(TAIL_GUARD_MARKER, ''), TAIL_GUARD_MARKER in content
+    if not isinstance(content, (list, tuple)):
+        return content, False
+    result, changed = [], False
+    for part in content:
+        body = _field(part, 'text')
+        if (_field(part, 'type') in {'text', 'input_text', 'output_text'}
+                and isinstance(body, str) and TAIL_GUARD_MARKER in body):
+            part = _copy_fields(part, text=body.replace(TAIL_GUARD_MARKER, ''))
+            changed = True
+        result.append(part)
+    return (tuple(result) if isinstance(content, tuple) else result, True) if changed else (content, False)
+
+
+def _strip_context_guard(contexts):
+    # The real ToolLoopAgentRunner embeds the system prompt in Message objects.
+    # Never consume arbitrary iterators, mutate history, or interpret a marker
+    # in user/tool/assistant content as trusted admission to the optional race.
+    if not isinstance(contexts, (list, tuple)):
+        return contexts, False
+    result, changed = [], False
+    for message in contexts:
+        if _field(message, 'role') in {'system', 'developer'}:
+            content, marked = _strip_system_content(_field(message, 'content'))
+            if marked:
+                message = _copy_fields(message, content=content)
+                changed = True
+        result.append(message)
+    return (tuple(result) if isinstance(contexts, tuple) else result, True) if changed else (contexts, False)
+
+
 def _strip_tail_guard(signature, provider, args, kwargs):
     """Remove our local marker without changing other arguments or defaults.
 
@@ -109,15 +156,21 @@ def _strip_tail_guard(signature, provider, args, kwargs):
     values = dict(bound.arguments.get(extras, {})) if extras else {}
     values.update({name: value for name, value in bound.arguments.items()
                    if name != extras and name != next(iter(signature.parameters))})
-    system = values.get('system_prompt')
-    if not isinstance(system, str) or TAIL_GUARD_MARKER not in system:
+    replacements = {}
+    system, marked = _strip_system_content(values.get('system_prompt'))
+    if marked:
+        replacements['system_prompt'] = system
+    contexts, marked = _strip_context_guard(values.get('contexts'))
+    if marked:
+        replacements['contexts'] = contexts
+    if not replacements:
         return args, kwargs, None
-    system = system.replace(TAIL_GUARD_MARKER, '')
-    if 'system_prompt' in bound.arguments:
-        bound.arguments['system_prompt'] = system
-    else:
-        bound.arguments[extras] = {**bound.arguments[extras], 'system_prompt': system}
-    values['system_prompt'] = system
+    for key, value in replacements.items():
+        if key in bound.arguments:
+            bound.arguments[key] = value
+        else:
+            bound.arguments[extras] = {**bound.arguments[extras], key: value}
+        values[key] = value
     return bound.args[1:], bound.kwargs, values
 
 
@@ -137,6 +190,30 @@ def _has_current_tools(contexts):
             return False
         if role == 'tool' or (role == 'assistant' and _field(message, 'tool_calls')):
             return True
+    return False
+
+
+def _has_current_media(values):
+    def media(content):
+        if content is None or isinstance(content, str):
+            return False
+        if not isinstance(content, (list, tuple)):
+            return True
+        return any(_field(part, 'type') not in {'text', 'input_text', 'output_text', 'think', 'reasoning'}
+                   for part in content)
+
+    if media(values.get('extra_user_content_parts')):
+        return True
+    contexts = values.get('contexts')
+    if contexts is None:
+        return False
+    if not isinstance(contexts, (list, tuple)):
+        return True
+    for message in reversed(contexts):
+        if media(_field(message, 'content')):
+            return True
+        if _field(message, 'role') == 'user':
+            break
     return False
 
 
@@ -174,6 +251,8 @@ class _Job:
     sequence: int
     ready: asyncio.Future
     trace_id: str | None = None
+    trace: object = None
+    after_primary: bool = False
     started: float | None = None
     worker: asyncio.Task | None = None
     paused: bool = False
@@ -253,6 +332,13 @@ class ModelScheduler:
             if job.ready.cancelled():
                 self._waiting.remove(job)
                 continue
+            if job.after_primary and not job.trace.primary_admitted:
+                if not job.trace.live:
+                    # The parent stopped before submitting its model request.
+                    # Release the orphan waiter; never start a stale prediction.
+                    self._waiting.remove(job)
+                    job.ready.cancel()
+                continue
             if job.kind == 'background' and not idle:
                 continue
             running = [item for item in self._active if item.key == job.key]
@@ -263,6 +349,8 @@ class ModelScheduler:
             self._waiting.remove(job)
             job.started = now
             self._active.add(job)
+            if job.kind == 'interactive' and job.trace is not None:
+                job.trace.primary_admitted = True
             job.ready.set_result(None)
         if (self._idle_since is not None and not idle
                 and any(job.kind == 'background' for job in self._waiting)):
@@ -288,6 +376,13 @@ class ModelScheduler:
         scope = _reply.get()
         if scope and scope.trace.live and scope.trace.runtime.scheduler is self:
             job.trace_id = scope.trace.trace_id
+            job.trace = scope.trace
+        prediction = _prediction_turn.get()
+        if (kind == 'auxiliary' and prediction is not None
+                and prediction.runtime.scheduler is self):
+            job.trace = prediction
+            job.trace_id = prediction.trace_id
+            job.after_primary = True
         self._sources.add(key)
         self._waiting.append(job)
         self._pump()
@@ -373,7 +468,7 @@ class ModelScheduler:
             self._release(job)
             self._report(job, outcome)
 
-    async def stream(self, provider, factory, *, kind=None):
+    async def stream(self, provider, factory, *, kind=None, is_final=None):
         """Pull-driven stream: no buffering/prefetch, tools remain in the consumer.
 
         A dedicated model worker can be stopped even between yields without
@@ -384,6 +479,10 @@ class ModelScheduler:
             iterator = factory()
             try:
                 async for item in iterator:
+                    if is_final and is_final(item):
+                        await _aclose(iterator)
+                        yield item
+                        return
                     yield item
             finally:
                 await _aclose(iterator)
@@ -406,8 +505,17 @@ class ModelScheduler:
                         if not reply.done():
                             reply.set_result(_DONE)
                         return
+                    complete = bool(is_final and is_final(item))
+                    if complete:
+                        # The real Runner stops pulling after the final response.
+                        # Finish model I/O now rather than retaining its slot until
+                        # async-generator GC, potentially across review/tool work.
+                        await _aclose(iterator)
+                        iterator = None
                     if not reply.done():
                         reply.set_result(item)
+                    if complete:
+                        return
             finally:
                 try:
                     if iterator is not None:
@@ -473,7 +581,9 @@ class ModelScheduler:
             }
         return {'closed': self._closed, 'busy': self.busy(), 'foreground': self._foreground,
                 'idle_ms': None if self._idle_since is None else round((now - self._idle_since) * 1000),
-                'running': len(self._active), 'waiting': len(self._waiting), 'providers': providers}
+                'running': len(self._active), 'waiting': len(self._waiting), 'providers': providers,
+                'predictions_awaiting_primary': sum(job.after_primary and not job.trace.primary_admitted
+                                                   for job in self._waiting)}
 
     async def close(self):
         self._closed = True
@@ -579,6 +689,7 @@ class _Trace:
     reply_depth: int = 0
     foreground_scope: object = None
     hedge_used: bool = False
+    primary_admitted: bool = False
     live: bool = True
     delivered: bool = False
     stages: dict = field(default_factory=dict)
@@ -626,6 +737,25 @@ class WorkRuntime:
                 'incomplete_deliveries': self._incomplete, 'audit_errors': self._audit_errors,
                 'hedge': dict(self._hedge_stats)}
 
+    @contextmanager
+    def prediction_work(self, event):
+        """Hold only speculative prediction until this turn's foreground starts.
+
+        This wait owns no model slot. Once the foreground is admitted, the
+        existing shared limit permits prediction in parallel in spare capacity.
+        Detached previews and other auxiliary work retain their existing path.
+        """
+        state = _extra(event, _STATE_KEY)
+        if (not self.enabled or not isinstance(state, _Trace) or state.runtime is not self
+                or not state.live or state.reply_owner is None):
+            yield
+            return
+        token = _prediction_turn.set(state)
+        try:
+            yield
+        finally:
+            _prediction_turn.reset(token)
+
     def _hedge_seconds(self):
         value = _config_get(self.cfg, 'reply_hedge_after_seconds', 15)
         try:
@@ -640,7 +770,8 @@ class WorkRuntime:
                 or (_kind.get() or 'interactive') != 'interactive' or _lease.get() is not None
                 or not scope or scope.trace.reply_owner is None or scope.trace.hedge_used
                 or scope.trace.delivered or values.get('image_urls') or values.get('audio_urls')
-                or values.get('tool_calls_result') or _has_current_tools(values.get('contexts'))):
+                or values.get('tool_calls_result') or _has_current_tools(values.get('contexts'))
+                or _has_current_media(values)):
             return None
         return scope.trace
 
@@ -671,6 +802,11 @@ class WorkRuntime:
             # read-only schema source, never deepcopy or call those handlers.
             tool = values.get('func_tool')
             memo = {id(tool): tool} if tool is not None else {}
+            # The runner's live cancellation event may already contain a waiter.
+            # Share this control signal, not a deep-copied event/asyncio Future.
+            abort_signal = values.get('abort_signal')
+            if isinstance(abort_signal, asyncio.Event):
+                memo[id(abort_signal)] = abort_signal
             first_args, first_kwargs = copy.deepcopy((args, kwargs), memo.copy())
             second_args, second_kwargs = copy.deepcopy((args, kwargs), memo.copy())
             template = _isolated_provider(provider)
@@ -1001,6 +1137,7 @@ def install_work_runtime(plugin):
     from astrbot.core.pipeline.scheduler import PipelineScheduler
     from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
     from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
+    from astrbot.core.provider.entities import LLMResponse
     from .conversation_review import _receipt
 
     previous_process = InternalAgentSubStage.process
@@ -1046,7 +1183,8 @@ def install_work_runtime(plugin):
         if not runtime.enabled:
             iterator = previous_stream(provider, *args, **kwargs)
         else:
-            iterator = runtime.scheduler.stream(provider, lambda: previous_stream(_isolated_provider(provider), *args, **kwargs))
+            iterator = runtime.scheduler.stream(provider, lambda: previous_stream(_isolated_provider(provider), *args, **kwargs),
+                is_final=lambda item: isinstance(item, LLMResponse) and not item.is_chunk)
         try:
             async for item in iterator:
                 yield item

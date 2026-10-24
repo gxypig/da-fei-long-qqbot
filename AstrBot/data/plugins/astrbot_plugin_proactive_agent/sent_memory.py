@@ -40,7 +40,11 @@ class SentMemory:
         with self.connect() as db:
             # A first-ever proactive send has no conversation yet. Adopt it once;
             # resetting/switching the conversation then naturally hides old memory.
-            if cid:
+            # Even a no-op UPDATE takes a write lock. Probe on this connection;
+            # the UPDATE predicate still arbitrates concurrent claims/deletions.
+            if cid and db.execute(
+                'SELECT 1 FROM sent WHERE origin=? AND cid IS NULL LIMIT 1', (origin,)
+            ).fetchone() is not None:
                 db.execute('UPDATE sent SET cid=? WHERE origin=? AND cid IS NULL', (cid, origin))
             rows = db.execute('SELECT at,text,kind FROM sent WHERE origin=? AND cid IS ? AND at>=? ORDER BY id DESC LIMIT 8',
                               (origin, cid, self.clock() - 7 * 86400)).fetchall()

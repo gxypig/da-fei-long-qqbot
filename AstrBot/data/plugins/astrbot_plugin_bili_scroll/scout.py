@@ -105,148 +105,141 @@ async def bounded_batch(coroutines, seconds):
 async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
     keyword = clean(keyword, 40)
     ups = split_words(up_list)[:12]
-    key = ('chishi', client.identity(), keyword, tuple(ups), bool(mygo))
-    async with client.lock:
-        cached = client.cache.get(key)
-        if not cached or time.time() - cached[0] > 300:
-            pool, inspected, warnings = {}, [], []
-            failures = 0
-            started = time.monotonic()
+    key = ('chishi', client._read_identity(), keyword, tuple(ups), bool(mygo))
+    async def build():
+        pool, inspected, warnings = {}, [], []
+        failures = 0
+        started = time.monotonic()
 
-            def add(row, source):
-                if not isinstance(row, dict):
-                    return
-                try:
-                    item = video(row)
-                except (ValueError, TypeError):
-                    return
-                if not item:
-                    return
-                old = pool.get(item['bvid'])
-                if old:
-                    if source not in old['sources']:
-                        old['sources'].append(source)
-                    return
-                if len(pool) < 800:
-                    item['sources'] = [source]
-                    pool[item['bvid']] = item
+        def add(row, source):
+            if not isinstance(row, dict):
+                return
+            try:
+                item = video(row)
+            except (ValueError, TypeError):
+                return
+            if not item:
+                return
+            old = pool.get(item['bvid'])
+            if old:
+                if source not in old['sources']:
+                    old['sources'].append(source)
+                return
+            if len(pool) < 800:
+                item['sources'] = [source]
+                pool[item['bvid']] = item
 
-            async def search(word, order, page, source, recent=False):
-                nonlocal failures
-                try:
+        async def search(word, order, page, source, recent=False):
+            nonlocal failures
+            try:
+                data = await client.get('/x/web-interface/search/type',
+                    {'search_type': 'video', 'keyword': word, 'order': order, 'page': page})
+                for row in (data.get('result') or [])[:20]:
+                    if recent and not time.time() - 7 * 86400 <= int(row.get('pubdate') or 0) <= time.time():
+                        continue
+                    add(row, source)
+            except (BiliUnavailable, ValueError, TypeError):
+                failures += 1
+
+        async def up_feed(name):
+            try:
+                uid = name
+                if not name.isdigit():
                     data = await client.get('/x/web-interface/search/type',
-                        {'search_type': 'video', 'keyword': word, 'order': order, 'page': page})
-                    for row in (data.get('result') or [])[:20]:
-                        if recent and not time.time() - 7 * 86400 <= int(row.get('pubdate') or 0) <= time.time():
-                            continue
-                        add(row, source)
-                except (BiliUnavailable, ValueError, TypeError):
-                    failures += 1
+                        {'search_type': 'bili_user', 'keyword': name, 'page': 1})
+                    match = next((r for r in data.get('result', []) if r.get('uname') == name), None)
+                    if not match:
+                        raise BiliUnavailable('未找到精确昵称')
+                    uid = str(match['mid'])
+                for page in (1, 2):
+                    data = await client.get('/x/space/arc/search',
+                        {'mid': uid, 'pn': page, 'ps': 30, 'order': 'pubdate'})
+                    rows = (data.get('list') or {}).get('vlist')
+                    if not isinstance(rows, list):
+                        raise BiliUnavailable('匿名接口未返回投稿列表')
+                    for row in rows:
+                        if time.time() - 7 * 86400 <= int(row.get('created') or 0) <= time.time():
+                            add(row, 'up:' + name)
+            except (BiliUnavailable, ValueError, TypeError, KeyError) as exc:
+                warnings.append(f'UP「{clean(name, 40)}」读取受限或无精确匹配；已跳过该来源')
 
-            async def up_feed(name):
-                try:
-                    uid = name
-                    if not name.isdigit():
-                        data = await client.get('/x/web-interface/search/type',
-                            {'search_type': 'bili_user', 'keyword': name, 'page': 1})
-                        match = next((r for r in data.get('result', []) if r.get('uname') == name), None)
-                        if not match:
-                            raise BiliUnavailable('未找到精确昵称')
-                        uid = str(match['mid'])
-                    for page in (1, 2):
-                        data = await client.get('/x/space/arc/search',
-                            {'mid': uid, 'pn': page, 'ps': 30, 'order': 'pubdate'})
-                        rows = (data.get('list') or {}).get('vlist')
-                        if not isinstance(rows, list):
-                            raise BiliUnavailable('匿名接口未返回投稿列表')
-                        for row in rows:
-                            if time.time() - 7 * 86400 <= int(row.get('created') or 0) <= time.time():
-                                add(row, 'up:' + name)
-                except (BiliUnavailable, ValueError, TypeError, KeyError) as exc:
-                    warnings.append(f'UP「{clean(name, 40)}」读取受限或无精确匹配；已跳过该来源')
+        words = [keyword] if keyword else list(CHISHI_WORDS)
+        tasks = [up_feed(name) for name in ups]
+        # Interleave lanes so a limited anonymous request budget covers all sources.
+        for page in (1, 2):
+            for order in ('totalrank', 'pubdate'):
+                tasks.extend(search(w, order, page, 'kw:' + w) for w in words)
+                if page == 1 and order == 'totalrank':
+                    tasks.extend(search(w, 'pubdate', 1, 'new7d:' + w, True)
+                                 for w in ('赤石', '大份视频', '抽象视频'))
+                    if mygo:
+                        tasks.extend(search(w, 'totalrank', 1, 'mygo:' + w) for w in MYGO_WORDS)
+        if await bounded_batch(tasks, 22):
+            warnings.append('召回达到时间预算，仅使用已取得的候选')
 
-            words = [keyword] if keyword else list(CHISHI_WORDS)
-            tasks = [up_feed(name) for name in ups]
-            # Interleave lanes so a limited anonymous request budget covers all sources.
-            for page in (1, 2):
-                for order in ('totalrank', 'pubdate'):
-                    tasks.extend(search(w, order, page, 'kw:' + w) for w in words)
-                    if page == 1 and order == 'totalrank':
-                        tasks.extend(search(w, 'pubdate', 1, 'new7d:' + w, True)
-                                     for w in ('赤石', '大份视频', '抽象视频'))
-                        if mygo:
-                            tasks.extend(search(w, 'totalrank', 1, 'mygo:' + w) for w in MYGO_WORDS)
-            if await bounded_batch(tasks, 22):
-                warnings.append('召回达到时间预算，仅使用已取得的候选')
+        async def related(item):
+            nonlocal failures
+            try:
+                rows = await client.get('/x/web-interface/archive/related', {'bvid': item['bvid']})
+                for row in rows[:18]:
+                    add(row, 'related:' + item['bvid'])
+            except (BiliUnavailable, TypeError):
+                failures += 1
 
-            async def related(item):
-                nonlocal failures
-                try:
-                    rows = await client.get('/x/web-interface/archive/related', {'bvid': item['bvid']})
-                    for row in rows[:18]:
-                        add(row, 'related:' + item['bvid'])
-                except (BiliUnavailable, TypeError):
-                    failures += 1
+        seeds = sorted(pool.values(), key=lambda x: -x.get('play', 0))[:3]
+        if await bounded_batch([related(x) for x in seeds], 6):
+            warnings.append('相关推荐读取超时，保留其他来源')
 
-            seeds = sorted(pool.values(), key=lambda x: -x.get('play', 0))[:3]
-            if await bounded_batch([related(x) for x in seeds], 6):
-                warnings.append('相关推荐读取超时，保留其他来源')
-
-            alive = [x for x in pool.values() if x['replies'] >= 8]
-            def prescore(item):
-                title_hit = 2 * any(w in item['title'] for w in ('赤石', '大份', '大粪', '散装', '抽象', '猎奇'))
-                up_hit = 1.5 * any(s.startswith('up:') for s in item['sources'])
-                return title_hit + up_hit + min(1, math.log10(item['replies'] + 1) / 3.2)
-            chosen = {x['bvid']: x for x in sorted(alive, key=prescore, reverse=True)[:12]}
-            # Keep each original keyword lane represented; a broad high-volume
-            # keyword otherwise consumes every slot before "大份/散装" is inspected.
-            for word in words:
-                lane = sorted((x for x in alive if 'kw:' + word in x['sources']), key=prescore, reverse=True)
-                added = 0
-                for item in lane:
-                    if item['bvid'] not in chosen:
-                        chosen[item['bvid']] = item
-                        added += 1
-                    if added >= 4 or len(chosen) >= MAX_SCAN:
-                        break
-            for item in sorted(alive, key=lambda x: -x['replies']):
-                if len(chosen) >= MAX_SCAN:
+        alive = [x for x in pool.values() if x['replies'] >= 8]
+        def prescore(item):
+            title_hit = 2 * any(w in item['title'] for w in ('赤石', '大份', '大粪', '散装', '抽象', '猎奇'))
+            up_hit = 1.5 * any(s.startswith('up:') for s in item['sources'])
+            return title_hit + up_hit + min(1, math.log10(item['replies'] + 1) / 3.2)
+        chosen = {x['bvid']: x for x in sorted(alive, key=prescore, reverse=True)[:12]}
+        # Keep each original keyword lane represented; a broad high-volume
+        # keyword otherwise consumes every slot before "大份/散装" is inspected.
+        for word in words:
+            lane = sorted((x for x in alive if 'kw:' + word in x['sources']), key=prescore, reverse=True)
+            added = 0
+            for item in lane:
+                if item['bvid'] not in chosen:
+                    chosen[item['bvid']] = item
+                    added += 1
+                if added >= 4 or len(chosen) >= MAX_SCAN:
                     break
-                chosen.setdefault(item['bvid'], item)
+        for item in sorted(alive, key=lambda x: -x['replies']):
+            if len(chosen) >= MAX_SCAN:
+                break
+            chosen.setdefault(item['bvid'], item)
 
-            async def inspect(item):
-                nonlocal failures
-                try:
-                    if not item['aid'] or not item['duration']:
-                        detail = await client.detail(item['bvid'])
-                        if detail:
-                            item.update(detail)
-                    data = await client.get('/x/v2/reply',
-                        {'type': 1, 'oid': item['aid'], 'pn': 1, 'ps': 20, 'sort': 2})
-                    item.update(judge(item, data.get('replies') or []))
-                    inspected.append(item)
-                except (BiliUnavailable, ValueError, TypeError):
-                    failures += 1
+        async def inspect(item):
+            nonlocal failures
+            try:
+                if not item['aid'] or not item['duration']:
+                    detail = await client.detail(item['bvid'])
+                    if detail:
+                        item.update(detail)
+                data = await client.get('/x/v2/reply',
+                    {'type': 1, 'oid': item['aid'], 'pn': 1, 'ps': 20, 'sort': 2})
+                item.update(judge(item, data.get('replies') or []))
+                inspected.append(item)
+            except (BiliUnavailable, ValueError, TypeError):
+                failures += 1
 
-            if await bounded_batch([inspect(x) for x in chosen.values()], 22):
-                warnings.append('热评检查达到时间预算，不发送尚未核验的视频')
-            if failures:
-                warnings.append(f'{failures} 个公开接口请求未成功，未绕过限制')
-            sparse = sum(0 < x['sample_count'] <= 3 for x in inspected)
-            if sparse:
-                warnings.append(f'{sparse} 条候选仅返回不超过3条热评；比例按可见样本计算，可在账号区选择扫码登录')
-            items = sorted((x for x in inspected if x['eligible']), key=lambda x: -x['score'])
-            if not items:
-                warnings.append('没有通过搬屎门槛的视频，本轮不拿普通热门凑数')
-            stats = {'candidates': len(pool), 'scanned': len(inspected), 'qualified': len(items),
-                     'elapsed_seconds': round(time.monotonic() - started, 1)}
-            if key[1] != client.identity():
-                raise BiliUnavailable('浏览账号在读取期间发生变化，请重新预览')
-            client.cache[key] = (time.time(), items, warnings, stats)
-            while len(client.cache) > 32:
-                client.cache.pop(next(iter(client.cache)))
-            cached = client.cache[key]
-        if key[1] != client.identity():
-            raise BiliUnavailable('浏览账号已变化，请重新预览')
-        return {'items': copy.deepcopy([x for x in cached[1] if x['bvid'] not in excluded]),
-                'warnings': list(cached[2]), 'anonymous': client.anonymous, 'mode': 'chishi', 'stats': dict(cached[3])}
+        if await bounded_batch([inspect(x) for x in chosen.values()], 22):
+            warnings.append('热评检查达到时间预算，不发送尚未核验的视频')
+        if failures:
+            warnings.append(f'{failures} 个公开接口请求未成功，未绕过限制')
+        sparse = sum(0 < x['sample_count'] <= 3 for x in inspected)
+        if sparse:
+            warnings.append(f'{sparse} 条候选仅返回不超过3条热评；比例按可见样本计算，可在账号区选择扫码登录')
+        items = sorted((x for x in inspected if x['eligible']), key=lambda x: -x['score'])
+        if not items:
+            warnings.append('没有通过搬屎门槛的视频，本轮不拿普通热门凑数')
+        stats = {'candidates': len(pool), 'scanned': len(inspected), 'qualified': len(items),
+                 'elapsed_seconds': round(time.monotonic() - started, 1)}
+        return (time.time(), items, warnings, stats)
+
+    cached = await client._cached_scan(key, build)
+    return {'items': copy.deepcopy([x for x in cached[1] if x['bvid'] not in excluded]),
+            'warnings': list(cached[2]), 'anonymous': client.anonymous, 'mode': 'chishi', 'stats': dict(cached[3])}

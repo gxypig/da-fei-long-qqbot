@@ -3,6 +3,7 @@
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
   let statusRequest, learningBusy = false, learningRollbackAvailable = false;
+  let emojiRevision, emojiWritable = false, emojiDirty = false, emojiBusy = false;
   const booleans = ['group_flow_enabled','chat_low_latency','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
@@ -52,6 +53,44 @@
     }
     catch(e){notice(e.message,true);}finally{$('save').disabled=!values;}
   }
+  function emojiControls() {
+    $('emoji-probability-percent').disabled=emojiBusy||!emojiWritable;
+    $('save-emoji-probability').disabled=emojiBusy||!emojiWritable||!emojiDirty;
+    $('reload-emoji-probability').disabled=emojiBusy;
+  }
+  function fillEmoji(data) {
+    if(typeof data?.available!=='boolean' || typeof data?.writable!=='boolean'
+      || (data.available && (!Number.isFinite(data.percent)||data.percent<0||data.percent>100
+        || typeof data.revision!=='string'||!data.revision)))throw new Error('图库设置格式不完整，请重新读取');
+    emojiWritable=data.available&&data.writable;emojiRevision=data.revision;emojiDirty=false;
+    $('emoji-probability-percent').value=data.available?data.percent:'';
+    $('emoji-probability-status').textContent=data.message||'已读取图库当前设置';
+  }
+  async function loadEmojiSettings() {
+    if(emojiBusy)return;
+    emojiBusy=true;emojiControls();
+    try{fillEmoji(await api('emoji_settings'));}
+    catch(e){emojiWritable=false;emojiRevision=null;$('emoji-probability-status').textContent='读取失败：'+e.message;}
+    finally{emojiBusy=false;emojiControls();}
+  }
+  async function saveEmojiSettings(event) {
+    event.preventDefault();
+    if(emojiBusy||!emojiWritable||!emojiRevision||!emojiDirty)return;
+    const raw=$('emoji-probability-percent').value.trim(), percent=Number(raw);
+    if(!raw||!Number.isFinite(percent)||percent<0||percent>100){
+      $('emoji-probability-status').textContent='请填写0至100的百分比';return;
+    }
+    emojiBusy=true;emojiControls();$('emoji-probability-status').textContent='正在保存表情包概率…';
+    try{
+      const saved=await api('emoji_settings',{percent,revision:emojiRevision});
+      fillEmoji(saved);
+      $('emoji-probability-status').textContent='表情包概率已保存；'+(saved.message||'图库开关及其他设置保持原样');
+    }catch(e){
+      // Retain the draft on conflict/failure; require a fresh version before retry.
+      emojiWritable=false;emojiRevision=null;
+      $('emoji-probability-status').textContent='保存未完成：'+e.message+'；请重新读取后再保存';
+    }finally{emojiBusy=false;emojiControls();}
+  }
   const statusLabels = {
     enabled:'已启用', review_policy:'审查策略', active:'进行中', running:'运行中作业数', busy:'忙碌',
     pending:'待办', queued:'排队中', queue:'任务队列', completed:'已完成', failed:'失败',
@@ -69,6 +108,11 @@
     samples:'样本数', p95_ms:'P95耗时（毫秒）', median_ms:'中位耗时（毫秒）', max_ms:'最大耗时（毫秒）', over_target:'超出目标次数',
     reply_text_delivery:'正文全程（收到消息至真实发出）', reply_text_send:'正文发送耗时',
     reply_text_deliveries:'正文发送成功次数', incomplete_deliveries:'未完成发送计时', audit_errors:'统计记录错误',
+    trigger_probability:'尝试配图概率（0至1）', triggered:'抽中配图', probability_skipped:'未抽中配图', empty_library:'没有可用图片',
+    selected_prediction:'模型语义选中', selected_local_reply:'按正文就地匹配', no_match:'没有合适图片',
+    sent_combined:'已与正文一起发送', sent_separate:'已单独发送', image_send_failed:'图片发送失败',
+    expired:'补图窗口已过', superseded:'已有更新回复', body_failed:'正文发送失败',
+    changed_before_send:'发送前配置或语气改变', preparation_failed:'图片准备失败',
     mean:'平均值', avg:'平均值', last:'最近一次', max:'最大值', min:'最小值',
   };
   const isRecord = value => value!==null && typeof value==='object' && !Array.isArray(value);
@@ -132,6 +176,7 @@
     $('performance-status').textContent=available?`${mode} · ${policy}${target} · 运行状态已刷新`:'当前运行实例尚未提供性能状态，请确认插件已升级并重载后刷新';
     renderSnapshot('performance-work',performance?.work,'尚未提供调度状态');
     renderSnapshot('performance-prediction',performance?.prediction,'尚未提供预测统计');
+    renderSnapshot('performance-emoji',performance?.emoji,'尚未提供表情统计');
     renderSnapshot('performance-timings',performance?.timings,'尚未提供耗时数据');
     renderLearning(performance?.learning);
     return available;
@@ -215,6 +260,13 @@
   $('refresh-performance').addEventListener('click',refreshPerformance);
   $('refresh-learning').addEventListener('click',refreshPerformance);
   $('learning-rollback').addEventListener('click',rollbackLearning);
+  $('emoji-settings-form').addEventListener('submit',saveEmojiSettings);
+  $('emoji-probability-percent').addEventListener('input',()=>{
+    emojiDirty=true;$('emoji-probability-status').textContent='表情包概率有未保存的修改，请使用本项的保存按钮';emojiControls();
+  });
+  $('reload-emoji-probability').addEventListener('click',()=>{
+    if(!emojiDirty||window.confirm('重新读取会放弃未保存的表情包概率，继续吗？'))return loadEmojiSettings();
+  });
   ['fixed_group_ids','fixed_private_ids'].forEach(k=>$(k).addEventListener('change',renderTargets));
   document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
@@ -224,12 +276,12 @@
     if(['performance','learning'].includes(button.dataset.tab))refreshPerformance();
     if(button.dataset.tab==='health')refreshHealth().then(r=>{if(r)poll();});
   }));
-  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(event.target.id!=='learning-rollback-version')changed();});
+  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(!['learning-rollback-version','emoji-probability-percent'].includes(event.target.id))changed();});
   $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings();});
   $('load-groups').addEventListener('click',loadGroups);$('group_chat_ids').addEventListener('change',renderGroups);
   $('probability-slider').addEventListener('input',()=>{$('group_chat_probability').value=$('probability-slider').value;});
   $('group_chat_probability').addEventListener('input',()=>{$('probability-slider').value=$('group_chat_probability').value;});
   $('refresh-health').addEventListener('click',refreshHealth);
-  window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
-  (async()=>{try{bridge=window.AstrBotPluginView||window.AstrBotPluginPage;if(!bridge)throw new Error('请从 AstrBot 控制台的插件页面打开');await bridge.ready();await loadSettings();await loadTargets();}catch(e){notice(e.message,true);}})();
+  window.addEventListener('beforeunload',event=>{if(dirty||emojiDirty){event.preventDefault();event.returnValue='';}});
+  (async()=>{try{bridge=window.AstrBotPluginView||window.AstrBotPluginPage;if(!bridge)throw new Error('请从 AstrBot 控制台的插件页面打开');await bridge.ready();await Promise.all([loadSettings(),loadEmojiSettings()]);await loadTargets();}catch(e){notice(e.message,true);}})();
 })();

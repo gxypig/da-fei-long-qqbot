@@ -31,6 +31,7 @@ from .visual_intent import generation_kind, generation_note
 from .conversation_style import STYLE, MemeHints, context_note
 from .proactive_policy import decide
 from .conversation_review import REVIEW_SYSTEM, ReplyReviewer, install_outbound_guard, sent_text, bind_request, request_scope, approve_once
+from .tool_prelude import install_tool_prelude, deferred_tool_message, has_deferred_prelude
 from .meme_memory import DETECT_SYSTEM, LEARN_SYSTEM, MemeMemory
 from .meme_prefetch import MemePrefetch
 from .reply_pipeline import ReplyPipelineMixin, PREDICTION_SYSTEM, LOCAL_MEMORY_RULE, TAIL_GUARD_MARKER, casual_tail_allowed, explicit_meme_request, fast_path_issues, current_turn_used_tools
@@ -68,6 +69,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._busy = False
         self._restore_images = None
         self._restore_review = None
+        self._restore_tool_prelude = None
         self._restore_route = None
         self._restore_group_wake = None
         self._recent_messages = {}
@@ -109,6 +111,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._restore_route = install_route_guard(self)
         self._restore_group_wake = install_group_wake(self)
         self._restore_group_flow = install_group_flow(self._group_flow)
+        self._restore_tool_prelude = install_tool_prelude(self)
         self._restore_work = install_work_runtime(self)
         await self._learning.start()
         self.context.register_web_api("/astrbot_plugin_proactive_agent/health", self.health_api, ["GET"], "只读链路和功能健康检查")
@@ -117,7 +120,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.11.0 已加载：并行预判、本地记忆、空闲学习；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.12.0 已加载：并行预判、配图恢复、工具调度；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -135,7 +138,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         except Exception:
             checks["onebot"] = False
         checks['idle_learning'] = bool(self._learning.snapshot().get('worker_running', False))
-        return jsonify({"status": "ok", "data": {"version": "1.11.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.12.0", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -143,7 +146,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats, "group_flow": self._group_flow.stats}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.11.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.12.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -170,6 +173,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         await self._close_reply_pipeline()
         if self._restore_work:
             self._restore_work()
+        if getattr(self, '_restore_tool_prelude', None):
+            self._restore_tool_prelude()
         await self._work.close()
         if self._restore_chat_lane:
             self._restore_chat_lane()
@@ -779,6 +784,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
     @filter.on_llm_request(priority=-100)
     async def enrich_conversation(self, event: AstrMessageEvent, req) -> None:
+        event.set_extra('qqbot_agent_final_done', False)
         text = str(req.prompt or "")
         state = self.character_context(event)
         optimized = self._cfg('latency_optimization_enabled', False)
@@ -855,6 +861,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     @filter.on_agent_done(priority=-800)
     async def prepare_chat_punctuation(self, event: AstrMessageEvent, run_context, response):
         # Run before emoji prefetch (-900) and mandatory review (-1000).
+        getattr(event, 'set_extra', lambda *args: None)('qqbot_agent_final_done', False)
         if response is None or getattr(response, "tools_call_name", None):
             return
         if await self.drop_stale_reply(event, response):
@@ -889,9 +896,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             from astrbot.core.agent.message import TextPart
             parts = messages[-1].content
             messages[-1].content = ([p for p in parts if not isinstance(p, TextPart)] if isinstance(parts, list) else []) + [TextPart(text=response.completion_text)]
-        if not self._cfg('reply_review_enabled', True) and getattr(self, '_work', None):
-            event.set_extra('qqbot_final_text', response.completion_text)
-            self._work.mark(event, 'final_ready')
+        if not self._cfg('reply_review_enabled', True):
+            event.set_extra('qqbot_agent_final_done', getattr(response, 'role', 'assistant') == 'assistant'
+                            and bool((response.completion_text or '').strip()))
+            if getattr(self, '_work', None):
+                event.set_extra('qqbot_final_text', response.completion_text)
+                self._work.mark(event, 'final_ready')
 
     @filter.on_agent_done(priority=-1000)
     async def review_agent_reply(self, event: AstrMessageEvent, run_context, response):
@@ -913,6 +923,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         for message in previous:
             if message.role != "assistant":
                 continue
+            if deferred_tool_message(run_context, message):
+                continue
             content = message.content
             if isinstance(content, str):
                 prior_replies.append(content)
@@ -928,7 +940,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             media = sum(not isinstance(p, Plain) and type(p).__name__ not in {'At', 'Reply'} for p in chain.chain) if chain else 0
             speed = self._cfg('latency_optimization_enabled', False) and self._cfg('review_policy', 'all') == 'speed_first'
             reasons = fast_path_issues(draft, event.get_message_str() or '', mode=mode, media=media,
-                state=state, used_tools=current_turn_used_tools(messages), prediction=self.reply_prediction(event)) if speed else ['full_policy']
+                state=state, used_tools=current_turn_used_tools(messages) or has_deferred_prelude(run_context), prediction=self.reply_prediction(event)) if speed else ['full_policy']
             if not reasons:
                 checked = draft
                 self._prediction_stats['fast_passed'] += 1
@@ -947,6 +959,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 if getattr(self, '_work', None): self._work.mark(event, 'review_done')
         except (Exception, asyncio.CancelledError) as exc:
             # Framework hooks log exceptions and keep going; explicitly stop instead of leaking a draft.
+            getattr(event, 'set_extra', lambda *args: None)('qqbot_agent_final_done', False)
             event.stop_event()
             response.completion_text = ""
             if chain:
@@ -975,6 +988,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         target = group or event.get_sender_id()
         route = f"{event.get_platform_id()}:{'GroupMessage' if group else 'FriendMessage'}:{target}"
         approve_once(route, checked, policy_version=self.review_policy_version() if self._cfg('latency_optimization_enabled', False) else None)
+        getattr(event, 'set_extra', lambda *args: None)('qqbot_agent_final_done',
+            getattr(response, 'role', 'assistant') == 'assistant' and bool(checked.strip()))
         if getattr(self, '_work', None):
             event.set_extra('qqbot_final_text', checked)
             self._work.mark(event, 'final_ready')
@@ -984,6 +999,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if not flow or not flow.stale(event) or getattr(response, 'qqbot_generated_image', False):
             return False
         # Running turns are retained; freshness is checked only before admission.
+        event.set_extra('qqbot_agent_final_done', False)
         event.stop_event()
         response.completion_text = ''
         if response.result_chain:

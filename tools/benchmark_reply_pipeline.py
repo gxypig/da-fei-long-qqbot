@@ -11,6 +11,8 @@ import copy
 import hashlib
 import json
 import logging
+import os
+import random
 from pathlib import Path
 import shutil
 import sqlite3
@@ -22,7 +24,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / 'tests'), str(ROOT)]
+SOURCE_ROOT = Path(os.environ.get('QQBOT_BENCHMARK_SOURCE', str(ROOT))).resolve()
+sys.path[:0] = [str(SOURCE_ROOT / 'tests'), str(ROOT)]
 # This import moves AstrBot's initialization into an isolated temporary folder.
 from test_maintenance import Main
 from test_async_emoji import Event
@@ -43,6 +46,7 @@ from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import WorkRunti
 from data.plugins.astrbot_plugin_smart_imagechat_hub.backend.retrieval import RetrievalMixin
 from data.plugins.astrbot_plugin_smart_imagechat_hub.main import SmartImageSenderPlugin
 from tools.local_admin import api
+from tools.benchmark_runner_latency import build_runner
 
 PROMPTS = [
     '下班了，今天决定奖励自己一杯奶茶', '昨晚熬夜，现在困得眼睛都睁不开',
@@ -105,10 +109,11 @@ async def run(args):
     report = {'kind': 'live_model_synthetic_chat_fake_QQ', 'qq_sends': 0,
               'model': model['model'], 'advertised_tools': [r['name'] for r in active],
               'persona_loaded': bool(persona),
-              'note': 'Real model, prompt enrichment/review/provider scheduler, local meme lookup and full-index emoji recall. Tools never executed; image conversion and QQ delivery mocked. Sequential requests, not a production p95 guarantee.',
+              'runner': 'ToolLoopAgentRunner', 'history_pairs': args.history_pairs,
+              'note': 'Real Runner/model, prompt enrichment/review/provider scheduler, local meme lookup and full-index emoji recall. Final hooks invoked explicitly by the harness. Tools never executed; image conversion and QQ delivery mocked. Sequential requests, not a production p95 guarantee.',
               'requested_count': args.count, 'start_case': args.start_case, 'samples': []}
     report['started_at'] = time.strftime('%Y-%m-%dT%H:%M:%S%z')
-    report['source_sha256'] = {name: hashlib.sha256((ROOT/'AstrBot/data/plugins/astrbot_plugin_proactive_agent'/name).read_bytes()).hexdigest()
+    report['source_sha256'] = {name: hashlib.sha256((SOURCE_ROOT/'AstrBot/data/plugins/astrbot_plugin_proactive_agent'/name).read_bytes()).hexdigest()
                                for name in ('main.py', 'reply_pipeline.py', 'work_scheduler.py', 'conversation_review.py', 'idle_learning.py')}
     report['hedge_after_seconds'] = args.hedge_after
     outfile = ROOT/args.report
@@ -127,6 +132,13 @@ async def run(args):
                              reply_audit_sample_percent=10, model_concurrency=2, emoji_late_grace_seconds=3,
                              reply_hedge_after_seconds=args.hedge_after)
         plugin._data_dir, plugin._timings, plugin._recent_messages = data, {}, {}
+        model_events = []
+        original_audit = plugin._audit
+        def capture_audit(name, fields):
+            if name == 'model_work':
+                model_events.append({key: fields.get(key) for key in ('kind', 'status', 'queue_ms', 'elapsed_ms')})
+            original_audit(name, fields)
+        plugin._audit = capture_audit
         plugin._init_reply_pipeline()
         plugin._auxiliary_lane = AuxiliaryLane()
         gallery = ROOT/'AstrBot/data/plugin_data/astrbot_plugin_smart_imagechat_hub'
@@ -185,6 +197,7 @@ async def run(args):
                 restore_work = install_work_runtime(plugin)
                 consecutive_failures = 0
                 for i in range(args.start_case, args.start_case + args.count):
+                    random.seed(i)
                     text = PROMPTS[i % len(PROMPTS)]
                     group = i % 2 == 0
                     origin = 'aiocqhttp:GroupMessage:100' if group else 'aiocqhttp:FriendMessage:200'
@@ -201,6 +214,7 @@ async def run(args):
                     event.send = event_send
                     row = {'case':i+1, 'chat_kind':'group' if group else 'private', 'synthetic_prompt':text}
                     begin = time.monotonic()
+                    model_event_start = len(model_events)
                     review_before = plugin._reviewer.stats.get('model_calls',0)
                     delivered_before = plugin._work.status()['reply_text_deliveries']
                     try:
@@ -211,16 +225,21 @@ async def run(args):
                                 await image_plugin._start_parallel_proactive_emoji(event, text)
                                 req = SimpleNamespace(prompt=text, system_prompt=persona)
                                 await plugin.enrich_conversation(event, req)
-                                contexts = [{'role':'user','content':'今天忙完了，来聊两句'},
-                                            {'role':'assistant','content':'来吧，本龙刚好闲着'},
-                                            {'role':'user','content':'刚回到家，准备歇一会儿'},
-                                            {'role':'assistant','content':'这班算是让你上明白了，快瘫着吧'}]
-                                response = await provider.text_chat(prompt=req.prompt, system_prompt=req.system_prompt, contexts=contexts,
-                                                                    func_tool=tools, request_max_retries=1)
-                                if response.tools_call_name:
-                                    row['tool_requested'] = list(response.tools_call_name)
+                                contexts = []
+                                for pair in range(args.history_pairs):
+                                    contexts.extend([{'role':'user', 'content':f'第{pair + 1}次闲聊：' + PROMPTS[pair % 30]},
+                                                     {'role':'assistant', 'content':('你这日子过得还挺有节目效果，给本龙都看乐了' if pair % 2 == 0 else '先歇会儿吧，本龙听着呢，今天这出也够折腾的')}])
+                                runner, _, attempts = await build_runner(provider,
+                                    {'prompt': req.prompt, 'system_prompt': req.system_prompt, 'contexts': contexts},
+                                    tools, event=event, request_max_retries=1)
+                                async for item in runner.step():
+                                    if item.type == 'tool_call': runner.request_stop()
+                                response = runner.get_final_llm_resp()
+                                if attempts or not response or response.tools_call_name or runner.was_aborted():
+                                    row['tool_requested'] = bool(attempts or (response and response.tools_call_name))
                                     raise RuntimeError('External tool request: excluded from ordinary complete-text success')
-                                history = SimpleNamespace(messages=[Message(role='user',content=text),Message(role='assistant',content=[TextPart(text=response.completion_text)])])
+                                history = runner.run_context
+                                event.set_extra('qqbot_agent_final_done', True)
                                 await plugin.prepare_chat_punctuation(event, history, response)
                                 await image_plugin._prefetch_reply_emoji(event, response)
                                 await plugin.review_agent_reply(event, history, response)
@@ -234,6 +253,7 @@ async def run(args):
                                 await SmartImageSenderPlugin.after_message_sent(image_plugin,event)
                                 await plugin.record_reply_latency(event)
                                 row.update(ok=True, elapsed_ms=elapsed, reply_chars=len(response.completion_text),
+                                           input_tokens=runner.stats.token_usage.input, cached_input_tokens=runner.stats.token_usage.input_cached,
                                            full_review_calls=plugin._reviewer.stats.get('model_calls',0)-review_before,
                                            delivery_metric=plugin._work.status()['reply_text_deliveries']-delivered_before,
                                            prediction_done=bool(plugin.reply_prediction(event)))
@@ -243,6 +263,7 @@ async def run(args):
                         cleanup = event.get_extra('qqbot_cancel_reply_preparation')
                         if callable(cleanup): await cleanup()
                         await plugin._close_reply_pipeline()
+                        row['model_events'] = model_events[model_event_start:]
                     report['samples'].append(row)
                     consecutive_failures = 0 if row.get('ok') else consecutive_failures + 1
                     report['timings'] = plugin._latency_summary()
@@ -273,5 +294,6 @@ if __name__ == '__main__':
     parser.add_argument('--provider',default='')
     parser.add_argument('--persona',default='龙娘')
     parser.add_argument('--hedge-after',type=float,default=15)
+    parser.add_argument('--history-pairs',type=int,default=2)
     parser.add_argument('--report',default='logs/reply-pipeline-live-benchmark.json')
     asyncio.run(run(parser.parse_args()))

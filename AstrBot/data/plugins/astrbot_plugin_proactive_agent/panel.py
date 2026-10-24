@@ -2,6 +2,7 @@
 import asyncio
 import copy
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -38,6 +39,28 @@ def settings(plugin):
     values = {key: plugin._cfg(key, default) for key, default in FIELDS.items()}
     revision = hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return values, revision
+
+
+EMOJI_CONFIG_KEY = "proactive_emoji_reply"
+EMOJI_UNAVAILABLE = "智能图片对话插件未加载或未启用，不能修改表情包概率；请启用图库后重新读取"
+
+
+def emoji_settings(gallery):
+    """Read the live gallery's source; never store a second probability here."""
+    effective = gallery._proactive_emoji_config()
+    probability = Decimal(str(effective["trigger_probability"]))
+    if not probability.is_finite() or not 0 <= probability <= 1:
+        raise ValueError("图库中的表情包概率不正确，请先检查图库配置")
+    # A plugin reload or any gallery configuration edit invalidates an old page.
+    source = {"instance": id(gallery), "config_instance": id(gallery.config),
+              "config": dict(gallery.config)}
+    revision = hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False,
+                                        allow_nan=False).encode()).hexdigest()
+    enabled = effective.get("enabled") is True
+    return {"available": True, "writable": True, "percent": float(probability * 100),
+            "revision": revision,
+            "message": ("图库自动配图当前开启，后续回复读取此概率" if enabled else
+                        "图库自动配图当前关闭，可以预先设置概率；保存概率不会自动开启")}
 
 
 def validate(data):
@@ -135,6 +158,7 @@ class PanelMixin:
         self._panel_lock = asyncio.Lock()
         for name, handler, methods in [
             ("panel_settings", self.panel_settings_api, ["GET", "POST"]),
+            ("emoji_settings", self.emoji_settings_api, ["GET", "POST"]),
             ("panel_groups", self.panel_groups_api, ["GET"]),
             ("panel_friends", self.panel_friends_api, ["GET"]),
             ("panel_schedule", self.panel_schedule_api, ["GET"]),
@@ -142,6 +166,71 @@ class PanelMixin:
             ("learning_action", self.learning_action_api, ["POST"]),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
+
+    def _emoji_library(self):
+        lookup = getattr(self.context, "get_registered_star", None)
+        meta = lookup("astrbot_plugin_smart_imagechat_hub") if callable(lookup) else None
+        gallery = getattr(meta, "star_cls", None) if getattr(meta, "activated", False) else None
+        if (gallery is None or not isinstance(getattr(gallery, "config", None), dict)
+                or not isinstance(getattr(gallery, "_lock", None), asyncio.Lock)
+                or not callable(getattr(gallery, "_proactive_emoji_config", None))
+                or not callable(getattr(gallery.config, "save_config", None))):
+            return None
+        return gallery
+
+    async def emoji_settings_api(self):
+        # The native /api/plug registration uses AstrBot's dashboard authentication.
+        body = None
+        if request.method == "POST":
+            body = await request.get_json(silent=True)
+            if (not isinstance(body, dict) or set(body) != {"percent", "revision"}
+                    or type(body.get("percent")) not in (int, float)
+                    or not isinstance(body.get("revision"), str) or not body["revision"]):
+                return jsonify({"status": "error", "message": "请提供0至100的百分比和当前版本，刷新后重试"}), 400
+            percent = Decimal(str(body["percent"]))
+            if not percent.is_finite() or not 0 <= percent <= 100:
+                return jsonify({"status": "error", "message": "表情包概率须为0至100的百分比"}), 400
+        gallery = self._emoji_library()
+        if gallery is None:
+            if body is None:
+                return jsonify({"status": "ok", "data": {"available": False, "writable": False,
+                    "percent": None, "revision": None, "message": EMOJI_UNAVAILABLE}})
+            return jsonify({"status": "error", "message": EMOJI_UNAVAILABLE}), 503
+        config = gallery.config
+        # Share the gallery editor's own lock, including edits from its native page.
+        async with gallery._lock:
+            if self._emoji_library() is not gallery or gallery.config is not config:
+                return jsonify({"status": "error", "message": "图库实例已变更，请重新读取后再保存"}), 409
+            try:
+                current = emoji_settings(gallery)
+            except (KeyError, TypeError, ValueError, InvalidOperation):
+                return jsonify({"status": "error", "message": "无法读取图库配置，请检查图库后重新读取"}), 503
+            if body is None:
+                return jsonify({"status": "ok", "data": current})
+            if not current["writable"]:
+                return jsonify({"status": "error", "message": current["message"]}), 503
+            if body["revision"] != current["revision"]:
+                return jsonify({"status": "error", "message": "图库设置已在其他地方变更，请重新读取后再保存"}), 409
+            previous = config.get(EMOJI_CONFIG_KEY)
+            if not isinstance(previous, dict):
+                return jsonify({"status": "error", "message": "图库自动表情包配置不完整，请先检查图库"}), 503
+            updated = copy.deepcopy(previous)
+            updated["trigger_probability"] = format((percent / 100).normalize(), "f")
+            try:
+                config[EMOJI_CONFIG_KEY] = updated
+                if config.save_config() is False:
+                    raise OSError("Gallery did not confirm persistence")
+            except Exception:
+                # Restore only our section; never replace the shared Config instance.
+                config[EMOJI_CONFIG_KEY] = previous
+                try:
+                    if config.save_config() is False:
+                        raise OSError("Gallery rollback did not confirm persistence")
+                except Exception:
+                    return jsonify({"status": "error", "message":
+                        "保存失败，内存概率已恢复；配置文件恢复未能确认，请检查磁盘与权限后重新读取"}), 500
+                return jsonify({"status": "error", "message": "保存失败，原图库配置已恢复，请重新读取后重试"}), 500
+            return jsonify({"status": "ok", "data": emoji_settings(gallery)})
 
     async def panel_settings_api(self):
         if request.method == "GET":

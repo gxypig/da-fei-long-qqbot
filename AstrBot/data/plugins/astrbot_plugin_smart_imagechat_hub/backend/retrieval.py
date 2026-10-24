@@ -56,6 +56,7 @@ class RetrievalMixin(LatencyEmojiMixin):
     async def _prefetch_reply_emoji(self, event, response):
         """Read-only matching overlaps the text review; attachment still happens later."""
         if self._uses_latency_emoji(event):
+            self._latency_reply_preview(event, response)
             return
         await self._cancel_reply_prefetch(event)
         cfg = self._proactive_emoji_config()
