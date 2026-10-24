@@ -67,6 +67,7 @@ class SmartImageSenderPlugin(
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
+        self._init_latency_emoji()
         set_auto_collection_plugin(self)
         self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self.index_path = self.data_dir / "image_index.json"
@@ -130,6 +131,7 @@ class SmartImageSenderPlugin(
         self._start_auto_collection_worker()
 
     async def terminate(self) -> None:
+        await self._terminate_latency_emoji()
         tasks = list(getattr(self, "_reply_prefetch_tasks", ()))
         for task in tasks:
             task.cancel()
@@ -204,6 +206,7 @@ class SmartImageSenderPlugin(
             return
 
         event.set_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, True)
+        self._advance_latency_turn(event)
         event.should_call_llm(True)
 
         await self._sync_library(caption_mode="none")
@@ -314,6 +317,7 @@ class SmartImageSenderPlugin(
 
     @filter.on_llm_request(priority=20)
     async def on_llm_request(self, event: AstrMessageEvent, req):
+        self._advance_latency_turn(event)
         if is_generation_request(event.get_message_str() or ""):
             event.set_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, True)
             return
@@ -324,7 +328,8 @@ class SmartImageSenderPlugin(
 
     @filter.after_message_sent(priority=20)
     async def after_message_sent(self, event: AstrMessageEvent):
-        await self._send_pending_proactive_emoji(event)
+        if not self._after_latency_text_sent(event):
+            await self._send_pending_proactive_emoji(event)
         await self._send_pending_meme_combat_burst(event)
         self._cleanup_deferred_send_image_style_paths(event)
 

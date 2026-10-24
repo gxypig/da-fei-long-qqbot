@@ -210,6 +210,65 @@
     "default": 25,
     "hint": "只淘汰仍在排队且已有更新候选的概率闲聊；最新候选、正在生成/审阅的回复、明确唤醒和功能任务保留"
   },
+  "latency_optimization_enabled": {
+    "description": "启用延迟优化调度；全部功能保留，仅改变调度方式",
+    "type": "bool",
+    "default": false,
+    "hint": "保存后后续调度读取新设置，已开始的任务继续完成；首次升级后需重载插件。"
+  },
+  "review_policy": {
+    "description": "启用可选二次审阅时的审查策略：all 全部审查，speed_first 速度优先；不改变 reply_review_enabled 开关",
+    "type": "string",
+    "default": "all",
+    "options": ["all", "speed_first"]
+  },
+  "reply_prediction_enabled": {
+    "description": "启用回复预测，供延迟优化调度使用",
+    "type": "bool",
+    "default": true
+  },
+  "prediction_provider_id": {
+    "description": "回复预测的模型提供商 ID，留空使用插件默认提供商",
+    "type": "string",
+    "default": ""
+  },
+  "idle_learning_enabled": {
+    "description": "启用空闲学习，默认关闭；学习版本可在控制面板回退",
+    "type": "bool",
+    "default": false
+  },
+  "style_learning_enabled": {
+    "description": "启用风格学习，默认关闭；与空闲学习开关分别保存",
+    "type": "bool",
+    "default": false
+  },
+  "reply_audit_sample_percent": {
+    "description": "回复审计抽样比例，0至100的整数（%）",
+    "type": "int",
+    "default": 10
+  },
+  "emoji_late_grace_seconds": {
+    "description": "表情包迟到宽限时间，0至10秒的整数",
+    "type": "int",
+    "default": 3
+  },
+  "reply_latency_target_seconds": {
+    "description": "正文回复目标，5至120秒的整数，默认30秒；计到真实正文发出，工具任务单独统计",
+    "type": "int",
+    "default": 30,
+    "hint": "这是统计目标，不是超时后取消任务或保证发送的期限。"
+  },
+  "reply_hedge_after_seconds": {
+    "description": "慢请求补救等待(秒)",
+    "type": "int",
+    "default": 15,
+    "hint": "0至30的整数，0关闭；仅开启响应优化（延迟优化调度）时生效。原请求超过阈值，普通短闲聊最多额外发起一次同模型、同参数API调用，先成功者胜，可能增加消耗；共用模型并发额度，不重复执行工具，不截断、不降模型。"
+  },
+  "model_concurrency": {
+    "description": "模型并发数，1至4的整数",
+    "type": "int",
+    "default": 2
+  },
   "chat_low_latency": {
     "description": "简单闲聊低推理档（试验）",
     "type": "bool",

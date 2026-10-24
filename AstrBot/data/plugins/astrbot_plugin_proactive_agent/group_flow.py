@@ -67,6 +67,8 @@ class GroupFlow:
         pending = self.pending_passive.get(group_key(event), [])
         if not pending or pending[-1] is event:
             return False
+        if self.cfg('latency_optimization_enabled', False):
+            return True
         arrival = event.get_extra('qqbot_arrival')
         age = self.clock() - (arrival if arrival is not None else self.clock())
         return age >= int(self.cfg('group_passive_max_age', 25)) or len(self.newer(event)) >= 4

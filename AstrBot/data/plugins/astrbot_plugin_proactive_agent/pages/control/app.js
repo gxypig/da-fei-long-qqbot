@@ -2,9 +2,10 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
-  const booleans = ['group_flow_enabled','chat_low_latency','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled'];
-  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability'];
-  const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname'];
+  let statusRequest, learningBusy = false, learningRollbackAvailable = false;
+  const booleans = ['group_flow_enabled','chat_low_latency','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
+  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds'];
+  const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function api(endpoint, body) {
     const result = await (body===undefined ? bridge.apiGet(endpoint) : bridge.apiPost(endpoint,body));
@@ -29,6 +30,10 @@
     });
   }
   function fill(data) {
+    if(!data?.values || [...booleans,...numbers,...strings].some(k=>!Object.hasOwn(data.values,k))){
+      values=undefined;$('save').disabled=true;
+      throw new Error('设置字段不完整，请重载插件并刷新页面后再保存');
+    }
     values=data.values;revision=data.revision;
     booleans.forEach(k=>$(k).checked=values[k]);[...numbers,...strings].forEach(k=>$(k).value=values[k]);
     $('probability-slider').value=values.group_chat_probability;
@@ -40,8 +45,127 @@
     event.preventDefault();if(!values)return;
     const next={...values};booleans.forEach(k=>next[k]=$(k).checked);numbers.forEach(k=>next[k]=Number($(k).value));strings.forEach(k=>next[k]=$(k).value);
     $('save').disabled=true;
-    try{fill(await api('panel_settings',{values:next,revision}));notice('设置已保存，群聊规则立即生效；固定定时约10秒内生效，首次发送等待一个完整间隔');}
-    catch(e){notice(e.message,true);}finally{$('save').disabled=false;}
+    try{
+      fill(await api('panel_settings',{values:next,revision}));
+      const available=await refreshPerformance();
+      notice('设置已保存，群聊规则立即生效；固定定时约10秒内生效，首次发送等待一个完整间隔。'+(available?'性能与学习配置供后续调度立即读取，已开始的任务继续完成。':'当前运行实例尚未提供性能状态，请确认插件已升级并重载后刷新。'));
+    }
+    catch(e){notice(e.message,true);}finally{$('save').disabled=!values;}
+  }
+  const statusLabels = {
+    enabled:'已启用', review_policy:'审查策略', active:'进行中', running:'运行中作业数', busy:'忙碌',
+    pending:'待办', queued:'排队中', queue:'任务队列', completed:'已完成', failed:'失败',
+    version:'版本', current_version:'当前版本', active_version:'生效版本', versions:'版本记录',
+    todo:'待办', todos:'待办', status:'状态', count:'次数', total:'总计', hits:'命中', misses:'未命中',
+    cancelled:'已取消', skipped:'已跳过', error:'错误', last_error:'最近错误',
+    target_seconds:'目标（秒）', concurrency:'并发数', model_concurrency:'模型并发数',
+    foreground:'前台任务', background:'后台任务', learning:'学习', prediction:'预测', scheduler:'模型调度',
+    reply:'正文回复', chat:'聊天', tool:'工具任务', tools:'工具任务',
+    created_at:'创建时间', updated_at:'更新时间', last_run:'最近运行',
+    closed:'已关闭', worker_running:'学习后台存活', idle_learning_enabled:'空闲学习已启用', style_learning_enabled:'风格学习已启用',
+    scheduler_available:'调度服务可用', cases:'学习案例', pending_forgets:'待遗忘条目',
+    candidate_stage:'候选阶段', last_publish:'最近发布', published:'发布时间', rules:'规则数',
+    stats:'统计', last_validation:'最近验证', paused:'已暂停', failures:'失败', dropped:'已丢弃',
+    samples:'样本数', p95_ms:'P95耗时（毫秒）', median_ms:'中位耗时（毫秒）', max_ms:'最大耗时（毫秒）', over_target:'超出目标次数',
+    reply_text_delivery:'正文全程（收到消息至真实发出）', reply_text_send:'正文发送耗时',
+    reply_text_deliveries:'正文发送成功次数', incomplete_deliveries:'未完成发送计时', audit_errors:'统计记录错误',
+    mean:'平均值', avg:'平均值', last:'最近一次', max:'最大值', min:'最小值',
+  };
+  const isRecord = value => value!==null && typeof value==='object' && !Array.isArray(value);
+  function statusNode(value, depth=0) {
+    if(value===null || value===undefined || typeof value!=='object'){
+      const text=document.createElement('span');
+      text.textContent=value===null||value===undefined?'尚未提供':typeof value==='boolean'?(value?'是':'否'):String(value);
+      return text;
+    }
+    if(depth>=4){const text=document.createElement('pre');text.className='status-detail';text.textContent=JSON.stringify(value,null,2);return text;}
+    const list=document.createElement('dl');list.className='status-list';
+    const entries=Object.entries(value);
+    if(!entries.length){list.textContent='暂无记录';return list;}
+    entries.slice(0,50).forEach(([key,item])=>{
+      const term=document.createElement('dt'), detail=document.createElement('dd');
+      term.textContent=Array.isArray(value)?`第 ${Number(key)+1} 项`:(Object.hasOwn(statusLabels,key)?statusLabels[key]:key);
+      detail.append(statusNode(item,depth+1));list.append(term,detail);
+    });
+    if(entries.length>50){const more=document.createElement('dd');more.textContent=`仅展示前50项，共${entries.length}项`;list.append(more);}
+    return list;
+  }
+  function renderSnapshot(id, data, empty) {
+    const container=$(id);container.replaceChildren();
+    if(data===undefined || data===null || (typeof data==='object' && !Object.keys(data).length))container.textContent=empty;
+    else container.append(statusNode(data));
+  }
+  const validVersion = version => (typeof version==='string' && version.trim()!=='') || (Number.isInteger(version) && version>=0);
+  function renderLearning(data) {
+    const learning=isRecord(data)?data:{};
+    const current=learning.current_version ?? learning.active_version ?? learning.version;
+    const worker=learning.worker_running===true?'学习后台运行中':learning.worker_running===false?'学习后台未运行':'学习状态已刷新';
+    $('learning-status').textContent=learning.closed===true?'学习服务已关闭，请重载插件后刷新':Object.keys(learning).length?`${worker}；开关修改需保存后生效`:'学习服务尚未提供状态，请确认插件已升级并重载后刷新';
+    $('learning-version').textContent=validVersion(current)?`当前学习版本：${current}`:'尚未提供当前版本，更多信息见学习服务详情';
+    renderSnapshot('learning-pending',learning.pending ?? learning.todos ?? learning.todo ?? learning.queue,'尚未提供待办状态，更多信息见学习服务详情');
+    renderSnapshot('learning-details',data,'尚未提供学习状态');
+    const select=$('learning-rollback-version'), selected=select.value;
+    select.replaceChildren();
+    const versions=Array.isArray(learning.versions)?[...learning.versions]:isRecord(learning.versions)?Object.keys(learning.versions):[];
+    // Numeric policy version 0 is the learning service's built-in baseline.
+    if(Number.isInteger(current) && current>=0)versions.push(0);
+    const seen=new Set();
+    versions.forEach(entry=>{
+      const version=isRecord(entry)?(entry.version ?? entry.id):entry;
+      if(!validVersion(version))return;
+      const key=JSON.stringify(version);if(seen.has(key))return;seen.add(key);
+      const option=document.createElement('option');option.value=key;
+      option.textContent=`版本 ${version}${version===0?'（内置规则）':''}${String(version)===String(current)?'（当前）':''}`;select.append(option);
+    });
+    if(!seen.size){const option=document.createElement('option');option.value='';option.textContent='暂无可回退版本';select.append(option);}
+    else if(seen.has(selected))select.value=selected;
+    learningRollbackAvailable=learning.closed!==true && seen.size>0;
+    select.disabled=learningBusy||!learningRollbackAvailable;
+    $('learning-rollback').disabled=select.disabled;
+  }
+  function renderPerformance(data) {
+    const performance=isRecord(data?.performance)?data.performance:null;
+    const available=performance!==null && Object.keys(performance).length>0;
+    const mode=performance?.enabled===true?'延迟优化已开启':performance?.enabled===false?'延迟优化已关闭':'调度开关尚未提供';
+    const policy=performance?.review_policy==='all'?'全部审查':performance?.review_policy==='speed_first'?'速度优先':'审查策略尚未提供';
+    const target=Number.isFinite(performance?.target_seconds)?` · 正文目标 ${performance.target_seconds} 秒`:'';
+    $('performance-status').textContent=available?`${mode} · ${policy}${target} · 运行状态已刷新`:'当前运行实例尚未提供性能状态，请确认插件已升级并重载后刷新';
+    renderSnapshot('performance-work',performance?.work,'尚未提供调度状态');
+    renderSnapshot('performance-prediction',performance?.prediction,'尚未提供预测统计');
+    renderSnapshot('performance-timings',performance?.timings,'尚未提供耗时数据');
+    renderLearning(performance?.learning);
+    return available;
+  }
+  async function refreshPerformance() {
+    if(statusRequest)return statusRequest;
+    statusRequest=(async()=>{
+      try{return renderPerformance(await api('status'));}
+      catch(e){
+        renderPerformance(null);
+        $('performance-status').textContent='读取性能状态失败：'+e.message;
+        $('learning-status').textContent='读取学习状态失败，请刷新重试；当前不可回退';
+        return false;
+      }
+    })();
+    try{return await statusRequest;}finally{statusRequest=null;}
+  }
+  async function rollbackLearning() {
+    const select=$('learning-rollback-version');
+    if(learningBusy || select.disabled || !select.value)return;
+    const version=JSON.parse(select.value);
+    learningBusy=true;select.disabled=true;$('learning-rollback').disabled=true;
+    $('learning-action-status').textContent='正在回退学习版本…';
+    try{
+      await api('learning_action',{action:'rollback',version});
+      $('learning-action-status').textContent=`已回退到版本 ${version}`;
+      // Finish any older status request, then fetch the state after rollback.
+      if(statusRequest)await statusRequest;
+      await refreshPerformance();
+    }catch(e){$('learning-action-status').textContent='回退失败：'+e.message;}
+    finally{
+      learningBusy=false;select.disabled=!learningRollbackAvailable;
+      $('learning-rollback').disabled=select.disabled;
+    }
   }
   function renderHealth(data) {
     const report=data.report, job=data.job;
@@ -88,15 +212,19 @@
   }catch(e){notice(e.message,true);}}
   $('load-targets').addEventListener('click',loadTargets);
   $('refresh-schedule').addEventListener('click',refreshSchedule);
+  $('refresh-performance').addEventListener('click',refreshPerformance);
+  $('refresh-learning').addEventListener('click',refreshPerformance);
+  $('learning-rollback').addEventListener('click',rollbackLearning);
   ['fixed_group_ids','fixed_private_ids'].forEach(k=>$(k).addEventListener('change',renderTargets));
   document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
     document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==button.dataset.tab);
     $('save-bar').hidden=button.dataset.tab==='health';
     if(button.dataset.tab==='fixed')refreshSchedule();
+    if(['performance','learning'].includes(button.dataset.tab))refreshPerformance();
     if(button.dataset.tab==='health')refreshHealth().then(r=>{if(r)poll();});
   }));
-  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',changed);
+  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(event.target.id!=='learning-rollback-version')changed();});
   $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings();});
   $('load-groups').addEventListener('click',loadGroups);$('group_chat_ids').addEventListener('change',renderGroups);
   $('probability-slider').addEventListener('input',()=>{$('group_chat_probability').value=$('probability-slider').value;});

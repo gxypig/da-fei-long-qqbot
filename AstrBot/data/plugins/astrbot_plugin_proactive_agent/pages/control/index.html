@@ -3,7 +3,7 @@
 <body><main>
   <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
   <div id="notice" role="status" aria-live="polite"></div>
-  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="health">运行报告</button></nav>
+  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="performance">性能与审查</button><button class="tab" data-tab="learning">空闲学习</button><button class="tab" data-tab="health">运行报告</button></nav>
   <form id="settings"><section id="groups" class="tab-panel">
     <div class="section-head"><div><h2>哪些群可以自然接话</h2><p>勾选后成为特殊接话群；未勾选的群继续按原有唤醒规则回复</p></div><button id="load-groups" type="button" class="secondary">刷新群列表</button></div>
     <div id="group-list" class="group-list" aria-label="特殊接话群">正在读取群列表…</div>
@@ -32,6 +32,30 @@
     <article class="card"><h2>偶尔带一个 Emoji</h2><label for="emoji_probability">每轮允许使用的概率（%）</label><input id="emoji_probability" type="number" min="0" max="100" required><p>默认18%，允许时由模型判断是否合适，最多一个。0表示禁用；严肃求助不添加</p></article></div>
     <div class="card-grid"><article class="card"><h2>偶尔称呼父亲</h2><label for="father_address_probability">每轮允许称呼爸 / 老爸的概率（%）</label><input id="father_address_probability" type="number" min="0" max="100" required><p>默认20%。父亲关系始终保留，只调整称呼频率；0表示直接说话，不加称呼</p></article><article class="card"><h2>表情包发送方式</h2><label for="meme_separate_probability">表情包另发一条的概率（%）</label><input id="meme_separate_probability" type="number" min="0" max="100" required><p>默认50%，其余与文字放在一起。0总是合并，100总是分开；只作用于聊天自动配的图库表情，不影响生图附件</p></article></div>
     <p class="callout">设置下一轮生效，无需重启；主动消息分别选话题，并检查本对象历史与近期重复正文</p>
+  </section>
+  <section id="performance" class="tab-panel" hidden>
+    <p class="callout">发送前 AI 二次审阅为可选功能，公开版默认关闭；可在插件配置中按需开启。修改这里的策略不会开启二次审阅，只决定已开启审阅后的执行方式</p>
+    <div class="section-head"><div><h2>性能与审查</h2><p>全部功能保留，仅改变调度方式；默认关闭延迟优化，沿用全部审查</p></div><button id="refresh-performance" type="button" class="secondary">刷新性能状态</button></div>
+    <div class="callout">默认 30s（30秒）目标从收到消息计到真实正文发出，排队、生成和审查都计入；工具任务单独统计。目标用于观察耗时，不是超时后取消任务或保证发送的期限。</div>
+    <div class="card-grid">
+      <article class="card"><h2>调度与回复目标</h2><label class="toggle"><input id="latency_optimization_enabled" type="checkbox">启用延迟优化调度</label><label for="reply_latency_target_seconds">正文回复目标（秒，5至120）</label><input id="reply_latency_target_seconds" type="number" min="5" max="120" step="1" required><label for="model_concurrency">模型并发数（1至4）</label><input id="model_concurrency" type="number" min="1" max="4" step="1" required>
+        <label for="reply_hedge_after_seconds">慢请求补救等待(秒)</label><input id="reply_hedge_after_seconds" type="number" min="0" max="30" step="1" required aria-describedby="reply-hedge-hint">
+        <p id="reply-hedge-hint">默认15秒，0关闭；仅开启响应优化（延迟优化调度）时生效。原请求超过阈值，普通短闲聊最多额外发起一次同模型、同参数API调用，先成功者胜，可能增加消耗。共用模型并发额度，不重复执行工具，不截断、不降模型。</p>
+        <p>保存后后续调度读取新设置，已开始的任务继续完成。</p></article>
+      <article class="card"><h2>审查策略</h2><label for="review_policy">选择审查策略</label><select id="review_policy"><option value="all">全部审查（默认）</option><option value="speed_first">速度优先</option></select><p>保留原有功能链，由调度服务按策略安排审查。</p><label for="reply_audit_sample_percent">回复审计抽样比例（%，0至100）</label><input id="reply_audit_sample_percent" type="number" min="0" max="100" step="1" required><label for="emoji_late_grace_seconds">表情包迟到宽限（秒，0至10）</label><input id="emoji_late_grace_seconds" type="number" min="0" max="10" step="1" required></article>
+    </div>
+    <article class="card"><h2>回复预测</h2><label class="toggle"><input id="reply_prediction_enabled" type="checkbox">允许回复预测（默认开启，供延迟优化调度使用）</label><label for="prediction_provider_id">预测模型提供商 ID</label><input id="prediction_provider_id" type="text" placeholder="留空使用插件默认提供商" autocomplete="off"><p>更改后保存设置，后续预测读取新的提供商选择。</p></article>
+    <h2 class="status-heading">当前运行状态</h2><p id="performance-status" role="status" aria-live="polite">打开本页后读取运行状态</p>
+    <div class="card-grid"><article class="card"><h2>调度工作</h2><div id="performance-work">暂无状态</div></article><article class="card"><h2>预测统计</h2><div id="performance-prediction">暂无状态</div></article></div>
+    <article class="card"><h2>正文与工具耗时</h2><p>按服务返回的分类展示；正文目标计到真实发送，工具任务单列，不混算。</p><div id="performance-timings">暂无耗时数据</div></article>
+    <p class="footnote">首次升级后请重载插件。若状态提示服务尚未就绪，重载后刷新；状态刷新不会覆盖尚未保存的设置。</p>
+  </section>
+  <section id="learning" class="tab-panel" hidden>
+    <div class="section-head"><div><h2>空闲学习</h2><p>空闲学习与风格学习默认关闭；可以查看学习版本、待办，并回退到已有版本</p></div><button id="refresh-learning" type="button" class="secondary">刷新学习状态</button></div>
+    <article class="card"><label class="toggle"><input id="idle_learning_enabled" type="checkbox">启用空闲学习</label><label class="toggle"><input id="style_learning_enabled" type="checkbox">启用风格学习</label><p>全部功能保留，仅调整学习调度。开关分别保存，由学习服务安排空闲时的任务。</p></article>
+    <p id="learning-status" role="status" aria-live="polite">打开本页后读取学习状态</p>
+    <div class="card-grid"><article class="card"><h2>学习版本</h2><p id="learning-version">尚未提供当前版本</p><label for="learning-rollback-version">选择回退版本</label><select id="learning-rollback-version" disabled><option value="">暂无可回退版本</option></select><button id="learning-rollback" type="button" class="secondary rollback-button" disabled>回退到所选版本</button><p id="learning-action-status" role="status" aria-live="polite"></p></article><article class="card"><h2>学习待办</h2><div id="learning-pending">尚未提供待办状态</div></article></div>
+    <article class="card"><h2>学习服务详情</h2><div id="learning-details">尚未提供学习状态</div></article>
   </section>
   <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
   </form>

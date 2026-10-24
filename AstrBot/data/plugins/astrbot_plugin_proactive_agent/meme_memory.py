@@ -185,6 +185,9 @@ class MemeMemory:
                 self._retry_after.pop(key, None)
                 raise
             except Exception as exc:
+                if type(exc).__name__ == 'BackgroundPaused':
+                    self._retry_after.pop(key, None)
+                    raise
                 self.audit("meme", {"status": "unverified", "phase": phase, "error": type(exc).__name__})
                 return {"status": "unverified", "hint": "搜索或核实暂未完成，别装作知道，也别说已记住"}
 
@@ -210,6 +213,8 @@ class MemeMemory:
                 if tasks:
                     await asyncio.gather(*tasks)
         except Exception as exc:
+            if type(exc).__name__ == 'BackgroundPaused':
+                raise
             self.audit("meme", {"status": "detection_failed", "error": type(exc).__name__})
         finally:
             for task in tasks:

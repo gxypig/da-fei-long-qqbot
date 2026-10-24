@@ -1,6 +1,7 @@
 """Additional QQ group wake rules; preserve AstrBot's permission/filter pipeline."""
 import random
 import re
+import time
 
 from astrbot.api.message_components import At, Plain
 from astrbot.core.pipeline.waking_check.stage import WakingCheckStage
@@ -41,6 +42,8 @@ def install_group_wake(plugin):
     previous = WakingCheckStage.process
 
     async def process(stage, event):
+        if event.get_platform_id() == plugin._cfg('platform_id', 'aiocqhttp') and event.get_extra('qqbot_received_at') is None:
+            event.set_extra('qqbot_received_at', time.monotonic())
         enabled = stage.ctx.astrbot_config.get("plugin_set", ["*"])
         if (enabled == ["*"] or "astrbot_plugin_proactive_agent" in enabled) and await SessionPluginManager.is_plugin_enabled_for_session(event.unified_msg_origin, "astrbot_plugin_proactive_agent"):
             if hasattr(plugin, '_live_journal') and event.get_platform_id() == plugin._cfg('platform_id', 'aiocqhttp'):

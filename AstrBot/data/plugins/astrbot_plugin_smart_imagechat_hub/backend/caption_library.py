@@ -1341,6 +1341,14 @@ class CaptionLibraryMixin:
 
         try:
             while True:
+                companion = None
+                context = getattr(self, 'context', None)
+                if context and hasattr(context, 'get_registered_star'):
+                    meta = context.get_registered_star('astrbot_plugin_proactive_agent')
+                    companion = meta.star_cls if meta and meta.activated else None
+                optimized = bool(companion and companion._cfg('latency_optimization_enabled', False))
+                if optimized:
+                    await companion.wait_for_reply_idle()
                 async with self._lock:
                     rel_paths = [
                         rel_path
@@ -1378,7 +1386,12 @@ class CaptionLibraryMixin:
 
                 try:
                     abs_path = self._abs_plugin_data_path(rel_path)
-                    auto_tags = await self._caption_image(abs_path)
+                    if optimized:
+                        from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import model_work
+                        with model_work('background'):
+                            auto_tags = await self._caption_image(abs_path)
+                    else:
+                        auto_tags = await self._caption_image(abs_path)
                     if not auto_tags:
                         auto_tags = self._normalize_caption_tags([], abs_path.name)
                     images = self._index.get("images", {})
@@ -1407,6 +1420,17 @@ class CaptionLibraryMixin:
                     generation_failed = True
                     fatal_error = exc
                 except Exception as exc:
+                    if type(exc).__name__ == 'BackgroundPaused':
+                        async with self._lock:
+                            images = self._index.get('images', {})
+                            paused = images.get(self._image_id(rel_path)) if isinstance(images, dict) else None
+                            if isinstance(paused, dict):
+                                paused['caption_status'] = 'pending'
+                                self._save_index()
+                            attempted_rel_paths.discard(rel_path)
+                            self._set_caption_progress(status='pending', message='等待当前聊天完成后继续打标签',
+                                current_image='', completed=completed, failed=failed)
+                        continue
                     logger.error(
                         "astrbot_plugin_smart_imagechat_hub: image tag generation failed for %s: %s",
                         rel_path,

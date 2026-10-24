@@ -25,6 +25,12 @@ FIELDS = {
     "fixed_messages_enabled": False, "fixed_group_ids": "", "fixed_private_ids": "",
     "fixed_message_interval_minutes": 30,
     "fixed_qzone_enabled": False, "fixed_qzone_interval_minutes": 360,
+    "latency_optimization_enabled": False, "review_policy": "all",
+    "reply_prediction_enabled": True, "prediction_provider_id": "",
+    "idle_learning_enabled": False, "style_learning_enabled": False,
+    "reply_audit_sample_percent": 10, "emoji_late_grace_seconds": 3,
+    "reply_latency_target_seconds": 30, "model_concurrency": 2,
+    "reply_hedge_after_seconds": 15,
 }
 
 
@@ -41,6 +47,18 @@ def validate(data):
     for key, default in FIELDS.items():
         if type(values[key]) is not type(default):
             raise ValueError("设置类型不正确：" + key)
+    if values["review_policy"] not in ("all", "speed_first"):
+        raise ValueError("审查策略只能选择 all 或 speed_first")
+    for key, minimum, maximum, label in [
+        ("reply_audit_sample_percent", 0, 100, "回复审计抽样比例"),
+        ("emoji_late_grace_seconds", 0, 10, "表情包迟到宽限秒数"),
+        ("reply_latency_target_seconds", 5, 120, "正文回复目标秒数"),
+        ("model_concurrency", 1, 4, "模型并发数"),
+        ("reply_hedge_after_seconds", 0, 30, "慢请求补救等待秒数"),
+    ]:
+        if not minimum <= values[key] <= maximum:
+            raise ValueError(f"{label}须为{minimum}至{maximum}的整数")
+    values["prediction_provider_id"] = values["prediction_provider_id"].strip()
     if not 0 <= values["emoji_probability"] <= 100:
         raise ValueError("Emoji概率必须为0至100的整数")
     for key in ['father_address_probability', 'meme_separate_probability']:
@@ -121,6 +139,7 @@ class PanelMixin:
             ("panel_friends", self.panel_friends_api, ["GET"]),
             ("panel_schedule", self.panel_schedule_api, ["GET"]),
             ("panel_health", self.panel_health_api, ["GET"]),
+            ("learning_action", self.learning_action_api, ["POST"]),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
 
@@ -148,6 +167,29 @@ class PanelMixin:
             return jsonify({"status": "ok", "data": {"values": saved, "revision": revision}})
         except ValueError as exc:
             return jsonify({"status": "error", "message": str(exc)}), 400
+
+    async def learning_action_api(self):
+        # Registered through the same authenticated plugin API as panel_settings.
+        body = await request.get_json(silent=True)
+        if not isinstance(body, dict) or set(body) != {"action", "version"} or body.get("action") != "rollback":
+            return jsonify({"status": "error", "message": "仅支持 rollback 回退操作，请选择学习版本"}), 400
+        version = body["version"]
+        if (type(version) not in (str, int)
+                or (isinstance(version, str) and not version.strip())
+                or (type(version) is int and version < 0)):
+            return jsonify({"status": "error", "message": "学习版本不正确，请刷新版本列表后重试"}), 400
+        learning = getattr(self, "_learning", None)
+        if not callable(getattr(learning, "rollback", None)):
+            return jsonify({"status": "error", "message": "学习服务尚未就绪，请确认插件已升级并重载后重试"}), 503
+        try:
+            result = await learning.rollback(version)
+            if result is False:
+                return jsonify({"status": "error", "message": "学习版本不可用，请刷新版本列表后重试"}), 404
+            return jsonify({"status": "ok", "data": result})
+        except (ValueError, LookupError):
+            return jsonify({"status": "error", "message": "学习版本不可用，请刷新版本列表后重试"}), 400
+        except Exception:
+            return jsonify({"status": "error", "message": "学习回退未完成，请刷新状态后重试"}), 500
 
     async def panel_groups_api(self):
         try:

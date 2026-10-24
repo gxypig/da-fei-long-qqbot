@@ -1,5 +1,7 @@
 import copy
 
+from .latency_emoji import LatencyEmojiMixin
+
 from .common import (
     Any,
     AstrMessageEvent,
@@ -40,7 +42,7 @@ PROACTIVE_EMOJI_SOURCE_USER_MESSAGE = "user_message"
 REPLY_PREFETCH_KEY = "smart_image_reply_prefetch"
 
 
-class RetrievalMixin:
+class RetrievalMixin(LatencyEmojiMixin):
     async def _cancel_reply_prefetch(self, event):
         spec = event.get_extra(REPLY_PREFETCH_KEY)
         event.set_extra(REPLY_PREFETCH_KEY, None)
@@ -53,6 +55,8 @@ class RetrievalMixin:
 
     async def _prefetch_reply_emoji(self, event, response):
         """Read-only matching overlaps the text review; attachment still happens later."""
+        if self._uses_latency_emoji(event):
+            return
         await self._cancel_reply_prefetch(event)
         cfg = self._proactive_emoji_config()
         if (not cfg["enabled"] or cfg.get("retrieval_mode") != "bot_reply_serial"
@@ -322,6 +326,8 @@ class RetrievalMixin:
         }
 
     async def _maybe_append_proactive_emoji(self, event: AstrMessageEvent) -> None:
+        if self._decorate_latency_emoji(event):
+            return
         if event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False):
             await self._cancel_reply_prefetch(event)
             return
@@ -531,6 +537,8 @@ class RetrievalMixin:
         event: AstrMessageEvent,
         user_message: str,
     ) -> None:
+        if self._start_latency_emoji(event, user_message):
+            return
         if event.get_extra(PROACTIVE_EMOJI_INTERNAL_LLM_EXTRA_KEY, False):
             return
         if event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False):
@@ -755,6 +763,16 @@ class RetrievalMixin:
         )
         return hit
 
+    def _proactive_emoji_embed(self, cfg: dict[str, Any]) -> bool:
+        # Keep the same probability for ready latency images and the legacy path.
+        embed = cfg["embed_in_conversation"]
+        meta = self.context.get_registered_star('astrbot_plugin_proactive_agent')
+        companion = meta.star_cls if meta and meta.activated else None
+        if companion:
+            probability = max(0, min(100, int(companion._cfg('meme_separate_probability', 50))))
+            embed = random.random() * 100 >= probability
+        return embed
+
     async def _apply_proactive_emoji_image(
         self,
         event: AstrMessageEvent,
@@ -776,12 +794,7 @@ class RetrievalMixin:
         image_tags = self._tags_from_item(image_item)
         # The optional dragon panel adds a mixed mode. With no companion plugin,
         # retain the gallery's original fixed combined/separate setting.
-        embed = cfg["embed_in_conversation"]
-        meta = self.context.get_registered_star('astrbot_plugin_proactive_agent')
-        companion = meta.star_cls if meta and meta.activated else None
-        if companion:
-            probability = max(0, min(100, int(companion._cfg('meme_separate_probability', 50))))
-            embed = random.random() * 100 >= probability
+        embed = self._proactive_emoji_embed(cfg)
         if embed:
             self._log_proactive_emoji_debug(
                 cfg,
@@ -1135,6 +1148,8 @@ class RetrievalMixin:
         except CaptionGenerationError:
             raise
         except Exception as exc:
+            if type(exc).__name__ == "BackgroundPaused":
+                raise
             detail = "".join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__)
             )

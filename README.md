@@ -16,13 +16,14 @@
 | 查看可用命令 | [COMMANDS.md](COMMANDS.md) |
 | 查看每次更新了什么 | [CHANGELOG.md](CHANGELOG.md) |
 | 更新、备份、回滚 | [MAINTENANCE.md](MAINTENANCE.md) |
+| 回复提速、空闲学梗、表达学习 | [PERFORMANCE.md](PERFORMANCE.md) |
 
 ## 包含什么
 
 - AstrBot **4.29.1**：安装时从 PyPI 获取固定版本；仓库不重复打包 AstrBot 全部源码。
-- `astrbot_plugin_proactive_agent` **1.8.1**：主动行为、梗记忆、唤醒规则、图片兼容和可选审阅；主动消息进入持久化上下文，发送前核对收件人，群回复只发正文，内部绑定真实发送者。
+- `astrbot_plugin_proactive_agent` **1.11.0**：主动行为、梗记忆、唤醒规则、图片兼容和可选审阅；新增并行预判、空闲学习和完整正文送达计时。主动消息进入持久化上下文，发送前核对收件人，自动引用默认关闭。
 - `astrbot_plugin_smart_imagechat_hub` **2.8.6 + 本地修改**：青尘工作室的图库插件，保留 GPL-3.0 许可、作者信息、原 README 与源码。本版增加更丰富标签、旧图重打标失败保留、私聊生图与图库检索分流等修正。
-- `astrbot_plugin_bili_scroll` **1.2.0**：原版搬屎评分与反话安利，可选扫码登录、评论/@、私信、收藏与回评，QQ分享仍独立；[完整使用说明](AstrBot/data/plugins/astrbot_plugin_bili_scroll/README.md)。
+- `astrbot_plugin_bili_scroll` **1.2.1**：原版搬屎评分与反话安利，可选扫码登录、评论/@、私信、收藏与回评，QQ分享仍独立；[完整使用说明](AstrBot/data/plugins/astrbot_plugin_bili_scroll/README.md)。
 - 三个插件的页面、样式和后端代码均自带，安装后无需再从插件市场下载。
 - 通用 API 配置。**不需要 Codex、不需要本机模型反代、不包含任何作者账号或密钥。**
 - Windows 一键入口，跨平台启动/停止/诊断脚本，Docker 部署文件。

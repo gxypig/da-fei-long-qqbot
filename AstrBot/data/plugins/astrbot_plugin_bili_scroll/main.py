@@ -21,6 +21,7 @@ from .actions import ACCOUNT_FIELDS, AccountActions, validate_account
 from data.plugins.astrbot_plugin_proactive_agent.sent_memory import SentMemory, conversation_id, remember_sent
 from data.plugins.astrbot_plugin_proactive_agent.route_guard import explicit_route
 from data.plugins.astrbot_plugin_proactive_agent.conversation_review import sent_text, delivery_policy, chat_delivery
+from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import model_work
 
 FIELDS = {'enabled': True, 'auto_enabled': False, 'keywords': '',
           'mode': 'chishi', 'up_list': DEFAULT_UPS, 'mygo': True, 'bait': False,
@@ -135,7 +136,8 @@ class Main(star.Star):
     async def account_loop(self):
         while True:
             try:
-                await self.actions.tick()
+                with model_work('scheduled'):
+                    await self.actions.tick()
             except Exception as exc:
                 self.logger.warning('B站账号巡航检查失败：%s', type(exc).__name__)
             await asyncio.sleep(15)
@@ -402,7 +404,8 @@ class Main(star.Star):
     async def loop(self):
         while True:
             try:
-                await self.tick()
+                with model_work('scheduled'):
+                    await self.tick()
             except Exception as exc:
                 self.logger.warning('B站定时检查失败：%s', type(exc).__name__)
             await asyncio.sleep(15)

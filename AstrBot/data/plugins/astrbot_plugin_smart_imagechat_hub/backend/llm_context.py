@@ -602,6 +602,8 @@ class LLMContextMixin:
                 raise
             except Exception as exc:
                 last_exc = exc
+                if type(exc).__name__ == 'BackgroundPaused':
+                    raise
                 if use_failure_cooldown:
                     self._mark_model_provider_failure(provider_id)
                 logger.warning(

@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import time
+import uuid
 from contextvars import ContextVar
 from contextlib import contextmanager
 
@@ -38,15 +39,19 @@ _delivery_check = ContextVar("qqbot_delivery_check", default=None)
 _approved = ContextVar("qqbot_review_approved", default=None)
 
 
-def approve_once(origin, text):
+def approve_once(origin, text, *, policy_version=None):
     """A same-task, exact-text receipt; another plugin's edit forces a new review."""
-    _approved.set((origin, text, time.monotonic()))
+    scope = _request_scope.get() or {}
+    _approved.set((origin, text, time.monotonic(), scope.get('request_id'), policy_version))
 
 
-def consume_approval(origin, text):
+def consume_approval(origin, text, *, policy_version=None):
     receipt = _approved.get()
     _approved.set(None)
-    return bool(receipt and receipt[0] == origin and receipt[1] == text and time.monotonic() - receipt[2] < 120)
+    scope = _request_scope.get() or {}
+    return bool(receipt and receipt[0] == origin and receipt[1] == text
+                and time.monotonic() - receipt[2] < 120
+                and receipt[3] == scope.get('request_id') and receipt[4] == policy_version)
 
 
 @contextmanager
@@ -59,7 +64,10 @@ def delivery_policy(check):
 
 
 def bind_request(origin, recent, management, character=None):
-    _request_scope.set({"origin": origin, "recent": list(recent), "management": management, "character": character or {}})
+    _receipt.set(None)
+    _approved.set(None)
+    _request_scope.set({"origin": origin, "recent": list(recent), "management": management,
+                        "character": character or {}, "request_id": uuid.uuid4().hex})
 
 
 def request_scope(origin):
@@ -83,6 +91,11 @@ def sent_text(origin, original):
     if receipt and receipt["origin"] == origin and receipt["original"] == original:
         return receipt["text"]
     return original
+
+
+def confirmed_sent(origin, text):
+    receipt = _receipt.get()
+    return bool(receipt and receipt.get('origin') == origin and receipt.get('text') == text)
 
 
 def json_object(text):
@@ -224,7 +237,10 @@ class OutboundGuard:
         # and clears the rest. Empty components have no visible text; including
         # them here adds spurious newlines and needlessly invalidates its receipt.
         text = "\n".join(container[key] for container, key in slots if container[key])
-        checked = text if consume_approval(origin, text) else await self.reviewer.review(text, origin=origin, recent=recent, mode=mode, media=media)
+        version = (self.plugin.review_policy_version()
+                   if self.plugin._cfg('latency_optimization_enabled', False)
+                   and hasattr(self.plugin, 'review_policy_version') else None)
+        checked = text if consume_approval(origin, text, policy_version=version) else await self.reviewer.review(text, origin=origin, recent=recent, mode=mode, media=media)
         if checked != text:
             # Preserve all recipients, at/reply/image segments and forward node metadata.
             for i, (container, key) in enumerate(slots):

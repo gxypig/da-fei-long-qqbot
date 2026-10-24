@@ -1,0 +1,509 @@
+"""Opt-in, event-scoped emoji preparation and delivery; never await it in text hooks."""
+import asyncio
+import copy
+import math
+import re
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+
+from .common import (
+    Image, MessageEventResult, Plain, PROACTIVE_EMOJI_INTERNAL_LLM_EXTRA_KEY,
+    SKIP_PROACTIVE_EMOJI_EXTRA_KEY, logger,
+)
+from .image_intent import is_generation_request, is_library_request
+from .proactive_fast_retrieval import (
+    _fallback_rank, _fast_query_profile, _item_tags, _score_fast_candidate,
+)
+
+LATENCY_EMOJI_KEY = "smart_image_latency_emoji"
+_TURN_ROUTE_KEY = "smart_image_latency_turn_route"
+LATE_GRACE_DEFAULT = 3.0
+_COMPANION_FIELDS = {
+    "latency_optimization_enabled": False, "meme_separate_probability": 50,
+    "emoji_late_grace_seconds": LATE_GRACE_DEFAULT,
+    "reply_review_enabled": True, "review_policy": "all",
+    "reply_prediction_enabled": True, "prediction_provider_id": "",
+    "father_qq": "", "father_address_probability": 20, "emoji_probability": 18,
+}
+_TONES = {
+    "positive": ("开心", "快乐", "哈哈", "大笑", "笑死", "高兴", "得意", "庆祝"),
+    "sad": ("难过", "伤心", "悲伤", "委屈", "流泪", "哭泣", "不开心", "不高兴"),
+    "angry": ("生气", "愤怒", "气死", "火大", "恼火", "怒火"),
+    "apology": ("对不起", "抱歉", "道歉", "认错", "错了", "认怂", "不敢", "别凶"),
+    "agree": ("同意", "赞同", "支持", "点头", "没问题", "可以", "好呀"),
+    "reject": ("拒绝", "不同意", "不赞同", "不支持", "不可以", "不行", "摇头"),
+}
+_OPPOSITES = {
+    "positive": {"sad", "angry", "apology"}, "sad": {"positive", "angry"},
+    "apology": {"positive", "angry"}, "angry": {"positive", "sad", "apology"},
+    "agree": {"reject"}, "reject": {"agree"},
+}
+
+
+def _tone_text(text):
+    # Keep full text for scoring, but don't turn a negated sentiment into evidence.
+    text = str(text or "").lower()
+    text = text.replace("不开心", "难过").replace("不高兴", "难过")
+    text = text.replace("不同意", "拒绝").replace("不赞同", "拒绝").replace("不支持", "拒绝").replace("不可以", "拒绝")
+    return re.sub(r"(?:并不|不是|没有|不再|不要|别|不)(?:是|再|很|太)?(?:开心|高兴|快乐|生气|愤怒|难过|伤心|笑|同意|支持)", "", text)
+
+
+def _tones(text):
+    text = _tone_text(text)
+    return {key for key, cues in _TONES.items() if any(cue in text for cue in cues)}
+
+
+def local_candidates(text, candidates, *, ambiguous=False):
+    """Score the ENTIRE eligible index; only the model payload is capped at 10/30.
+
+    Reuse the fast retriever's scoring primitives instead of its fixed top-10
+    wrapper, so widening never mutates its global limit or truncates the library.
+    """
+    profile = _fast_query_profile(_tone_text(text), candidates)
+    ranked = [_score_fast_candidate(profile, item) for item in candidates]
+    ranked.sort(key=lambda item: (
+        item.get("proactive_fast_score", 0), _fallback_rank(item),
+        len(item.get("proactive_fast_hints", [])), str(item.get("id", "")),
+    ), reverse=True)
+    tones = _tones(text)
+    conflicting = any(_OPPOSITES.get(tone, set()) & tones for tone in tones)
+    weak = not ranked or ranked[0].get("proactive_fast_score", 0) < 6
+    return ranked[:30 if ambiguous or conflicting or weak else 10]
+
+
+def compatible_with_reply(text, character, item):
+    """Conservative final check: full reply relevance plus its concluding tone."""
+    mood = (character or {}).get("mood")
+    if mood in {"serious", "stop"}:
+        return False
+    full_text = _tone_text(text)
+    # A reversal at the end must override an earlier joke/quoted sentiment.
+    clauses = re.split(r"但是|但其实|不过|其实|然而|反而|但", full_text)
+    tones = _tones(clauses[-1]) or _tones(full_text)
+    tags = " ".join(_item_tags(item))
+    image_tones = _tones(tags)
+    if any(_OPPOSITES.get(tone, set()) & image_tones for tone in tones):
+        return False
+    if (mood == "timid" or tones & {"sad", "apology"}) and re.search(
+        r"嘲讽|挑衅|幸灾乐祸|嘲笑|得意|大笑", tags,
+    ):
+        return False
+    if mood == "timid" and "apology" not in image_tones:
+        return False
+    ranked = local_candidates(full_text, [item])
+    return bool(ranked and ranked[0].get("proactive_fast_score", 0) >= 6)
+
+
+def _plain(chain):
+    return "".join(part.text for part in getattr(chain, "chain", ()) if isinstance(part, Plain))
+
+
+def _identity(item):
+    return {key: item.get(key) for key in (
+        "id", "rel_path", "filename", "tags", "auto_tags", "manual_tags", "selected_global_tags",
+    )}
+
+
+@dataclass(eq=False)
+class EmojiTurn:
+    event: object
+    companion: object
+    origin: str
+    route: tuple
+    snapshot: object
+    cfg: dict
+    settings: dict
+    style: object
+    candidates: list
+    prediction: object = None
+    prepare: object = None
+    delivery: object = None
+    conversion: object = None
+    item: object = None
+    path: object = None
+    signature: object = None
+    cleanup: list = field(default_factory=list)
+    text: str = ""
+    character: dict = field(default_factory=dict)
+    sent_parts: list = field(default_factory=list)
+    sent_at: float = 0.0
+    failed: bool = False
+    decorated: bool = False
+    confirmed: bool = False
+    embedded: bool = False
+    ready_at_decoration: bool = False
+    result: object = None
+    attachment: object = None
+    sending: int = 0
+    closed: bool = False
+    restore_send: object = None
+    owner: object = None
+    owner_done: object = None
+    cancel_callback: object = None
+    previous_cancel: object = None
+
+
+class LatencyEmojiMixin:
+    def _init_latency_emoji(self):
+        self._latency_emoji_tasks = set()
+        self._latency_emoji_conversions = set()
+        self._latency_emoji_turns = {}
+        self._latency_emoji_closed = False
+
+    def _latency_companion(self):
+        lookup = getattr(getattr(self, "context", None), "get_registered_star", None)
+        meta = lookup("astrbot_plugin_proactive_agent") if callable(lookup) else None
+        companion = meta.star_cls if meta and meta.activated else None
+        return companion if companion and companion._cfg("latency_optimization_enabled", False) else None
+
+    def _uses_latency_emoji(self, event):
+        return event.get_extra(LATENCY_EMOJI_KEY) is not None or self._latency_companion() is not None
+
+    def _latency_settings(self, companion):
+        return copy.deepcopy({key: companion._cfg(key, default) for key, default in _COMPANION_FIELDS.items()})
+
+    def _latency_style(self):
+        getter = getattr(self, "_send_image_style_config", None)
+        return copy.deepcopy(getter()) if callable(getter) else None
+
+    def _advance_latency_turn(self, event):
+        if event.get_extra(PROACTIVE_EMOJI_INTERNAL_LLM_EXTRA_KEY, False):
+            return
+        previous_route = event.get_extra(_TURN_ROUTE_KEY)
+        if previous_route is not None:
+            return previous_route
+        origin = str(getattr(event, "unified_msg_origin", ""))
+        # The transport group, not a per-member unique session, owns the window.
+        parts = origin.split(":", 2)
+        if len(parts) == 3 and parts[1] == "GroupMessage":
+            parts[2] = parts[2].rsplit("_", 1)[-1]
+        route = tuple(parts)
+        event.set_extra(_TURN_ROUTE_KEY, route)
+        previous = getattr(self, "_latency_emoji_turns", {}).get(route)
+        if previous and previous.event is not event:
+            self._finish_latency_turn(previous)
+        return route
+
+    def _own_latency_task(self, coroutine, name):
+        task = asyncio.create_task(coroutine, name=name)
+        self._latency_emoji_tasks.add(task)
+        def done(task):
+            self._latency_emoji_tasks.discard(task)
+            if not task.cancelled() and task.exception():
+                logger.warning("smart_image latency emoji task failed: %s", type(task.exception()).__name__)
+        task.add_done_callback(done)
+        return task
+
+    def _start_latency_emoji(self, event, user_message):
+        if event.get_extra(PROACTIVE_EMOJI_INTERNAL_LLM_EXTRA_KEY, False):
+            return False
+        route = self._advance_latency_turn(event)
+        if event.get_extra(LATENCY_EMOJI_KEY) is not None:
+            return True
+        companion = self._latency_companion()
+        if companion is None:
+            return False
+        # A marker prevents re-entering the old serial path after a config edit.
+        event.set_extra(LATENCY_EMOJI_KEY, False)
+        if not hasattr(self, "_latency_emoji_tasks"):
+            self._init_latency_emoji()
+        cfg = self._proactive_emoji_config()
+        if (self._latency_emoji_closed or not cfg.get("enabled") or not str(user_message).strip()
+                or event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False)
+                or is_library_request(user_message) or is_generation_request(user_message)):
+            return True
+        if not all(callable(getattr(companion, name, None)) for name in ("prepare_reply_prediction", "reply_prediction")):
+            return True
+        if not self._proactive_emoji_probability_hit(cfg):
+            return True
+        candidates = local_candidates(user_message, self._proactive_emoji_candidates(bool(cfg["meme_only"])))
+        if not candidates:
+            return True
+        origin = str(event.unified_msg_origin)
+        group = str(event.get_group_id() or "")
+        sender = str(event.get_sender_id() or "")
+        message_obj = copy.deepcopy(getattr(event, "message_obj", None))
+        # Never give a background send the live mutable message/session object.
+        snapshot = SimpleNamespace(
+            unified_msg_origin=origin, message_obj=message_obj,
+            get_group_id=lambda: group, get_sender_id=lambda: sender,
+            get_message_str=lambda: user_message,
+        )
+        turn = EmojiTurn(event, companion, origin, route, snapshot, copy.deepcopy(cfg),
+                         self._latency_settings(companion), self._latency_style(), copy.deepcopy(candidates))
+        event.set_extra(LATENCY_EMOJI_KEY, turn)
+        self._latency_emoji_turns[route] = turn
+        turn.previous_cancel = event.get_extra("qqbot_cancel_reply_preparation")
+        async def cancel():
+            self._finish_latency_turn(turn)
+            if callable(turn.previous_cancel):
+                await turn.previous_cancel()
+        turn.cancel_callback = cancel
+        event.set_extra("qqbot_cancel_reply_preparation", cancel)
+        turn.owner = asyncio.current_task()
+        def owner_done(_):
+            if not turn.confirmed:
+                self._finish_latency_turn(turn)
+        turn.owner_done = owner_done
+        if turn.owner:
+            turn.owner.add_done_callback(owner_done)
+        try:
+            # This synchronous call runs at priority 20, before the companion's
+            # priority -100 hook, and supplies candidates to the ONE shared task.
+            turn.prediction = companion.prepare_reply_prediction(event, candidates=copy.deepcopy(candidates))
+            if turn.prediction is None:
+                self._finish_latency_turn(turn)
+            else:
+                turn.prepare = self._own_latency_task(self._prepare_latency_emoji(turn), "gallery-emoji-prepare")
+        except Exception as exc:
+            logger.warning("smart_image latency emoji start failed: %s", type(exc).__name__)
+            self._finish_latency_turn(turn)
+        return True
+
+    def _valid_latency_turn(self, turn):
+        return (not turn.closed and not self._latency_emoji_closed
+                and self._latency_emoji_turns.get(turn.route) is turn
+                and self._latency_companion() is turn.companion
+                and self._proactive_emoji_config() == turn.cfg
+                and self._latency_settings(turn.companion) == turn.settings
+                and self._latency_style() == turn.style
+                and not turn.event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False)
+                and not getattr(turn.event, "is_stopped", lambda: False)())
+
+    def _current_latency_image(self, turn):
+        if not turn.item or not self._valid_latency_turn(turn):
+            return False
+        current = next((item for item in self._proactive_emoji_candidates(bool(turn.cfg["meme_only"]))
+                        if str(item.get("id")) == str(turn.item.get("id"))), None)
+        if current is None or _identity(current) != _identity(turn.item):
+            return False
+        try:
+            path = self._abs_plugin_data_path(current["rel_path"])
+            stat = path.stat()
+            return path.is_file() and (stat.st_mtime_ns, stat.st_size) == turn.signature
+        except OSError:
+            return False
+
+    async def _prepare_latency_emoji(self, turn):
+        try:
+            # Cancellation of this plugin's waiter MUST NOT cancel review's task.
+            await asyncio.shield(turn.prediction)
+            prediction = turn.companion.reply_prediction(turn.event)
+            if not self._valid_latency_turn(turn) or not isinstance(prediction, dict):
+                return
+            ids = prediction.get("image_ids", [])
+            if prediction.get("risk") not in {"low", "high", "unknown"} or not isinstance(ids, list):
+                return
+            selected = [item for image_id in ids if isinstance(image_id, str)
+                        for item in turn.candidates if str(item["id"]) == image_id]
+            if turn.text:
+                selected = [item for item in selected if compatible_with_reply(turn.text, turn.character, item)]
+            if not selected:
+                return
+            turn.item = selected[0]
+            path = self._abs_plugin_data_path(turn.item["rel_path"])
+            stat = path.stat()
+            turn.signature = stat.st_mtime_ns, stat.st_size
+            if not self._current_latency_image(turn):
+                return
+            # Conversion can involve disk I/O: prepare it off the text path too.
+            turn.conversion = self._own_latency_task(
+                self._prepare_send_image_path(path, self._tags_from_item(turn.item)), "gallery-emoji-convert",
+            )
+            self._latency_emoji_conversions.add(turn.conversion)
+            def converted(task):
+                self._latency_emoji_conversions.discard(task)
+                if turn.closed:
+                    self._cleanup_latency_paths(turn)
+            turn.conversion.add_done_callback(converted)
+            turn.path, turn.cleanup = await asyncio.shield(turn.conversion)
+            if not self._current_latency_image(turn):
+                turn.path = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            turn.path = None
+            logger.debug("smart_image latency emoji preparation unavailable: %s", type(exc).__name__)
+        finally:
+            if turn.closed or turn.path is None:
+                self._finish_latency_turn(turn)
+
+    def _observe_latency_text_send(self, turn):
+        event = turn.event
+        original = event.send
+        own_send = getattr(event, "__dict__", {}).get("send")
+        async def observed(message, *args, **kwargs):
+            if turn.embedded and (not self._current_latency_image(turn)
+                    or not compatible_with_reply(_plain(event.get_result()), turn.character, turn.item)):
+                self._drop_latency_attachment(turn, message)
+                self._finish_latency_turn(turn)
+            text = _plain(message)
+            turn.sending += 1
+            try:
+                outcome = await original(message, *args, **kwargs)
+            except BaseException:
+                if text:
+                    turn.failed = True
+                    self._finish_latency_turn(turn)
+                raise
+            finally:
+                turn.sending -= 1
+                if turn.closed:
+                    self._cleanup_latency_paths(turn)
+            if text:
+                if outcome is False:
+                    turn.failed = True
+                    self._finish_latency_turn(turn)
+                else:
+                    turn.sent_parts.append(text)
+                    turn.sent_at = asyncio.get_running_loop().time()
+            return outcome
+        def restore():
+            if event.send is observed:
+                if own_send is None:
+                    delattr(event, "send")
+                else:
+                    event.send = own_send
+        turn.restore_send = restore
+        event.send = observed
+
+    def _decorate_latency_emoji(self, event):
+        # Commands and direct plugin replies may never enter on_llm_request.
+        self._advance_latency_turn(event)
+        turn = event.get_extra(LATENCY_EMOJI_KEY)
+        if not isinstance(turn, EmojiTurn):
+            return turn is not None or self._latency_companion() is not None
+        if turn.closed or turn.decorated:
+            return True
+        result = event.get_result()
+        if (not self._valid_latency_turn(turn) or not isinstance(result, MessageEventResult)
+                or not result.is_llm_result() or not _plain(result).strip()
+                or any(isinstance(part, Image) for part in result.chain)):
+            self._finish_latency_turn(turn)
+            return True
+        turn.text = _plain(result)
+        turn.result = result
+        turn.character = copy.deepcopy(event.get_extra("qqbot_character") or {})
+        turn.decorated = True
+        self._observe_latency_text_send(turn)
+        # No yield, await, file conversion or model call on the decoration path.
+        if turn.path is not None and self._current_latency_image(turn):
+            if not compatible_with_reply(turn.text, turn.character, turn.item):
+                self._finish_latency_turn(turn)
+            else:
+                turn.ready_at_decoration = True
+                if self._proactive_emoji_embed(turn.cfg):
+                    turn.attachment = Image.fromFileSystem(str(turn.path))
+                    result.chain.append(turn.attachment)
+                    turn.embedded = True
+        return True
+
+    def _after_latency_text_sent(self, event):
+        turn = event.get_extra(LATENCY_EMOJI_KEY)
+        if not isinstance(turn, EmojiTurn):
+            return turn is not None
+        if turn.closed or turn.confirmed:
+            return True
+        if turn.restore_send:
+            turn.restore_send()
+        # AstrBot may call this hook even after swallowing a send exception.
+        sent_text = "".join(turn.sent_parts)
+        if (turn.failed or not turn.decorated or not sent_text.strip()
+                or sent_text.strip() != _plain(event.get_result()).strip()
+                or not self._valid_latency_turn(turn)):
+            self._finish_latency_turn(turn)
+            return True
+        turn.confirmed = True
+        # Formatting may split or clean punctuation after decorating. Validate
+        # the complete text actually sent, rather than an earlier draft.
+        turn.text = sent_text
+        turn.delivery = self._own_latency_task(self._deliver_latency_emoji(turn), "gallery-emoji-delivery")
+        return True
+
+    async def _deliver_latency_emoji(self, turn):
+        try:
+            if not turn.embedded:
+                grace = float(turn.settings["emoji_late_grace_seconds"])
+                if not math.isfinite(grace):
+                    grace = LATE_GRACE_DEFAULT
+                if turn.ready_at_decoration:
+                    # Setting late grace to zero disables waiting, not the
+                    # original ready-image separate-send probability branch.
+                    grace = max(grace, LATE_GRACE_DEFAULT)
+                deadline = turn.sent_at + max(0.0, min(grace, 12.0))
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return
+                async with asyncio.timeout(remaining):
+                    await asyncio.shield(turn.prepare)
+                    if (not turn.path or not self._current_latency_image(turn)
+                            or not compatible_with_reply(turn.text, turn.character, turn.item)
+                            or asyncio.get_running_loop().time() >= deadline):
+                        return
+                    # Reuse the installed task-local route guard and AstrBot API.
+                    from ...astrbot_plugin_proactive_agent.route_guard import bind_route
+                    bind_route(turn.origin, turn.snapshot.get_sender_id(),
+                               getattr(turn.snapshot.message_obj, "message_id", ""),
+                               bool(turn.snapshot.get_group_id()))
+                    sent = await self.context.send_message(turn.origin, MessageEventResult().file_image(str(turn.path)))
+                    if sent is False:
+                        return
+            elif not self._current_latency_image(turn):
+                return
+            await self._after_plugin_sent_image_for_meme_combat(
+                turn.snapshot, str(self._abs_plugin_data_path(turn.item["rel_path"])),
+                source="proactive_emoji", allow_burst=False,
+            )
+        except (TimeoutError, ValueError):
+            pass
+        finally:
+            self._finish_latency_turn(turn)
+
+    def _finish_latency_turn(self, turn):
+        turn.closed = True
+        current = asyncio.current_task()
+        for task in (turn.prepare, turn.delivery):
+            if task and task is not current and not task.done():
+                task.cancel()
+        if turn.restore_send:
+            turn.restore_send()
+        if turn.owner and turn.owner_done:
+            turn.owner.remove_done_callback(turn.owner_done)
+        if turn.event.get_extra("qqbot_cancel_reply_preparation") is turn.cancel_callback:
+            turn.event.set_extra("qqbot_cancel_reply_preparation", turn.previous_cancel)
+        if self._latency_emoji_turns.get(turn.route) is turn:
+            self._latency_emoji_turns.pop(turn.route, None)
+        if not turn.confirmed:
+            self._drop_latency_attachment(turn)
+        self._cleanup_latency_paths(turn)
+
+    def _drop_latency_attachment(self, turn, outgoing=None):
+        if turn.attachment is not None:
+            for result in (turn.result, outgoing):
+                if result is not None:
+                    result.chain[:] = [part for part in result.chain if part is not turn.attachment]
+
+    def _cleanup_latency_paths(self, turn):
+        if turn.sending:
+            return  # A transport may still be reading the prepared file.
+        paths = list(turn.cleanup)
+        if turn.conversion and turn.conversion.done() and not turn.conversion.cancelled():
+            try:
+                paths.extend(turn.conversion.result()[1])
+            except Exception:
+                pass
+        self._cleanup_temp_paths(list(dict.fromkeys(paths)))
+        turn.cleanup = []
+
+    async def _terminate_latency_emoji(self):
+        self._latency_emoji_closed = True
+        for turn in list(getattr(self, "_latency_emoji_turns", {}).values()):
+            self._finish_latency_turn(turn)
+        tasks = list(getattr(self, "_latency_emoji_tasks", ()))
+        for task in tasks:
+            # to_thread conversion cannot be stopped halfway. Let it return so
+            # its temporary paths can be cleaned, even during plugin shutdown.
+            if task not in getattr(self, "_latency_emoji_conversions", ()):
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
