@@ -14,6 +14,7 @@
 | 配置定时发消息、概率接话 | AstrBot 左侧「扩展功能 → 大肥龙控制面板」 |
 | 排查不能聊天或不能生图 | [DEPLOYMENT.md](DEPLOYMENT.md) 的验收与故障表 |
 | 查看可用命令 | [COMMANDS.md](COMMANDS.md) |
+| 查看每次更新了什么 | [CHANGELOG.md](CHANGELOG.md) |
 | 更新、备份、回滚 | [MAINTENANCE.md](MAINTENANCE.md) |
 
 ## 包含什么
