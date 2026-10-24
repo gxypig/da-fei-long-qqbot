@@ -32,6 +32,8 @@ Windows将解释器替换为`.venv\Scripts\python.exe`。Docker执行`docker com
 
 ## 维护者发布更新
 
+每次发布同步维护 [CHANGELOG.md](CHANGELOG.md)：概述新增功能、问题修复和必要的升级提醒，细小内部改动可以合并。未发布的内容先放“待发布”；核实GitHub源码后填写发布日期与提交链接，不将开发中或未验证的功能写成已发布。
+
 1. 在独立目录测试，保留来源、许可证和本地修改说明。
 2. 检查公开树没有`.env`、settings、运行config、数据库、日志、图片、cookie或账号信息。
 3. `python tools/release_check.py --write-manifest`，然后`python tools/release_check.py`。
