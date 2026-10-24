@@ -52,7 +52,7 @@
   </section>
   <section id="learning" class="tab-panel" hidden>
     <div class="section-head"><div><h2>空闲学习</h2><p>空闲学习与风格学习默认关闭；可以查看学习版本、待办，并回退到已有版本</p></div><button id="refresh-learning" type="button" class="secondary">刷新学习状态</button></div>
-    <article class="card"><label class="toggle"><input id="idle_learning_enabled" type="checkbox">启用空闲学习</label><label class="toggle"><input id="style_learning_enabled" type="checkbox">启用风格学习</label><p>全部功能保留，仅调整学习调度。开关分别保存，由学习服务安排空闲时的任务。</p></article>
+    <article class="card"><label class="toggle"><input id="idle_learning_enabled" type="checkbox">启用空闲学习</label><label class="toggle"><input id="style_learning_enabled" type="checkbox">启用风格学习</label><p>开启响应优化后，两种学习可以分别设置。关闭响应优化会暂停学习，保留队列；重新开启后在空闲时继续。</p></article>
     <p id="learning-status" role="status" aria-live="polite">打开本页后读取学习状态</p>
     <div class="card-grid"><article class="card"><h2>学习版本</h2><p id="learning-version">尚未提供当前版本</p><label for="learning-rollback-version">选择回退版本</label><select id="learning-rollback-version" disabled><option value="">暂无可回退版本</option></select><button id="learning-rollback" type="button" class="secondary rollback-button" disabled>回退到所选版本</button><p id="learning-action-status" role="status" aria-live="polite"></p></article><article class="card"><h2>学习待办</h2><div id="learning-pending">尚未提供待办状态</div></article></div>
     <article class="card"><h2>学习服务详情</h2><div id="learning-details">尚未提供学习状态</div></article>

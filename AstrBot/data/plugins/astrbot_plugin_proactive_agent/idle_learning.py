@@ -275,6 +275,10 @@ class IdleLearning:
         return self.cfg(key, default) if callable(self.cfg) else self.cfg.get(key, default)
 
     def _enabled(self, kind):
+        # The master switch also removes foreground tracking. Do not run idle
+        # jobs without that tracking, or switching back could compete with chat.
+        if not self._cfg("latency_optimization_enabled", False):
+            return False
         return self._cfg("idle_learning_enabled" if kind == "meme" else "style_learning_enabled", False) is True
 
     @property
@@ -440,7 +444,7 @@ class IdleLearning:
         try:
             while True:
                 self._prune()
-                if self.busy() or self._mutating:
+                if self.busy() or self._mutating or not self._cfg("latency_optimization_enabled", False):
                     self._idle_since = None
                 elif self._idle_since is None:
                     self._idle_since = time.monotonic()

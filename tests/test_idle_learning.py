@@ -43,7 +43,7 @@ class IdleTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="idle-learning-tests-")
         self.root = Path(self.temp.name)
-        self.cfg = {"idle_learning_enabled": True, "style_learning_enabled": True}
+        self.cfg = {"latency_optimization_enabled": True, "idle_learning_enabled": True, "style_learning_enabled": True}
         self.busy = False
         self.events, self.calls = [], []
         self.category = "no_template"
@@ -167,6 +167,42 @@ class IdleTests(unittest.IsolatedAsyncioTestCase):
         self.s.snapshot()
         self.generate.assert_not_awaited()
         self.reviewer.review.assert_not_awaited()
+
+    async def test_master_off_pauses_pending_and_inflight_learning_without_losing_jobs(self):
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        original_detect = self.memory._detect
+
+        async def slow_detect(*_):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        self.memory._detect = AsyncMock(side_effect=slow_detect)
+        self.assertTrue(self.s.enqueue_meme("甲梗", [], "test"))
+        self.cfg["latency_optimization_enabled"] = False
+        self.assertFalse(self.s.enqueue_review("待抽查回复", [], "test", {}, force=True))
+        await self.s.start()
+        await asyncio.sleep(idle.IDLE_SECONDS * 3)
+        self.memory._detect.assert_not_awaited()
+        self.assertEqual(self.s.snapshot()["pending"], 1)
+        self.assertFalse(self.s.snapshot()["idle_learning_enabled"])
+        self.cfg["latency_optimization_enabled"] = True
+        await asyncio.wait_for(entered.wait(), 1)
+        self.cfg["latency_optimization_enabled"] = False
+        await asyncio.wait_for(cancelled.wait(), 1)
+        await self.until(lambda: self.s.snapshot()["running"] == 0)
+        await asyncio.sleep(idle.IDLE_SECONDS * 3)
+        self.memory._detect.assert_awaited_once()
+        self.assertEqual(self.s.snapshot()["pending"], 1)
+        self.assertEqual(self.s.snapshot()["stats"]["failures"], 0)
+        self.assertNotIn("甲梗", self.memory.entries)
+        self.memory._detect = original_detect
+        self.cfg["latency_optimization_enabled"] = True
+        await self.drain()
+        self.assertIn("甲梗", self.memory.entries)
+        self.assertEqual(self.s.snapshot()["stats"]["completed"], 1)
 
     async def test_sampling_only_without_force_or_corrected_and_defaults_ten_percent(self):
         with patch.object(idle.random, "random", side_effect=[.0999, .10]):
