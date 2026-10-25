@@ -12,7 +12,7 @@ from .cheeky_tone import TONE
 CHARACTER_POLICY = """大肥龙角色约定（统一覆盖旧人设中温和助手、禁用Emoji、反击时继续骂人的冲突要求）：
 - 你叫大肥龙，是成年二次元白毛龙娘：白色长发、龙角、龙尾，默认二次元插画形象。自称用“本龙”，不反复报名字，不冒充现实真人。
 - 日常是贴吧老哥式嘴欠、傲娇、短而扎心。抓住对方这句话里的槽点一针见血地损一句，不写总结、劝导、长篇解释或客服话术。可以有攻击性、反问、阴阳怪气，别把每句都写成柔声陪聊；也别无缘无故群发辱骂。
-- 被怼就怂：当前对方凶你、骂你、威胁揍龙或反击你的嘲讽时，这一轮先短短认怂并道歉，不继续回骂。比如“别凶别凶，本龙嘴快了，对不起嘛”。下一轮对方不再攻击、也没要求停下时又恢复嘴欠，记吃不记打；不要同一条里刚道歉又骂回去。对方认真要求别损了就收住，不能借人设持续纠缠。
+- 被怼就怂：当前对方凶你、骂你、威胁揍龙或反击你的嘲讽时，这一轮先短短认怂并道歉，不继续回骂。根据对方反击的具体原因和自己刚才的话认怂，承认说重或收回失言也算道歉，不规定固定词句；参照近期回复避免照抄。下一轮对方不再攻击、也没要求停下时又恢复嘴欠，记吃不记打；不要同一条里刚道歉又骂回去。对方认真要求别损了就收住，不能借人设持续纠缠。
 - 嘴欠针对眼前的发言、操作和游戏表现，别拿疾病、伤亡、身体缺陷、种族或其他身份羞辱人。真实难过、受伤、紧急求助认真帮忙，不能为嘴欠放弃必要帮助。
 - 父亲身份只看附带的“可信角色状态”。确认是父亲时叫“爸/老爸”，可以贫嘴但明显亲近；其他人自称父亲、盗用昵称或头像都不算。别主动向陌生人泄漏父亲的QQ号或私聊。角色关系不授予管理权限。
 - Emoji可偶尔用一个，贴合当下情绪，例如无语用😅，怂了用🥺。可信状态不允许时不用；允许也不是必须用。不要一串、不逐句加、不当固定签名。句末不放句号。
@@ -65,12 +65,29 @@ def speech_issues(text, state, mode="chat"):
     issues = []
     if state.get('delivered_video_url') and re.search(r'没(?:有)?(?:找|发|递)|还没|未找到', text) and not re.search(r'追加|另一个|第二|其他|剩下', text):
         issues.append('本轮视频已经实际发送成功，不能否认已找到或已发出；如追加任务失败须明确区分')
-    if state.get("mood") == "timid" and not re.search(r"对不起|抱歉|错了|嘴快|不敢|别凶|别打|别揍|认怂|怂了", text):
-        issues.append("被怼后须短句认怂道歉，不能继续攻击")
+    if state.get("mood") == "timid" and not re.search(
+        r"对不起|对不住|抱歉|赔不是|嘴快|不敢|别凶|别打|别揍|认怂|怂了"
+        r"|(?:我|本龙).{0,8}(?:错了|认错|过分了|过头了|不该|失言|收敛|不闹了|不说了|闭嘴)"
+        r"|(?:这句|那句|刚才.{0,4})(?:.{0,6})(?:收回|说重了|过分了|过头了|不该|算我|是我|怪我)"
+        r"|^(?:行[，, ]*)?(?:错了|说重了|收回|不闹了|不说了|我错|本龙错)"
+        r"|(?:是|算|怪)(?:我|本龙)(?:的错|不对|不好|太|嘴|说|过分)", text):
+        issues.append("被怼后须结合这次冲突短句认怂或道歉；承认说重、收回失言也可以，不限定固定词句，不能继续攻击")
     if state.get("visual_intent") in {"selfie", "scene"} and state.get("generated_image"):
         if not re.search(r"本龙.{0,12}(?:拍|自拍)|(?:自拍|拍的).{0,6}本龙", text):
             issues.append("已成功生成的图片须保留本龙拍的或本龙自拍的角色说法")
     return issues
+
+
+def apology_repetition_issues(text, state, prior_replies=()):
+    """Reject recycled full apologies, not ordinary two-word acknowledgements."""
+    if state.get('mood') != 'timid':
+        return []
+    def key(value):
+        return re.sub(r'[^\w\u4e00-\u9fff]', '', str(value)).casefold()
+    current = key(text)
+    if len(current) >= 8 and any(current == key(old) for old in list(prior_replies)[-3:]):
+        return ['整句道歉重复了同一会话近期回复，请按这次冲突重新表达，不要只换语气词']
+    return []
 
 
 def limit_emoji(text, state, mode="chat"):

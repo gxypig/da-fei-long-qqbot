@@ -14,7 +14,7 @@ from aiocqhttp import CQHttp, Message
 from .chat_style_policy import CHAT_STYLE_POLICY, output_issues
 from .local_recall import BRIEF_RULE
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
-from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address
+from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address, apology_repetition_issues
 
 
 REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句话是否像正在 QQ 中随口聊天”，不只是正确、简短或礼貌。
@@ -148,6 +148,8 @@ class ReplyReviewer:
                     feedback = []
                     for attempt in range(3):
                         issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
+                        if mode == 'chat':
+                            issues += apology_repetition_issues(candidate, state, prior_replies)
                         video_links = re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', text)
                         if video_links and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', candidate) != video_links:
                             issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))

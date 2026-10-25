@@ -294,18 +294,27 @@
     if(!d.rows.length)$('meme-list').textContent='暂无匹配词条';$('meme-page').textContent=` 共${memeTotal}条 · 第${Math.floor(memeOffset/30)+1}页 `;
     $('meme-prev').disabled=memeOffset===0;$('meme-next').disabled=memeOffset+30>=memeTotal;
   }catch(e){notice(e.message,true);}finally{memeLoading=false;}}
-  async function loadLearningContent(){try{
-    const d=await api('learning_content'), root=$('learning-content');root.replaceChildren();
+  let learningRequest=0;
+  async function loadLearningContent(){const serial=++learningRequest;try{
+    const d=await api('learning_content',undefined,{q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0'});
+    if(serial!==learningRequest)return;
+    const root=$('learning-content');root.replaceChildren();
+    const counts=d.counts||{jobs:(d.jobs||[]).length,events:(d.events||[]).length,rules:(d.rules||[]).length};
+    $('learning-content-count').textContent=`匹配：待办${counts.jobs}条，学习记录${counts.events}条，生效策略${counts.rules}条；每类最多显示${d.limit||50}条，可缩小关键词范围`;
     for(const r of d.rules||[])contentLine(root,'当前生效策略',r.rule);
     for(const j of d.jobs||[])contentLine(root,`待办 #${j.id} · ${{meme:'识别与查证梗',usage:'理解梗的语境',review:'观察回复风格',validate:'验证表达策略'}[j.kind]||j.kind} · ${{pending:'等待空闲',running:'正在学习'}[j.status]||j.status}`,j.text+(j.phrases?.length?' · 已识别：'+j.phrases.join('、'):''));
     for(const e of d.events||[]){const card=document.createElement('article');card.className='card';contentLine(card,new Date(e.created*1000).toLocaleString('zh-CN'),e.kind==='meme'?'梗查证':'回复风格学习');
       if(e.kind==='meme'){contentLine(card,e.phrase,({learned:'已核实并入库',remembered:'已有记忆',unverified:'证据不足，未入库',understood:'已整理表达意图与反例',none:'无需学习'}[e.status]||e.status));if(e.entry)contentLine(card,'学到的内容',[e.entry.meaning,e.entry.usage,e.entry.intent,e.entry.avoid].filter(Boolean).join('；'));}
-      else {contentLine(card,'原话',e.before);contentLine(card,'审阅后',e.after);contentLine(card,'观察类别',e.category);}
+      else {contentLine(card,'状态','已观察，不代表策略已生效');contentLine(card,'原话',e.before);contentLine(card,'审阅后',e.after);contentLine(card,'观察类别',e.category);}
       root.append(card);
     }
-    if(!root.childNodes.length)root.textContent=d.closed?'学习服务尚未启动':'暂无学习内容，新任务会在空闲时执行';
-  }catch(e){$('learning-content').textContent=e.message;}}
+    if(!root.childNodes.length)root.textContent=d.closed?'学习服务尚未启动':$('learning-search').value.trim()||$('learning-only-learned').checked?'暂无符合筛选条件的学习内容':'暂无学习内容，新任务会在空闲时执行';
+  }catch(e){if(serial===learningRequest){$('learning-content').textContent=e.message;$('learning-content-count').textContent='读取失败，可重新搜索或刷新';}}}
   $('refresh-learning-content').addEventListener('click',loadLearningContent);
+  $('search-learning').addEventListener('click',loadLearningContent);
+  $('learning-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();return loadLearningContent();}});
+  $('learning-search').addEventListener('search',loadLearningContent);
+  $('learning-only-learned').addEventListener('change',loadLearningContent);
   $('refresh-memes').addEventListener('click',loadMemes);
   $('search-memes').addEventListener('click',()=>{memeOffset=0;loadMemes();});
   $('meme-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();memeOffset=0;loadMemes();}});
@@ -313,7 +322,7 @@
   $('meme-next').addEventListener('click',()=>{if(!memeLoading&&memeOffset+30<memeTotal){memeOffset+=30;loadMemes();}});
   $('meme-file').addEventListener('change',async()=>{const f=$('meme-file').files[0];if(!f)return;if(f.size>250000){$('meme-import-status').textContent='文件不能超过250KB';return;}$('meme-import').value=await f.text();});
   $('import-memes').addEventListener('click',async()=>{const button=$('import-memes');button.disabled=true;try{const entries=JSON.parse($('meme-import').value.replace(/^\uFEFF/,''));const d=await api('meme_repository',{entries,overwrite:$('meme-overwrite').checked});$('meme-import-status').textContent=`成功导入${d.imported}条，跳过${d.skipped}条`;memeOffset=0;await loadMemes();}catch(e){$('meme-import-status').textContent=e.message;}finally{button.disabled=false;}});
-  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(!['learning-rollback-version','emoji-probability-percent'].includes(event.target.id))changed();});
+  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(!['learning-rollback-version','emoji-probability-percent','learning-search','learning-only-learned'].includes(event.target.id))changed();});
   $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings();});
   $('load-groups').addEventListener('click',loadGroups);$('group_chat_ids').addEventListener('change',renderGroups);
   $('probability-slider').addEventListener('input',()=>{$('group_chat_probability').value=$('probability-slider').value;});

@@ -54,9 +54,9 @@ MAX_NOTE_CHARS = 400
 # prose. The model learns WHICH small expression strategies help this bot.
 RULES = {
     "brief": ("日常回复去掉冗余铺垫，通常一两句；保留必要事实与拒绝理由", "今天忙啥", "被一堆琐事绊住了"),
-    "concrete": ("接住对方提到的具体细节，少用空泛评价", "咖啡又洒了", "桌子倒是先喝上了"),
+    "concrete": ("接住对方提到的具体细节，少用空泛评价", "咖啡又洒了", "先擦一下，别把键盘泡了"),
     "no_template": ("省去客服开场与套话，直接接当前这句", "下雨了", "窗边已经听见了"),
-    "no_repeat": ("不要重复同一句意思或固定句尾", "又迟到了", "闹钟今天也罢工啊"),
+    "no_repeat": ("不要重复同一句意思或固定句尾", "又迟到了", "这回晚了多久"),
     "no_recap": ("省去复述问题、总结和升华，保留具体回应", "今天总算完工", "这下能歇口气了"),
     "no_stage": ("把舞台动作改成自然说话，保留原有语气", "困了", "眼皮都快打架了"),
     "few_questions": ("少加无必要的追问，不把每轮都变成连续问句", "吃饱了", "那就瘫一会儿"),
@@ -779,19 +779,42 @@ class IdleLearning:
                              (time.time(), kind, _json(details), expires))
             self._db.execute('DELETE FROM learning_events WHERE expires<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT 200)', (time.time(),))
 
-    def details(self):
+    def details(self, query='', learned_only=False):
+        # Panel-only local reads: filter all retained rows BEFORE display limits.
+        query = unicodedata.normalize('NFKC', str(query)[:100]).strip().casefold()
+        tokens = query.split()
+        def matches(value):
+            haystack = unicodedata.normalize('NFKC', _json(value)).casefold()
+            return all(token in haystack for token in tokens)
+        result = {'jobs':[], 'events':[], 'rules':[], 'closed':self._closed,
+                  'query':query, 'learned_only':bool(learned_only), 'limit':50,
+                  'counts':{'jobs':0, 'events':0, 'rules':0}}
         if self._closed:
-            return {'jobs':[], 'events':[], 'rules':[], 'closed':True}
+            return result
         now = time.time()
         jobs = []
-        for r in self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY status DESC,id DESC LIMIT 50', (now,)):
+        pending = () if learned_only else self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY status DESC,id DESC', (now,))
+        for r in pending:
             payload, progress = json.loads(r['payload']), json.loads(r['progress'])
-            jobs.append({'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
+            row = {'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
                 'text':str(payload.get('text',''))[:800], 'phrases':progress.get('phrases',[]),
-                'stage':progress.get('stage'), 'attempts':r['attempts']})
-        events = [{'id':r['id'], 'created':r['created'], 'kind':r['kind'], **json.loads(r['details'])}
-            for r in self._db.execute('SELECT * FROM learning_events WHERE expires>? ORDER BY id DESC LIMIT 50', (now,))]
-        return {'jobs':jobs, 'events':events, 'rules':[{'name':k, 'rule':RULES[k][0]} for k in self._active_rules() if k in RULES], 'closed':False}
+                'stage':progress.get('stage'), 'attempts':r['attempts']}
+            if matches({'text':payload.get('text',''), 'phrases':row['phrases'], 'stage':row['stage']}):
+                jobs.append(row)
+        events = []
+        for r in self._db.execute('SELECT * FROM learning_events WHERE expires>? ORDER BY id DESC', (now,)):
+            detail = json.loads(r['details'])
+            # Observing an edit or failing verification is NOT learning it.
+            if learned_only and not (r['kind'] == 'meme' and detail.get('status') in {'learned', 'remembered', 'understood'}):
+                continue
+            if matches(detail):
+                events.append({'id':r['id'], 'created':r['created'], 'kind':r['kind'], **detail})
+        rules = [{'name':k, 'rule':RULES[k][0]} for k in self._active_rules() if k in RULES]
+        rules = [row for row in rules if matches(row)]
+        for name, rows in (('jobs', jobs), ('events', events), ('rules', rules)):
+            result['counts'][name] = len(rows)
+            result[name] = rows[:50]
+        return result
 
     def snapshot(self):
         if self._closed:

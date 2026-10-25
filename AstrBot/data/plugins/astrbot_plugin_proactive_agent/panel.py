@@ -179,7 +179,14 @@ class PanelMixin:
 
     async def learning_content_api(self):
         learning = getattr(self, '_learning', None)
-        return jsonify({'status':'ok', 'data':learning.details() if learning else {'jobs':[], 'events':[], 'rules':[], 'closed':True}})
+        query = request.args.get('q', '')
+        learned = request.args.get('learned_only', '0').lower()
+        if len(query) > 100 or learned not in {'0', '1', 'false', 'true'}:
+            return jsonify({'status':'error', 'message':'搜索最多100字，已学习筛选须为0或1'}), 400
+        data = learning.details(query=query, learned_only=learned in {'1','true'}) if learning else {
+            'jobs':[], 'events':[], 'rules':[], 'closed':True,
+            'counts':{'jobs':0, 'events':0, 'rules':0}, 'limit':50}
+        return jsonify({'status':'ok', 'data':data})
 
     async def meme_repository_api(self):
         memory = self._memory

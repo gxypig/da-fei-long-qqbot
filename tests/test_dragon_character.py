@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 from test_maintenance import ROOT, Main
 from test_conversation import encoded
-from data.plugins.astrbot_plugin_proactive_agent.dragon_character import CharacterState, limit_emoji, speech_issues, proactive_note
+from data.plugins.astrbot_plugin_proactive_agent.dragon_character import CharacterState, limit_emoji, speech_issues, proactive_note, apology_repetition_issues
 from data.plugins.astrbot_plugin_proactive_agent.visual_intent import generation_kind
 from data.plugins.astrbot_plugin_proactive_agent.conversation_review import ReplyReviewer, bind_request, request_scope
 from data.plugins.astrbot_plugin_smart_imagechat_hub.backend.image_intent import is_generation_request, is_library_request
@@ -22,6 +22,21 @@ def event(text, sender="12345", group=""):
 
 
 class CharacterTests(unittest.TestCase):
+    def test_contextual_apologies_not_limited_to_one_phrase(self):
+        state={'mood':'timid'}
+        for text in ['刚才是本龙过分了', '那句收回，不该笑你', '行，本龙不闹了', '是我说重了', '本龙误会了，这句收回', '对不起', '不笑了，刚才拿你战绩损过头了，本龙认错']:
+            with self.subTest(text=text):
+                self.assertEqual(speech_issues(text,state),[])
+        self.assertTrue(speech_issues('你急了？',state))
+        self.assertTrue(speech_issues('你过分了，还不道歉？',state))
+
+    def test_repetition_guard_preserves_short_acknowledgements_and_other_moods(self):
+        old='别凶别凶，本龙嘴快了，对不起嘛'
+        self.assertTrue(apology_repetition_issues(old+'🥺',{'mood':'timid'},[old]))
+        self.assertEqual(apology_repetition_issues('对不起',{'mood':'timid'},['对不起']),[])
+        self.assertEqual(apology_repetition_issues(old,{'mood':'cheeky'},[old]),[])
+        self.assertEqual(apology_repetition_issues('是我说重了，那句收回',{'mood':'timid'},[old]),[])
+
     def test_father_uses_transport_identity_not_claim_or_nickname(self):
         state = CharacterState(roll=lambda:0)
         cfg = {"father_qq":"12345", "father_nickname":"父亲"}.get
@@ -72,6 +87,14 @@ class CharacterTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_review_rewrites_recycled_apology_even_if_model_passes(self):
+        old='别凶别凶，本龙嘴快了，对不起嘛'
+        generate=AsyncMock(side_effect=[encoded(True),encoded(False,'是我说重了，那句收回'),encoded(True)])
+        result=await ReplyReviewer(generate,lambda *a:None).review(old,origin='test',
+            prior_replies=[old],character={'mood':'timid','emoji_allowed':False})
+        self.assertEqual(result,'是我说重了，那句收回')
+        self.assertIn('整句道歉重复',str(generate.call_args_list[0].args[1]))
+
     def plugin(self):
         p=object.__new__(Main);p.config={"father_qq":"12345","father_address_probability":100,"meme_context_enabled":False,"reply_review_enabled":False}
         p._recent_messages={}

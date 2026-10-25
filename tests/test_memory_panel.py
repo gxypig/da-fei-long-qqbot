@@ -124,6 +124,34 @@ class MemoryPanelTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(s.details()['events'],[]);self.assertEqual(s.details()['jobs'],[])
         finally:await s.close()
 
+    async def test_learning_search_all_retained_rows_then_filter_learned(self):
+        generate=AsyncMock()
+        s=IdleLearning(self.path/'filter.db',{'latency_optimization_enabled':True,'idle_learning_enabled':True},
+            self.memory,generate,SimpleNamespace(review=AsyncMock()),lambda *_:None,lambda:True)
+        self.p._learning=s
+        try:
+            future=time.time()+100
+            s.record_detail('meme',{'phrase':'旧词','status':'learned','entry':{'meaning':'ＡＢＣ 特殊场景'}},future)
+            for i in range(55):s.record_detail('meme',{'phrase':f'新词{i}','status':'understood','entry':{'intent':'自嘲'}},future)
+            for status in ['remembered','unverified','none']:
+                s.record_detail('meme',{'phrase':status,'status':status},future)
+            s.record_detail('review',{'before':'特殊场景','after':'短接','status':'observed'},future)
+            s.enqueue_meme('等待学习特殊场景',[],'private-route-not-searchable')
+            d=(await (await self.client.get('/learning',query_string={'q':'abc 特殊','learned_only':'1'})).get_json())['data']
+            self.assertEqual([x['phrase'] for x in d['events']],['旧词'])
+            self.assertEqual(d['counts']['events'],1);self.assertEqual(d['jobs'],[])
+            d=(await (await self.client.get('/learning?learned_only=true')).get_json())['data']
+            self.assertEqual(d['counts']['events'],57);self.assertEqual(len(d['events']),50)
+            self.assertFalse(any(e['status'] in {'unverified','none','observed'} for e in d['events']))
+            self.assertEqual(s.details('private-route-not-searchable')['counts']['jobs'],0)
+            self.assertEqual(s.details("' OR 1=1 --")['counts']['events'],0)
+            d=s.details('特殊场景');self.assertEqual(d['counts']['events'],2);self.assertEqual(d['counts']['jobs'],1)
+            generate.assert_not_awaited();self.memory.search.assert_not_awaited()
+            for query in [{'learned_only':'maybe'},{'q':'字'*101}]:
+                self.assertEqual((await self.client.get('/learning',query_string=query)).status_code,400)
+        finally:await s.close()
+        self.assertTrue(s.details('旧词',True)['closed'])
+
     async def test_local_recall_keeps_archive_and_limits_payload_and_isolates_sessions(self):
         history=[]
         for i in range(30):
