@@ -158,8 +158,8 @@ class ContextWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job["delta"], expanded[8:16])
         self.assertEqual(job["old"], expanded[:16])
 
-    async def test_explicit_recall_returns_complete_context_without_jobs(self):
-        for request in ("还记得之前那张图吗", "Please recall the earlier discussion", "昨天说了什么"):
+    async def test_visual_recall_returns_complete_context_without_jobs(self):
+        for request in ("还记得之前那张图吗", "show the earlier image"):
             with self.subTest(request_type="recall"):
                 history = rounds(20, large=True)
                 history[-1] = [{"role": "user", "content": [{"type": "text", "text": request}]}]
@@ -167,6 +167,13 @@ class ContextWindowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(self.window.project(self.provider, source, "session-a"), source)
         self.assertEqual(self.window.jobs, {})
         self.provider.text_chat.assert_not_awaited()
+
+    async def test_disabled_text_retrieval_preserves_full_recall_option(self):
+        self.config['history_recall_enabled'] = False
+        history = rounds(20)
+        history[-1] = [{'role':'user','content':'昨天说了什么'}]
+        source = payload(history)
+        self.assertIs(self.window.project(self.provider, source, 'session-a'), source)
 
     async def test_unsupported_shapes_and_cross_round_tool_pairs_fall_back_unchanged(self):
         variants = []

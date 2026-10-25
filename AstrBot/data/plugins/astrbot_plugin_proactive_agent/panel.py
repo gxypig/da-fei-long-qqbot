@@ -25,6 +25,9 @@ FIELDS = {
     "discretionary_enabled": True,
     "fixed_messages_enabled": False, "fixed_group_ids": "", "fixed_private_ids": "",
     "fixed_message_interval_minutes": 30,
+    "fixed_message_random_enabled": False, "fixed_message_min_minutes": 60, "fixed_message_max_minutes": 100,
+    "history_recall_enabled": True,
+    "meme_understanding_enabled": True,
     "fixed_qzone_enabled": False, "fixed_qzone_interval_minutes": 360,
     "latency_optimization_enabled": False, "review_policy": "all",
     "reply_prediction_enabled": True, "prediction_provider_id": "",
@@ -101,9 +104,11 @@ def validate(data):
         raise ValueError("接话概率必须为0至100的整数")
     if not 5 <= values["interval_minutes"] <= 1440:
         raise ValueError("主动检查间隔须为5至1440分钟")
-    for key in ["fixed_message_interval_minutes", "fixed_qzone_interval_minutes"]:
+    for key in ["fixed_message_interval_minutes", "fixed_qzone_interval_minutes", 'fixed_message_min_minutes', 'fixed_message_max_minutes']:
         if not 5 <= values[key] <= 10080:
             raise ValueError("固定发送间隔须为5至10080分钟")
+    if values['fixed_message_min_minutes'] > values['fixed_message_max_minutes']:
+        raise ValueError('随机间隔下限不能大于上限')
     for key in ["fixed_group_ids", "fixed_private_ids"]:
         ids = [v for v in re.split(r"[,，\s]+", values[key]) if v]
         if len(ids) > 200 or any(not re.fullmatch(r"[0-9]{1,20}", v) for v in ids):
@@ -167,8 +172,40 @@ class PanelMixin:
             ("panel_schedule", self.panel_schedule_api, ["GET"]),
             ("panel_health", self.panel_health_api, ["GET"]),
             ("learning_action", self.learning_action_api, ["POST"]),
+            ('learning_content', self.learning_content_api, ['GET']),
+            ('meme_repository', self.meme_repository_api, ['GET','POST']),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
+
+    async def learning_content_api(self):
+        learning = getattr(self, '_learning', None)
+        return jsonify({'status':'ok', 'data':learning.details() if learning else {'jobs':[], 'events':[], 'rules':[], 'closed':True}})
+
+    async def meme_repository_api(self):
+        memory = self._memory
+        if request.method == 'POST':
+            if request.content_length and request.content_length > 250_000:
+                return jsonify({'status':'error','message':'导入文件不能超过250KB'}), 400
+            body = await request.get_json(silent=True)
+            try:
+                if not isinstance(body,dict) or set(body) - {'entries','overwrite'}:
+                    raise ValueError('请提交词条数组')
+                async with self._panel_lock:
+                    result = memory.import_entries(body.get('entries'), body.get('overwrite',False))
+                return jsonify({'status':'ok','data':result})
+            except ValueError as exc:
+                return jsonify({'status':'error','message':str(exc)}), 400
+            except OSError:
+                return jsonify({'status':'error','message':'保存失败，原有词条未改动'}), 500
+        query = request.args.get('q','')[:100].casefold()
+        try:
+            offset = max(0,int(request.args.get('offset',0)))
+        except ValueError:
+            offset = 0
+        rows = [dict(row, fresh=memory.fresh(row)) for row in memory.entries.values()
+                if not query or query in json.dumps(row,ensure_ascii=False).casefold()]
+        rows.sort(key=lambda row:(-row.get('imported_at',row.get('verified_at',0)),row['phrase']))
+        return jsonify({'status':'ok','data':{'total':len(rows),'offset':offset,'rows':rows[offset:offset+30]}})
 
     def _emoji_library(self):
         lookup = getattr(self.context, "get_registered_star", None)

@@ -5,6 +5,7 @@ import asyncio
 import copy
 import json
 import time
+import random
 from datetime import datetime
 
 from .conversation_review import delivery_policy, sent_text
@@ -22,10 +23,14 @@ def plans(plugin):
     result = {}
     if plugin._cfg("fixed_messages_enabled", False):
         interval = max(5, int(plugin._cfg("fixed_message_interval_minutes", 30))) * 60
+        if plugin._cfg('fixed_message_random_enabled', False):
+            low = max(5, min(10080, int(plugin._cfg('fixed_message_min_minutes', 60))))
+            high = max(low, min(10080, int(plugin._cfg('fixed_message_max_minutes', 100))))
+            interval = (low * 60, high * 60)
         for lane, switch, field in [("group", "allow_group", "fixed_group_ids"),
                                      ("private", "allow_private", "fixed_private_ids")]:
             if plugin._cfg(switch, False):
-                for target in plugin._id_set(plugin._cfg(field, "")):
+                for target in sorted(plugin._id_set(plugin._cfg(field, ""))):
                     result[f"{lane}:{target}"] = interval
     if plugin._cfg("fixed_qzone_enabled", False) and plugin._cfg("allow_qzone", True):
         result["qzone:"] = max(5, int(plugin._cfg("fixed_qzone_interval_minutes", 360))) * 60
@@ -37,10 +42,18 @@ def next_slot(due, interval, now):
 
 
 class FixedScheduler:
-    def __init__(self, plugin, clock=time.time):
+    def __init__(self, plugin, clock=time.time, draw=random.randint):
         self.plugin, self.clock = plugin, clock
+        self.draw = draw
         self.lock = asyncio.Lock()
         self.running = False
+
+    def interval(self, plan):
+        return self.draw(plan[0]//60, plan[1]//60)*60 if isinstance(plan, tuple) else plan
+
+    @staticmethod
+    def signature(plan):
+        return list(plan) if isinstance(plan, tuple) else plan
 
     async def tick(self):
         # A slow provider cannot cause overlapping ticks or duplicate recipients.
@@ -59,10 +72,11 @@ class FixedScheduler:
         current = plans(p)
         # Removing a selection also removes its timer; reselecting starts a full interval.
         state = {key: value for key, value in state.items() if key in current}
-        for key, interval in current.items():
+        for key, plan in current.items():
             entry = state.get(key)
-            if not isinstance(entry, dict) or entry.get("interval") != interval:
-                state[key] = {"interval": interval, "due": now + interval, "status": "waiting"}
+            if not isinstance(entry, dict) or entry.get('plan', entry.get('interval')) != self.signature(plan):
+                interval = self.interval(plan)
+                state[key] = {"interval": interval, 'plan':self.signature(plan), "due": now + interval, "status": "waiting"}
         await p.put_kv_data(STATE_KEY, copy.deepcopy(state))
         if not p._cfg("enable", True) or p._quiet_now():
             return
@@ -74,15 +88,17 @@ class FixedScheduler:
                 now = self.clock()
                 if max(entry["due"], entry.get("retry_at", 0)) > now:
                     return
-                if not self.allowed(key, entry["interval"]):
+                plan = current[key]
+                if not self.allowed(key, plan):
                     return
                 due = entry["due"]
                 # Persist before external delivery. After a crash the uncertain slot is
                 # skipped, never blindly replayed; OneBot has no idempotency key.
-                entry.update(due=next_slot(due, entry["interval"], now), status="sending", attempted_at=now)
+                interval = self.interval(plan)
+                entry.update(interval=interval, due=(now+interval if isinstance(plan,tuple) else next_slot(due, interval, now)), status="sending", attempted_at=now)
                 await self.save(state)
                 try:
-                    content = await asyncio.wait_for(self.generate_and_send(key, entry["interval"]), 150)
+                    content = await asyncio.wait_for(self.generate_and_send(key, plan), 150)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -96,7 +112,7 @@ class FixedScheduler:
                     await p._record(f"固定定时 {key} 未确认成功（{type(exc).__name__}），其他目标继续")
                 else:
                     entry.update(status="sent", last_success=self.clock(), failures=0, retry_at=0, error="")
-                    entry["due"] = next_slot(due, entry["interval"], self.clock())
+                    entry["due"] = self.clock()+interval if isinstance(plan,tuple) else next_slot(due, interval, self.clock())
                     entry["recent"] = (entry.get("recent", []) + [content])[-4:]
                     await p._record(f"固定定时已发送 {key}")
                 finally:

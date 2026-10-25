@@ -3,7 +3,7 @@
 <body><main>
   <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
   <div id="notice" role="status" aria-live="polite"></div>
-  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="performance">性能与审查</button><button class="tab" data-tab="learning">空闲学习</button><button class="tab" data-tab="health">运行报告</button></nav>
+  <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="performance">性能与审查</button><button class="tab" data-tab="learning">空闲学习</button><button class="tab" data-tab="memes">梗仓库</button><button class="tab" data-tab="health">运行报告</button></nav>
   <form id="settings"><section id="groups" class="tab-panel">
     <div class="section-head"><div><h2>哪些群可以自然接话</h2><p>勾选后成为特殊接话群；未勾选的群继续按原有唤醒规则回复</p></div><button id="load-groups" type="button" class="secondary">刷新群列表</button></div>
     <div id="group-list" class="group-list" aria-label="特殊接话群">正在读取群列表…</div>
@@ -19,7 +19,7 @@
   </section>
   <section id="fixed" class="tab-panel" hidden>
     <div class="section-head"><div><h2>每个勾选对象，都有自己的定时安排</h2><p>到点给所有勾选群和好友分别生成消息，不共用发送名额；同一个对象不会再被自由模式重复选中</p></div><button id="load-targets" type="button" class="secondary">刷新好友和群</button></div>
-    <div class="card-grid"><article class="card"><label class="toggle master"><input id="fixed_messages_enabled" type="checkbox">开启固定消息</label><label for="fixed_message_interval_minutes">群聊和私聊发送间隔（分钟）</label><input id="fixed_message_interval_minutes" type="number" min="5" max="10080" required><p>每个目标首次勾选或改间隔后，等待一个完整间隔。生成和审阅会有少量耗时；单个失败独立重试</p></article>
+    <div class="card-grid"><article class="card"><label class="toggle master"><input id="fixed_messages_enabled" type="checkbox">开启固定消息</label><label for="fixed_message_interval_minutes">群聊和私聊发送间隔（分钟）</label><input id="fixed_message_interval_minutes" type="number" min="5" max="10080" required><label class="toggle"><input id="fixed_message_random_enabled" type="checkbox">使用随机间隔范围</label><div class="inline"><label>下限（分钟）<input id="fixed_message_min_minutes" type="number" min="5" max="10080" required></label><label>上限（分钟）<input id="fixed_message_max_minutes" type="number" min="5" max="10080" required></label></div><p>开启后固定间隔不生效，例如60至100分钟。每个对象每轮各自抽签，重启保留已抽好的时间；动态仍用独立固定间隔</p><p>每个目标首次勾选或改间隔后，等待一个完整间隔。生成和审阅会有少量耗时；单个失败独立重试</p></article>
     <article class="card"><label class="toggle master"><input id="fixed_qzone_enabled" type="checkbox">开启固定动态</label><label for="fixed_qzone_interval_minutes">动态发布间隔（分钟）</label><input id="fixed_qzone_interval_minutes" type="number" min="5" max="10080" required><p>动态使用独立时钟，不占用消息名额，也不受原来自由动态冷却限制</p></article></div>
     <div class="callout">仍遵守「主动行为」总开关、群聊/私聊/动态渠道开关和免打扰。免打扰期间不发，恢复后每个到期目标最多补一次。未勾选任何对象就不发送消息</div>
     <h2>定时群聊</h2><div id="fixed-group-list" class="group-list"></div><details><summary>手动填写群号</summary><textarea id="fixed_group_ids" rows="2"></textarea></details>
@@ -45,7 +45,7 @@
         <p>保存后后续调度读取新设置，已开始的任务继续完成。</p></article>
       <article class="card"><h2>审查策略</h2><label for="review_policy">选择审查策略</label><select id="review_policy"><option value="all">全部审查（默认）</option><option value="speed_first">速度优先</option></select><p>保留原有功能链，由调度服务按策略安排审查。</p><label for="reply_audit_sample_percent">回复审计抽样比例（%，0至100）</label><input id="reply_audit_sample_percent" type="number" min="0" max="100" step="1" required><label for="emoji_late_grace_seconds">表情包迟到宽限（秒，0至10）</label><input id="emoji_late_grace_seconds" type="number" min="0" max="10" step="1" required></article>
     </div>
-    <article class="card"><h2>长对话记忆</h2><label class="toggle"><input id="context_window_enabled" type="checkbox">智能压缩长聊天上下文</label><label for="context_recent_turns">近期完整对话最多保留轮数（4至40）</label><input id="context_recent_turns" type="number" min="4" max="40" step="1" required><label for="context_recent_tokens">近期上下文估算预算（2000至16000）</label><input id="context_recent_tokens" type="number" min="2000" max="16000" step="500" required><p>默认12轮、6000估算token。较旧内容保留重点摘录，空闲时整理为摘要；当前任务、工具结果、近期图片与最少4轮完整保留，可超出预算。人设、工具定义和摘要另计。原始记录仍在本地，明确追问旧事时恢复完整上下文，可能更慢。</p><div id="performance-context">尚未提供压缩状态</div></article>
+    <article class="card"><h2>长对话记忆</h2><label class="toggle"><input id="context_window_enabled" type="checkbox">智能压缩长聊天上下文</label><label for="context_recent_turns">近期完整对话最多保留轮数（4至40）</label><input id="context_recent_turns" type="number" min="4" max="40" step="1" required><label for="context_recent_tokens">近期上下文估算预算（2000至16000）</label><input id="context_recent_tokens" type="number" min="2000" max="16000" step="500" required><p>默认12轮、6000估算token。较旧内容保留重点摘录，空闲时整理为摘要；当前任务、工具结果、近期图片与最少4轮完整保留，可超出预算。人设、工具定义和摘要另计。原始记录仍在本地，追问旧事优先检索当前会话相关原话，旧图片追问保留原来的图片回看路径。</p><label class="toggle"><input id="history_recall_enabled" type="checkbox">从本地原始文本找回旧事</label><div id="performance-context">尚未提供压缩状态</div></article>
     <article class="card"><h2>回复预测</h2><label class="toggle"><input id="reply_prediction_enabled" type="checkbox">允许回复预测（默认开启，供延迟优化调度使用）</label><label for="prediction_provider_id">预测模型提供商 ID</label><input id="prediction_provider_id" type="text" placeholder="留空使用插件默认提供商" autocomplete="off"><p>更改后保存设置，后续预测读取新的提供商选择。</p></article>
     <h2 class="status-heading">当前运行状态</h2><p id="performance-status" role="status" aria-live="polite">打开本页后读取运行状态</p>
     <div class="card-grid"><article class="card"><h2>调度工作</h2><div id="performance-work">暂无状态</div></article><article class="card"><h2>预测统计</h2><div id="performance-prediction">暂无状态</div></article></div>
@@ -55,14 +55,20 @@
   </section>
   <section id="learning" class="tab-panel" hidden>
     <div class="section-head"><div><h2>空闲学习</h2><p>空闲学习与风格学习默认关闭；可以查看学习版本、待办，并回退到已有版本</p></div><button id="refresh-learning" type="button" class="secondary">刷新学习状态</button></div>
-    <article class="card"><label class="toggle"><input id="idle_learning_enabled" type="checkbox">启用空闲学习</label><label class="toggle"><input id="style_learning_enabled" type="checkbox">启用风格学习</label><p>开启响应优化后，两种学习可以分别设置。关闭响应优化会暂停学习，保留队列；重新开启后在空闲时继续。</p></article>
+    <article class="card"><label class="toggle"><input id="idle_learning_enabled" type="checkbox">启用空闲学习</label><label class="toggle"><input id="style_learning_enabled" type="checkbox">启用风格学习</label><label class="toggle"><input id="meme_understanding_enabled" type="checkbox">空闲时理解梗的表达意图、反例和变体</label><p>开启响应优化后，两种学习可以分别设置。关闭响应优化会暂停学习，保留队列；重新开启后在空闲时继续。</p></article>
     <p id="learning-status" role="status" aria-live="polite">打开本页后读取学习状态</p>
     <div class="card-grid"><article class="card"><h2>学习版本</h2><p id="learning-version">尚未提供当前版本</p><label for="learning-rollback-version">选择回退版本</label><select id="learning-rollback-version" disabled><option value="">暂无可回退版本</option></select><button id="learning-rollback" type="button" class="secondary rollback-button" disabled>回退到所选版本</button><p id="learning-action-status" role="status" aria-live="polite"></p></article><article class="card"><h2>学习待办</h2><div id="learning-pending">尚未提供待办状态</div></article></div>
-    <article class="card"><h2>学习服务详情</h2><div id="learning-details">尚未提供学习状态</div></article>
+    <article class="card"><h2>正在学什么</h2><p>展示待学原话、识别到的梗、已完成的查证与风格修改。仅本机登录管理员可见，保留期限与学习样本一致；升级前没有保存的过程不会编造补写</p><button id="refresh-learning-content" type="button" class="secondary">刷新学习内容</button><div id="learning-content" aria-live="polite">点击刷新查看</div></article><article class="card"><h2>学习服务详情</h2><div id="learning-details">尚未提供学习状态</div></article>
   </section>
   <div id="save-bar" class="save-bar"><span id="save-state">读取设置中</span><div><button type="button" id="reload" class="secondary">重新读取</button><button id="save" type="submit" disabled>保存设置</button></div></div>
   </form>
   <form id="emoji-settings-form"></form>
+  <section id="memes" class="tab-panel" hidden>
+    <div class="section-head"><div><h2>梗仓库</h2><p>本地检索候选，由模型按语境决定是否使用；严肃话题不硬玩梗</p></div><button id="refresh-memes" type="button" class="secondary">刷新词条</button></div>
+    <article class="card"><label for="meme-search">搜索梗词、含义或用法</label><input id="meme-search" type="search" maxlength="100"><button id="search-memes" type="button">搜索</button><div id="meme-list" aria-live="polite"></div><button id="meme-prev" type="button" class="secondary">上一页</button><span id="meme-page"></span><button id="meme-next" type="button" class="secondary">下一页</button></article>
+    <article class="card"><h2>自定义导入</h2><p>选择JSON文件或粘贴数组，每次最多100条。phrase是梗词，meaning含义，usage适用场景与禁用情境，examples可选例句，triggers可选场景线索，intent可选表达意图，avoid可选反例与边界。导入标记为“自定义”，不会假称联网核实；默认跳过同名词条</p>
+    <input id="meme-file" type="file" accept=".json,application/json" aria-label="选择梗词JSON文件"><textarea id="meme-import" rows="8" aria-label="梗词JSON数组" placeholder='[{"phrase":"示例梗词","meaning":"含义","usage":"什么时候适合用，什么时候不要用","examples":["短接法"],"triggers":["触发短语"]}]'></textarea><label class="toggle"><input id="meme-overwrite" type="checkbox">覆盖同名词条（不勾选则跳过）</label><button id="import-memes" type="button">导入梗词</button><p id="meme-import-status" role="status"></p></article>
+  </section>
   <section id="health" class="tab-panel" hidden><div class="section-head"><div><h2>看看每一段连接是否正常</h2><p>检查 QQ/OneBot、AstrBot、模型 API 和功能组件，不会试发群消息或动态</p></div><button class="secondary" id="refresh-health">刷新结果</button></div>
     <div class="callout">全项目检查修复已独立：请在电脑的 QQBot 项目目录双击「一键检查修复.bat」。即使 AstrBot 控制台打不开，也能检查并修复；这里仅显示上次运行报告</div>
     <p id="job-status" role="status">尚未读取检查状态</p><div id="health-summary" class="callout"></div><div id="health-results"></div>

@@ -261,6 +261,9 @@ class IdleLearning:
                 CREATE TABLE IF NOT EXISTS reports(
                     id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL NOT NULL, summary TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS forgets(phrase TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS learning_events(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL NOT NULL,
+                    kind TEXT NOT NULL, details TEXT NOT NULL, expires REAL NOT NULL);
                 PRAGMA application_id=1229212741;
                 PRAGMA user_version=1;
             """)
@@ -279,7 +282,7 @@ class IdleLearning:
         # jobs without that tracking, or switching back could compete with chat.
         if not self._cfg("latency_optimization_enabled", False):
             return False
-        return self._cfg("idle_learning_enabled" if kind == "meme" else "style_learning_enabled", False) is True
+        return self._cfg("idle_learning_enabled" if kind in {'meme','usage'} else "style_learning_enabled", False) is True and (kind != 'usage' or self._cfg('meme_understanding_enabled',False))
 
     @property
     def _limit(self):
@@ -304,7 +307,7 @@ class IdleLearning:
         if not force and now < self._next_prune:
             return
         with self._db:
-            for table in ("jobs", "cases"):
+            for table in ("jobs", "cases", "learning_events"):
                 self._db.execute(f"DELETE FROM {table} WHERE expires<=?", (now,))
             self._db.execute("DELETE FROM dedup WHERE created<=?", (now - self._ttl,))
             self._db.execute("DELETE FROM dedup WHERE key NOT IN (SELECT key FROM dedup ORDER BY created DESC, key DESC LIMIT ?)", (self._limit * 2,))
@@ -329,7 +332,7 @@ class IdleLearning:
         if self._closed or self._mutating or not self._enabled(kind):
             return False
         self._prune()
-        if kind == "meme" and any(self._mentions(payload, {}, r[0]) for r in self._db.execute("SELECT phrase FROM forgets")):
+        if kind in {'meme','usage'} and any(self._mentions(payload, {}, r[0]) for r in self._db.execute("SELECT phrase FROM forgets")):
             return False
         key, now = key or _hash([kind, payload]), time.time()
         with self._db:
@@ -451,7 +454,7 @@ class IdleLearning:
                 self._maybe_candidate()
                 ready = self._idle_since is not None and time.monotonic() - self._idle_since >= IDLE_SECONDS
                 if ready:
-                    enabled = [k for k in ("meme", "review", "validate") if self._enabled(k)]
+                    enabled = [k for k in ("meme", "review", "validate", 'usage') if self._enabled(k)]
                     placeholders = ",".join("?" for _ in enabled)
                     job = self._db.execute(
                         f"SELECT * FROM jobs WHERE status='pending' AND ready<=? AND kind IN ({placeholders}) ORDER BY id LIMIT 1",
@@ -459,6 +462,13 @@ class IdleLearning:
                     if job is not None:
                         await self._run_job(dict(job))
                         continue
+                    if self._enabled('usage') and time.monotonic() >= getattr(self, '_usage_scan_after', 0):
+                        self._usage_scan_after = time.monotonic()+60
+                        for row in list(self.memory.entries.values()):
+                            if not row.get('intent') and self.memory.fresh(row):
+                                if self._enqueue('usage', {'text':row['phrase']}, key='usage:'+_hash(row)):
+                                    self._usage_scan_after = time.monotonic()+5
+                                    break
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), POLL_SECONDS)
@@ -522,6 +532,10 @@ class IdleLearning:
             payload, progress = json.loads(job["payload"]), json.loads(job["progress"])
             if job["kind"] == "meme":
                 await self._learn_meme(job, payload, progress)
+            elif job['kind'] == 'usage':
+                row = await self._call(self.memory.understand, payload['text'])
+                if row:
+                    self.record_detail('meme', {'phrase':payload['text'],'status':'understood','entry':row},job['expires'])
             elif job["kind"] == "review":
                 await self._learn_review(job, payload, progress)
             else:
@@ -542,10 +556,15 @@ class IdleLearning:
                     accepted.append(phrase)
             progress.update(phrases=accepted, index=0)
             self._save_progress(job, progress)
+            if not accepted:
+                self.record_detail('meme', {'phrase':'未识别到需要学习的梗', 'status':'none',
+                    'hint':'当前原话未被判定为公共梗，不写入梗库'}, job['expires'])
         while progress["index"] < len(progress["phrases"]):
             # lookup, never direct insertion: existing public-source validation,
             # key lock, atomic save, TTL and normal forgetting remain authoritative.
             result = await self._call(self.memory.lookup, progress["phrases"][progress["index"]], case["origin"])
+            self.record_detail('meme', {'phrase':progress['phrases'][progress['index']],
+                'status':result.get('status'), 'entry':result.get('entry'), 'hint':result.get('hint')}, job['expires'])
             self.audit("idle_meme", {"status": str(result.get("status", "unverified"))[:32]})
             progress["index"] += 1
             self._save_progress(job, progress)
@@ -582,6 +601,8 @@ class IdleLearning:
             progress["category"] = category
             self._save_progress(job, progress)
         category = progress["category"]
+        self.record_detail('review', {'before':case['text'], 'after':progress.get('checked'),
+            'category':category, 'status':'observed'}, job['expires'])
         if category == "none":
             return
         # Passing, unchanged samples cannot be relabeled as failures by a model.
@@ -752,6 +773,26 @@ class IdleLearning:
             return ""
         return _note_for(self._active_rules(), text)
 
+    def record_detail(self, kind, details, expires):
+        with self._db:
+            self._db.execute('INSERT INTO learning_events(created,kind,details,expires) VALUES(?,?,?,?)',
+                             (time.time(), kind, _json(details), expires))
+            self._db.execute('DELETE FROM learning_events WHERE expires<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT 200)', (time.time(),))
+
+    def details(self):
+        if self._closed:
+            return {'jobs':[], 'events':[], 'rules':[], 'closed':True}
+        now = time.time()
+        jobs = []
+        for r in self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY status DESC,id DESC LIMIT 50', (now,)):
+            payload, progress = json.loads(r['payload']), json.loads(r['progress'])
+            jobs.append({'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
+                'text':str(payload.get('text',''))[:800], 'phrases':progress.get('phrases',[]),
+                'stage':progress.get('stage'), 'attempts':r['attempts']})
+        events = [{'id':r['id'], 'created':r['created'], 'kind':r['kind'], **json.loads(r['details'])}
+            for r in self._db.execute('SELECT * FROM learning_events WHERE expires>? ORDER BY id DESC LIMIT 50', (now,))]
+        return {'jobs':jobs, 'events':events, 'rules':[{'name':k, 'rule':RULES[k][0]} for k in self._active_rules() if k in RULES], 'closed':False}
+
     def snapshot(self):
         if self._closed:
             return dict(self._last_snapshot)
@@ -823,10 +864,14 @@ class IdleLearning:
         async with self._control:
             if self._closed:
                 raise RuntimeError("IdleLearning is closed")
+            with self._db:
+                for r in self._db.execute('SELECT id,details FROM learning_events').fetchall():
+                    if _fold(phrase) in _fold(r['details']):
+                        self._db.execute('DELETE FROM learning_events WHERE id=?', (r['id'],))
             # The tombstone is committed BEFORE cancellation/deletion. It only
             # blocks matching meme enqueues until the memory deletion succeeds;
             # style jobs and unrelated memes remain runnable even if disk fails.
-            rows = self._db.execute("SELECT id,key,payload,progress FROM jobs WHERE kind='meme'").fetchall()
+            rows = self._db.execute("SELECT id,key,payload,progress FROM jobs WHERE kind IN ('meme','usage')").fetchall()
             affected = [r for r in rows if self._mentions(json.loads(r["payload"]), json.loads(r["progress"]), phrase)]
             with self._db:
                 self._db.execute("INSERT OR IGNORE INTO forgets VALUES(?)", (phrase,))

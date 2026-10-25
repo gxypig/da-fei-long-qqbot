@@ -150,6 +150,8 @@ class PerformancePanelAPITests(unittest.IsolatedAsyncioTestCase):
             PREFIX + "panel_schedule": ["GET"],
             PREFIX + "panel_health": ["GET"],
             PREFIX + "learning_action": ["POST"],
+            PREFIX + "learning_content": ["GET"],
+            PREFIX + "meme_repository": ["GET", "POST"],
         })
         self.assertEqual(len(registered), self.plugin.context.register_web_api.call_count)
 

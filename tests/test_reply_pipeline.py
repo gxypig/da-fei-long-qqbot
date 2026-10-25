@@ -122,7 +122,7 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
     async def test_local_meme_hit_never_awaits_detection_or_learning(self):
         p = plugin(); p.config.update(meme_context_enabled=True, meme_memory_enabled=True)
         e = event('典中典'); p._recent_messages = {}; p._meme_hints = SimpleNamespace(match=lambda _: [])
-        p._memory = SimpleNamespace(match=lambda _: [{'phrase': '典中典', 'meaning': '非常典型的套路'}])
+        p._memory = SimpleNamespace(contextual=lambda *_: [{'phrase': '典中典', 'meaning': '非常典型的套路'}])
         p._meme_prefetch = SimpleNamespace(get=AsyncMock(side_effect=AssertionError('foreground enrichment')))
         p.prepare_reply_prediction = Mock(return_value=None)
         req = SimpleNamespace(prompt='典中典', system_prompt='原人设')

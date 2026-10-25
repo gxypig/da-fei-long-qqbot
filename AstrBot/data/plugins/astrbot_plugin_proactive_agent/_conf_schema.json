@@ -295,5 +295,30 @@
     "type": "int",
     "default": 6000,
     "hint": "2000至16000，估算值，不包含人设、工具定义与旧事摘要。当前任务、最少4轮或明确历史查询可超出预算。"
+  },
+  "fixed_message_random_enabled": {
+    "type": "bool",
+    "default": false,
+    "description": "固定消息使用随机间隔范围；每个对象独立抽取并保存下次时间"
+  },
+  "fixed_message_min_minutes": {
+    "type": "int",
+    "default": 60,
+    "description": "随机消息间隔下限（分钟，5至10080）"
+  },
+  "fixed_message_max_minutes": {
+    "type": "int",
+    "default": 100,
+    "description": "随机消息间隔上限（分钟，不小于下限）"
+  },
+  "history_recall_enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "追问旧事时从当前会话本地原始文本检索相关片段，避免重新发送全部历史"
+  },
+  "meme_understanding_enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "空闲时补全梗的表达意图、反例和变体；使用已有资料，不在聊天前增加一次模型调用"
   }
 }

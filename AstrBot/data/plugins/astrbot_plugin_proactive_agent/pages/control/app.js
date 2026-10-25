@@ -4,12 +4,12 @@
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
   let statusRequest, learningBusy = false, learningRollbackAvailable = false;
   let emojiRevision, emojiWritable = false, emojiDirty = false, emojiBusy = false;
-  const booleans = ['group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
-  const numbers = ['father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
+  const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
+  const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
-  async function api(endpoint, body) {
-    const result = await (body===undefined ? bridge.apiGet(endpoint) : bridge.apiPost(endpoint,body));
+  async function api(endpoint, body, params) {
+    const result = await (body===undefined ? bridge.apiGet(endpoint, params) : bridge.apiPost(endpoint,body));
     if(result?.status==='error') throw new Error(result.message||'请求失败');
     return result?.data ?? result;
   }
@@ -261,7 +261,7 @@
   $('load-targets').addEventListener('click',loadTargets);
   $('refresh-schedule').addEventListener('click',refreshSchedule);
   $('refresh-performance').addEventListener('click',refreshPerformance);
-  $('refresh-learning').addEventListener('click',refreshPerformance);
+  $('refresh-learning').addEventListener('click',()=>Promise.all([refreshPerformance(),loadLearningContent()]));
   $('learning-rollback').addEventListener('click',rollbackLearning);
   $('emoji-settings-form').addEventListener('submit',saveEmojiSettings);
   $('emoji-probability-percent').addEventListener('input',()=>{
@@ -274,11 +274,45 @@
   document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
     document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==button.dataset.tab);
-    $('save-bar').hidden=button.dataset.tab==='health';
+    $('save-bar').hidden=['health','memes'].includes(button.dataset.tab);
     if(button.dataset.tab==='fixed')refreshSchedule();
+    if(button.dataset.tab==='memes')loadMemes();
+    if(button.dataset.tab==='learning')loadLearningContent();
     if(['performance','learning'].includes(button.dataset.tab))refreshPerformance();
     if(button.dataset.tab==='health')refreshHealth().then(r=>{if(r)poll();});
   }));
+  let memeOffset=0, memeTotal=0, memeLoading=false;
+  function contentLine(parent,title,body){const d=document.createElement('p');const b=document.createElement('strong');b.textContent=title+'：';d.append(b,document.createTextNode(String(body??'—')));parent.append(d);}
+  async function loadMemes(){if(memeLoading)return;memeLoading=true;try{
+    const d=await api('meme_repository',undefined,{q:$('meme-search').value,offset:memeOffset});memeTotal=d.total;$('meme-list').replaceChildren();
+    for(const r of d.rows){const card=document.createElement('article');card.className='card';const h=document.createElement('h3');h.textContent=r.phrase;card.append(h);
+      contentLine(card,'来源',r.provenance==='custom'?'管理员自定义，未联网核实':r.fresh?'联网核实':'联网核实记录已过期，等待重新查证');
+      for(const [k,label] of [['meaning','含义'],['usage','适用场景'],['examples','接法示例'],['triggers','场景线索'],['intent','表达意图与反差'],['avoid','不适合的场合'],['adaptations','灵活接法']])contentLine(card,label,Array.isArray(r[k])?r[k].join(' / '):r[k]);
+      for(const s of r.sources||[]){try{const u=new URL(s.url);if(!['https:','http:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=s.title||u.hostname;card.append(a,document.createElement('br'));}catch{}}
+      $('meme-list').append(card);
+    }
+    if(!d.rows.length)$('meme-list').textContent='暂无匹配词条';$('meme-page').textContent=` 共${memeTotal}条 · 第${Math.floor(memeOffset/30)+1}页 `;
+    $('meme-prev').disabled=memeOffset===0;$('meme-next').disabled=memeOffset+30>=memeTotal;
+  }catch(e){notice(e.message,true);}finally{memeLoading=false;}}
+  async function loadLearningContent(){try{
+    const d=await api('learning_content'), root=$('learning-content');root.replaceChildren();
+    for(const r of d.rules||[])contentLine(root,'当前生效策略',r.rule);
+    for(const j of d.jobs||[])contentLine(root,`待办 #${j.id} · ${{meme:'识别与查证梗',usage:'理解梗的语境',review:'观察回复风格',validate:'验证表达策略'}[j.kind]||j.kind} · ${{pending:'等待空闲',running:'正在学习'}[j.status]||j.status}`,j.text+(j.phrases?.length?' · 已识别：'+j.phrases.join('、'):''));
+    for(const e of d.events||[]){const card=document.createElement('article');card.className='card';contentLine(card,new Date(e.created*1000).toLocaleString('zh-CN'),e.kind==='meme'?'梗查证':'回复风格学习');
+      if(e.kind==='meme'){contentLine(card,e.phrase,({learned:'已核实并入库',remembered:'已有记忆',unverified:'证据不足，未入库',understood:'已整理表达意图与反例',none:'无需学习'}[e.status]||e.status));if(e.entry)contentLine(card,'学到的内容',[e.entry.meaning,e.entry.usage,e.entry.intent,e.entry.avoid].filter(Boolean).join('；'));}
+      else {contentLine(card,'原话',e.before);contentLine(card,'审阅后',e.after);contentLine(card,'观察类别',e.category);}
+      root.append(card);
+    }
+    if(!root.childNodes.length)root.textContent=d.closed?'学习服务尚未启动':'暂无学习内容，新任务会在空闲时执行';
+  }catch(e){$('learning-content').textContent=e.message;}}
+  $('refresh-learning-content').addEventListener('click',loadLearningContent);
+  $('refresh-memes').addEventListener('click',loadMemes);
+  $('search-memes').addEventListener('click',()=>{memeOffset=0;loadMemes();});
+  $('meme-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();memeOffset=0;loadMemes();}});
+  $('meme-prev').addEventListener('click',()=>{if(!memeLoading){memeOffset=Math.max(0,memeOffset-30);loadMemes();}});
+  $('meme-next').addEventListener('click',()=>{if(!memeLoading&&memeOffset+30<memeTotal){memeOffset+=30;loadMemes();}});
+  $('meme-file').addEventListener('change',async()=>{const f=$('meme-file').files[0];if(!f)return;if(f.size>250000){$('meme-import-status').textContent='文件不能超过250KB';return;}$('meme-import').value=await f.text();});
+  $('import-memes').addEventListener('click',async()=>{const button=$('import-memes');button.disabled=true;try{const entries=JSON.parse($('meme-import').value.replace(/^\uFEFF/,''));const d=await api('meme_repository',{entries,overwrite:$('meme-overwrite').checked});$('meme-import-status').textContent=`成功导入${d.imported}条，跳过${d.skipped}条`;memeOffset=0;await loadMemes();}catch(e){$('meme-import-status').textContent=e.message;}finally{button.disabled=false;}});
   $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(!['learning-rollback-version','emoji-probability-percent'].includes(event.target.id))changed();});
   $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings();});
   $('load-groups').addEventListener('click',loadGroups);$('group_chat_ids').addEventListener('change',renderGroups);
