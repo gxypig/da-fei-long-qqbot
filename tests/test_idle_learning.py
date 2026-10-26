@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from temp_support import TemporaryDirectory
 import time
 from types import SimpleNamespace
 import unittest
@@ -41,7 +42,7 @@ PREFIXES = {
 
 class IdleTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="idle-learning-tests-")
+        self.temp = TemporaryDirectory(prefix="idle-learning-tests-")
         self.root = Path(self.temp.name)
         self.cfg = {"latency_optimization_enabled": True, "idle_learning_enabled": True, "style_learning_enabled": True}
         self.busy = False
@@ -623,6 +624,9 @@ class IdleTests(unittest.IsolatedAsyncioTestCase):
         self.s.snapshot()
         self.assertEqual(self.s.snapshot()["pending"], 0)
         self.assertEqual(self.s.snapshot()["cases"], 0)
+        # Status reads are pure; the maintenance lane owns expiry and disk sync.
+        self.s._prune(force=True)
+        await self.s._persistence.flush()
         self.assertNotIn(marker.encode(), self.s.path.read_bytes())
         self.assertNotIn(marker, encoded(self.events))
 

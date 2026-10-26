@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥龙控制面板</title><link rel="stylesheet" href="./style.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥龙控制面板</title><link rel="stylesheet" href="./style.css?v=1.16.0"></head>
 <body><main>
   <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
   <div id="notice" role="status" aria-live="polite"></div>
@@ -51,6 +51,9 @@
     <div class="card-grid"><article class="card"><h2>调度工作</h2><div id="performance-work">暂无状态</div></article><article class="card"><h2>预测统计</h2><div id="performance-prediction">暂无状态</div></article></div>
     <article class="card"><h2>表情包发送情况</h2><p>概率沿用智能图片对话插件设置，每轮只抽一次。需要图片适合语气、正文发送成功才会配图；计数从本次加载插件开始</p><div id="performance-emoji">尚未提供表情统计</div></article>
     <article class="card"><h2>正文与工具耗时</h2><p>按服务返回的分类展示；正文目标计到真实发送，工具任务单列，不混算。</p><div id="performance-timings">暂无耗时数据</div></article>
+    <div class="card-grid"><article class="card"><h2>统计窗口</h2><div id="performance-timing-window">暂无状态</div></article><article class="card"><h2>核心数据库连接</h2><div id="performance-database-pool">暂无状态</div></article></div>
+    <article class="card"><h2>图片发送记忆</h2><div id="performance-image-memory">暂无状态</div></article>
+    <div class="card-grid"><article class="card"><h2>发送账本保存</h2><div id="performance-delivery-storage">暂无状态</div></article><article class="card"><h2>诊断日志保存</h2><div id="performance-audit-storage">暂无状态</div></article></div>
     <p class="footnote">首次升级后请重载插件。若状态提示服务尚未就绪，重载后刷新；状态刷新不会覆盖尚未保存的设置。</p>
   </section>
   <section id="learning" class="tab-panel" hidden>
@@ -75,4 +78,4 @@
     <p class="footnote">独立脚本会检查服务、QQ连接、模型和审阅，并重启可恢复的故障服务。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
   </section>
   <footer>设置保存后生效 · 特殊群默认不选 · 固定定时独立计时 · 管理员权限保持不变</footer>
-</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./app.js"></script></body></html>
+</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./fullchain.js?v=1.16.0"></script><script src="./app.js?v=1.16.0"></script></body></html>

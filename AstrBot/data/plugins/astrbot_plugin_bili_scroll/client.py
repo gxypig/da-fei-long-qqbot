@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 import aiohttp
+from .work_limits import remaining
 
 BVID = re.compile(r'BV[0-9A-Za-z]{10}\Z')
 API = 'https://api.bilibili.com'
@@ -213,7 +214,9 @@ class BiliClient:
         identity = key[1]
         self._check_read(identity)
         cached = self.cache.get(key)
-        if cached and time.time() - cached[0] <= 300:
+        metadata=cached[3] if cached and len(cached)>3 else {}
+        ttl=8 if metadata.get('read_state')=='failed' else 25 if metadata.get('read_state')=='partial' else 300
+        if cached and time.time() - cached[0] <= ttl:
             return cached
 
         async def fill():
@@ -248,7 +251,16 @@ class BiliClient:
         task = asyncio.current_task()
         self._http_tasks.add(task)
         try:
-            return await self._get(path, params, scope)
+            for attempt in range(2):
+                try:
+                    async with asyncio.timeout(remaining(12)):
+                        return await self._get(path, params, scope)
+                except BiliUnavailable as exc:
+                    # Only transport failures on a read are retryable. Auth,
+                    # rate limits and invalid responses retain their meaning.
+                    transient=isinstance(exc.__cause__,(aiohttp.ClientConnectionError,TimeoutError))
+                    if attempt or not transient or remaining(2)<1:raise
+                    await asyncio.sleep(.15)
         finally:
             self._http_tasks.discard(task)
 
@@ -316,12 +328,14 @@ class BiliClient:
         key = ('normal', self._read_identity(), keyword)
         async def build():
             rows, warnings = [], []
+            failures=0
             if keyword:
                 try:
                     data = await self.get('/x/web-interface/search/type',
                         {'search_type': 'video', 'keyword': keyword, 'page': 1, 'order': 'totalrank'})
                     rows = data.get('result') or []
                 except BiliUnavailable as exc:
+                    failures+=1
                     warnings.append(str(exc) + '；仅在当前热门标题中匹配关键词')
             if not rows:
                 data = await self.get('/x/web-interface/popular', {'pn': 1, 'ps': 30})
@@ -332,13 +346,14 @@ class BiliClient:
             items = list({x['bvid']: x for x in items}.values())[:6]
 
             async def inspect(item):
+                nonlocal failures
                 comments = []
                 if item['aid']:
                     try:
                         data = await asyncio.wait_for(self.get('/x/v2/reply', {'type': 1, 'oid': item['aid'], 'pn': 1, 'ps': 10, 'sort': 2}), 4)
                         comments = [clean((r.get('content') or {}).get('message'), 120) for r in (data.get('replies') or [])[:8]]
                     except (BiliUnavailable, TimeoutError):
-                        pass
+                        failures+=1
                 item['comments'] = comments
                 item['read_scope'] = '标题、简介' + ('、公开评论' if comments else '（评论暂不可读）')
                 item['score'] = score(item, comments)
@@ -352,11 +367,13 @@ class BiliClient:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-            return (time.time(), sorted(items, key=lambda x: -x['score']), warnings)
+            return (time.time(), sorted(items, key=lambda x: -x['score']), warnings,
+                    {'read_state':('partial' if items else 'failed') if failures else ('ok' if items else 'empty'),
+                     'failed_reads':failures})
 
         cached = await self._cached_scan(key, build)
         return {'items': copy.deepcopy([v for v in cached[1] if v['bvid'] not in excluded]),
-                'warnings': list(cached[2]), 'anonymous': self.anonymous, 'mode': 'normal'}
+                'warnings': list(cached[2]), 'anonymous': self.anonymous, 'mode': 'normal', 'stats':dict(cached[3])}
 
     async def detail(self, bvid):
         if not BVID.fullmatch(bvid):

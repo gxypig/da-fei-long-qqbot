@@ -89,11 +89,12 @@ def judge(item, replies, now=None):
 
 
 async def bounded_batch(coroutines, seconds):
+    from .work_limits import remaining
     tasks = [asyncio.create_task(c) for c in coroutines]
     if not tasks:
         return False
     try:
-        _, pending = await asyncio.wait(tasks, timeout=seconds)
+        _, pending = await asyncio.wait(tasks, timeout=remaining(seconds,reserve=18))
         return bool(pending)
     finally:
         for task in tasks:
@@ -109,6 +110,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
     async def build():
         pool, inspected, warnings = {}, [], []
         failures = 0
+        timed_out = False
         started = time.monotonic()
 
         def add(row, source):
@@ -142,6 +144,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
                 failures += 1
 
         async def up_feed(name):
+            nonlocal failures
             try:
                 uid = name
                 if not name.isdigit():
@@ -161,6 +164,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
                         if time.time() - 7 * 86400 <= int(row.get('created') or 0) <= time.time():
                             add(row, 'up:' + name)
             except (BiliUnavailable, ValueError, TypeError, KeyError) as exc:
+                failures+=1
                 warnings.append(f'UP「{clean(name, 40)}」读取受限或无精确匹配；已跳过该来源')
 
         words = [keyword] if keyword else list(CHISHI_WORDS)
@@ -175,6 +179,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
                     if mygo:
                         tasks.extend(search(w, 'totalrank', 1, 'mygo:' + w) for w in MYGO_WORDS)
         if await bounded_batch(tasks, 22):
+            timed_out=True
             warnings.append('召回达到时间预算，仅使用已取得的候选')
 
         async def related(item):
@@ -188,6 +193,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
 
         seeds = sorted(pool.values(), key=lambda x: -x.get('play', 0))[:3]
         if await bounded_batch([related(x) for x in seeds], 6):
+            timed_out=True
             warnings.append('相关推荐读取超时，保留其他来源')
 
         alive = [x for x in pool.values() if x['replies'] >= 8]
@@ -227,6 +233,7 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
                 failures += 1
 
         if await bounded_batch([inspect(x) for x in chosen.values()], 22):
+            timed_out=True
             warnings.append('热评检查达到时间预算，不发送尚未核验的视频')
         if failures:
             warnings.append(f'{failures} 个公开接口请求未成功，未绕过限制')
@@ -237,6 +244,8 @@ async def scout(client, keyword='', excluded=(), up_list='', mygo=True):
         if not items:
             warnings.append('没有通过搬屎门槛的视频，本轮不拿普通热门凑数')
         stats = {'candidates': len(pool), 'scanned': len(inspected), 'qualified': len(items),
+                 'read_state':('partial' if inspected else 'failed') if failures or timed_out else ('ok' if items else 'empty'),
+                 'failed_reads':failures,'budget_exhausted':timed_out,
                  'elapsed_seconds': round(time.monotonic() - started, 1)}
         return (time.time(), items, warnings, stats)
 

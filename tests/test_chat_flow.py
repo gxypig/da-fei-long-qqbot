@@ -32,7 +32,11 @@ def event(text, sender='12345', group='100', reason='keyword'):
     e.get_self_id = lambda: '99999'
     e.set_extra('qqbot_group_wake', reason)
     e.stop_event = Mock()
-    e.send = AsyncMock()
+    async def deliver(*args,**kwargs):
+        from data.plugins.astrbot_plugin_bili_scroll.receipts import capture
+        scope=capture.get()
+        if scope:scope[1].append({'state':'confirmed','message_id':'test-qq-42'})
+    e.send = AsyncMock(side_effect=deliver)
     return e
 
 

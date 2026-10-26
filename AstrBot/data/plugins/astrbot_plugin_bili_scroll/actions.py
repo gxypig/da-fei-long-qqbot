@@ -11,6 +11,8 @@ import uuid
 
 from .client import BiliUnavailable, clean
 from .scout import split_words
+from .work_limits import total_budget,remaining
+from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import model_work
 
 ACCOUNT_FIELDS = {'use_account': False, 'account_cruise': 'off', 'account_interval': 30,
     'auto_comment': False, 'mention_names': '', 'comment_per_round': 1,
@@ -49,7 +51,7 @@ class Ledger:
 
     @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path)
+        db = sqlite3.connect(self.path,timeout=1)
         db.row_factory = sqlite3.Row
         try:
             with db:
@@ -68,10 +70,21 @@ class Ledger:
         with self.connect() as db:
             db.execute('UPDATE actions SET state=?,detail=? WHERE key=?', (state, json.dumps(detail, ensure_ascii=False), key))
 
+    def checked(self,uid,rpid,text,mark=False):
+        """Cache completed decisions, never turn a failed model read into a decision."""
+        key=hashlib.sha256(json.dumps([uid,'checked',rpid,text]).encode()).hexdigest()
+        with self.connect() as db:
+            if mark:
+                db.execute('INSERT OR REPLACE INTO actions VALUES (?,?,?,?,?,?,?,?)',
+                    (key,uid,'checked',rpid,'',time.time(),'checked','{}'))
+                db.execute("DELETE FROM actions WHERE kind='checked' AND created<?",(time.time()-7*86400,))
+                return True
+            return bool(db.execute("SELECT 1 FROM actions WHERE key=? AND state='checked' AND created>?",(key,time.time()-7*86400)).fetchone())
+
     def rows(self, uid, limit=100):
         with self.connect() as db:
             return [{**dict(r), 'detail': json.loads(r['detail'])} for r in db.execute(
-                'SELECT * FROM actions WHERE uid=? ORDER BY created DESC LIMIT ?', (uid, limit))]
+                "SELECT * FROM actions WHERE uid=? AND kind!='checked' ORDER BY created DESC LIMIT ?", (uid, limit))]
 
     def excluded(self, uid):
         with self.connect() as db:
@@ -109,7 +122,11 @@ class AccountActions:
         if self.plugin.quiet():
             raise BiliUnavailable('当前处于免打扰时段')
         self.state = {'running': True, 'message': '正在按已保存设置执行，本轮不向QQ发消息'}
-        self.task = asyncio.create_task(self.run(), name='bili-account-round')
+        async def scheduled():
+            with model_work('scheduled'):
+                async with total_budget(120):await self.run()
+        self.task = asyncio.create_task(scheduled(), name='bili-account-round')
+        self.task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
 
     async def folders(self):
         identity = self.account.identity()
@@ -154,39 +171,54 @@ class AccountActions:
 
     async def perform(self, v, identity, kind, item, target, payload, path, detail, *, receipt=''):
         self.check(v, identity)
-        key = self.ledger.reserve(identity[0], kind, item['bvid'], str(target), detail)
+        key = await asyncio.to_thread(self.ledger.reserve,identity[0], kind, item['bvid'], str(target), detail)
         if not key:
             return
+        confirmed=False
+        async def save(state,values):
+            await asyncio.to_thread(self.ledger.finish,key,state,values)
         try:
             data = await self.account.post(path, payload, expected_identity=identity,
                 final_check=lambda: self.check(v, identity))
             if receipt == 'rpid':
                 rpid = str(data.get('rpid_str') or data.get('rpid') or (data.get('reply') or {}).get('rpid') or '')
                 if not rpid.isdigit():
-                    self.ledger.finish(key, 'unknown', {**detail, 'note': '接口未返回评论编号，不能确认，不自动重发'})
+                    await save('unknown', {**detail, 'note': '接口未返回评论编号，不能确认，不自动重发'})
                     return
                 detail = {**detail, 'rpid': rpid}
-                self.ledger.finish(key, 'sent', detail)  # persist receipt before optional reads
-                detail['visibility'] = await self.visibility(item['aid'], rpid, detail.get('root', ''))
+                confirmed=True
+                await save('sent', detail)  # persist receipt before optional reads
+                try:
+                    async with asyncio.timeout(remaining(8)):
+                        detail['visibility'] = await self.visibility(item['aid'], rpid, detail.get('root', ''))
+                except (BiliUnavailable,TimeoutError):detail['visibility']='unknown'
                 returned = (data.get('reply') or {}).get('content') or {}
                 detail['mention_receipt'] = [str(r.get('mid')) for r in returned.get('members') or []]
             elif receipt == 'dm':
                 message_key = str(data.get('msg_key') or '')
                 if not message_key:
-                    self.ledger.finish(key, 'unknown', {**detail, 'note': '接口未返回私信编号，不能确认，不自动重发'})
+                    await save('unknown', {**detail, 'note': '接口未返回私信编号，不能确认，不自动重发'})
                     return
                 detail = {**detail, 'message_key': message_key}
-            self.ledger.finish(key, 'sent', detail)
+            confirmed=True
+            await save('sent', detail)
         except asyncio.CancelledError:
             # May have reached the server. Preserve any receipt already persisted.
             raise
         except Exception as exc:
-            self.ledger.finish(key, 'unknown', {**detail, 'note': type(exc).__name__ + '；结果未确认，不自动重发'})
+            try:
+                await save('sent' if confirmed else 'unknown', {**detail, 'note': type(exc).__name__ + ('；已有成功回执，后续记录/检查失败' if confirmed else '；结果未确认，不自动重发')})
+            except Exception:pass
+            if confirmed:
+                self.state['message']='操作已取得成功回执，附加检查或保存失败；不会重发'
+                return
             raise BiliUnavailable('账号操作未确认成功，本轮停止；请检查操作记录') from exc
 
     async def replies(self, v, identity):
-        count = 0
-        roots = [r for r in self.ledger.rows(identity[0], 500) if r['kind'] == 'comment'
+        count = attempts = 0
+        records=await asyncio.to_thread(self.ledger.rows,identity[0],1000)
+        done={r['target'] for r in records if r['kind']=='reply'}
+        roots = [r for r in records if r['kind'] == 'comment'
                  and r['state'] == 'sent' and r['detail'].get('rpid') and r['created'] > time.time() - 7 * 86400][:8]
         for row in roots:
             root, aid = row['detail']['rpid'], row['detail']['aid']
@@ -196,6 +228,7 @@ class AccountActions:
             if str((actual_root.get('member') or {}).get('mid')) != identity[0]:
                 continue
             for reply in data.get('replies') or []:
+                if attempts>=6 or remaining(30)<5:return
                 mid = str((reply.get('member') or {}).get('mid') or '')
                 rpid = str(reply.get('rpid_str') or reply.get('rpid') or '')
                 if (not mid.isdigit() or mid == identity[0] or not rpid.isdigit()
@@ -203,9 +236,15 @@ class AccountActions:
                         or int(reply.get('ctime') or 0) < row['created']):
                     continue
                 target = root + ':' + mid  # once per user per root, even across restarts
-                if any(r['kind'] == 'reply' and r['target'] == target for r in self.ledger.rows(identity[0], 1000)):
+                if target in done:
                     continue
-                text = await self.plugin.make_account_reply(clean((reply.get('content') or {}).get('message'), 600))
+                content=clean((reply.get('content') or {}).get('message'),600)
+                if await asyncio.to_thread(self.ledger.checked,identity[0],rpid,content):continue
+                attempts+=1
+                self.state['examined_this_round']=attempts
+                async with asyncio.timeout(remaining(25)):
+                    text = await self.plugin.make_account_reply(content)
+                await asyncio.to_thread(self.ledger.checked,identity[0],rpid,content,True)
                 if not text:
                     continue
                 item = {'bvid': row['bvid'], 'aid': aid}
@@ -230,7 +269,7 @@ class AccountActions:
                 if (public and v['auto_comment']) or v['dm_mode'] != 'off' or v['favorite_id']:
                     words = split_words(v['keywords']) or ['']
                     data = await self.plugin.discover(words[int(time.time() // 60) % len(words)],
-                        excluded=self.ledger.excluded(identity[0]))
+                        excluded=await asyncio.to_thread(self.ledger.excluded,identity[0]))
                     for item in data['items'][:v['comment_per_round']]:
                         text = await self.plugin.review_account_text(await self.plugin.make_copy(item, None))
                         # The model cannot choose recipients or insert extra mentions.

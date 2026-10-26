@@ -18,6 +18,9 @@ from .client import BiliClient, BiliUnavailable, clean
 from .scout import split_words, DEFAULT_UPS
 from .account import AccountSession
 from .actions import ACCOUNT_FIELDS, AccountActions, validate_account
+from .work_limits import SharedCopy,SessionLock,total_budget,remaining
+from .receipts import observe as observe_receipts,install as install_receipts
+from data.plugins.astrbot_plugin_proactive_agent.record_store import AsyncRecordStore
 from data.plugins.astrbot_plugin_proactive_agent.sent_memory import SentMemory, conversation_id, remember_sent
 from data.plugins.astrbot_plugin_proactive_agent.route_guard import explicit_route
 from data.plugins.astrbot_plugin_proactive_agent.conversation_review import sent_text, delivery_policy, chat_delivery
@@ -68,8 +71,10 @@ class Main(star.Star):
         self.client = BiliClient(self.account, lambda: self.values()['use_account'])
         self.actions = AccountActions(self, data / 'account-actions.sqlite3')
         self._locks = {}
+        self._copies=SharedCopy()
+        self._share_store=AsyncRecordStore(data/'qq-share-facts.sqlite3')
         self._settings_lock = asyncio.Lock()
-        self._sent_memory = SentMemory(Path(__file__).resolve().parents[2] / 'plugin_data/astrbot_plugin_proactive_agent/sent-memory.sqlite3')
+        self._sent_memory = SentMemory(data/'bili-sent-memory.sqlite3',buffered=True)
         self._task = None
         self._account_task = None
 
@@ -80,6 +85,9 @@ class Main(star.Star):
         return hashlib.sha256(json.dumps(self.values(), sort_keys=True).encode()).hexdigest()
 
     async def initialize(self):
+        self._restore_receipts=install_receipts(self)
+        await self._share_store.start()
+        await self._sent_memory.start()
         for name, handler, methods in [('settings', self.settings_api, ['GET', 'POST']),
                 ('preview', self.preview_api, ['POST']), ('targets', self.targets_api, ['GET']),
                 ('status', self.status_api, ['GET']), ('account', self.account_api, ['GET', 'POST'])]:
@@ -88,6 +96,7 @@ class Main(star.Star):
         self._account_task = asyncio.create_task(self.account_loop(), name='bili-account-scheduler')
 
     async def terminate(self):
+        await self._copies.close()
         if self._account_task:
             self._account_task.cancel()
             await asyncio.gather(self._account_task, return_exceptions=True)
@@ -100,6 +109,9 @@ class Main(star.Star):
                 pass
         await self.client.close()
         await self.account.close()
+        await self._share_store.close()
+        await self._sent_memory.close()
+        self._restore_receipts()
 
     async def account_api(self):
         try:
@@ -129,7 +141,7 @@ class Main(star.Star):
                         return jsonify(status='error', message='未知账号操作'), 400
             status = await self.account.status(refresh=request.method == 'POST')
             return jsonify(status='ok', data={**status, 'using_account': not self.client.anonymous,
-                'automation': self.actions.state, 'records': self.actions.ledger.rows(self.account.identity()[0], 40)})
+                'automation': self.actions.state, 'records': await asyncio.to_thread(self.actions.ledger.rows,self.account.identity()[0],40)})
         except (BiliUnavailable, OSError) as exc:
             return jsonify(status='error', message=str(exc)), 503
 
@@ -255,9 +267,19 @@ class Main(star.Star):
                            '例如虚构角色的离谱排练片段；这条仅覆盖前文禁止编造剧情的限制。'
                            '不编真实人物或机构的新闻，不涉及金钱、健康、账号验证或资源承诺，不冒称官方发布。')
         try:
-            result = await asyncio.wait_for(provider.text_chat(system_prompt=system,
-                prompt=json.dumps(item, ensure_ascii=False), request_max_retries=1), 35)
-            line = clean(result.completion_text, 160)
+            from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import provider_key
+            body=json.dumps(item,ensure_ascii=False,sort_keys=True)
+            parameters={k:v for k,v in getattr(provider,'provider_config',{}).items() if k in {'model','custom_extra_body','temperature','top_p','max_tokens','reasoning_effort'}}
+            key=hashlib.sha256(json.dumps([provider_key(provider),parameters,system,body],sort_keys=True,default=str).encode()).hexdigest()
+            copies=getattr(self,'_copies',None)
+            if copies is None:copies=self._copies=SharedCopy()
+            async def generate():
+                result=await asyncio.wait_for(provider.text_chat(system_prompt=system,prompt=body,request_max_retries=1),remaining(35,reserve=10))
+                return result.completion_text
+            # This request contains public video data only. Every destination
+            # separately passes the outbound review/receipt/dedup path below.
+            text=await copies.get(key,generate)
+            line = clean(text, 160)
             if not line or len(line) > 90 or re.search(r'https?://|\[CQ:', line):
                 return self.fallback_copy(item)
             return line.rstrip('。.') + '\n' + item['url']
@@ -268,7 +290,7 @@ class Main(star.Star):
         # Remove idle locks without replacing a lock held/waited on by another task.
         if len(self._locks) > 200:
             self._locks = {k: v for k, v in self._locks.items() if v.locked()}
-        return self._locks.setdefault(origin, asyncio.Lock())
+        return self._locks.setdefault(origin, SessionLock())
 
     async def discover(self, keyword='', excluded=(), mode=None):
         v = self.values()
@@ -276,6 +298,16 @@ class Main(star.Star):
                                           up_list=v['up_list'], mygo=v['mygo'])
 
     async def share(self, origin, keyword='', event=None, final_check=None, mode=None):
+        completion={}
+        try:
+            async with total_budget(50):
+                return await self._share(origin,keyword,event,final_check,mode,completion)
+        except TimeoutError:
+            if completion.get('confirmed'):
+                return '已向当前会话分享了视频链接；不要再发送一次，也不要复述文案'
+            raise
+
+    async def _share(self, origin, keyword='', event=None, final_check=None, mode=None, completion=None):
         async with self.lock(origin):
             receipt = event.get_extra('qqbot_bili_sent') if event else None
             if receipt and receipt.get('keyword') == keyword and receipt.get('mode') == mode:
@@ -284,6 +316,9 @@ class Main(star.Star):
                 return '刷B站功能已关闭'
             key = 'seen:' + origin
             seen = await self.get_kv_data(key, [])
+            store=getattr(self,'_share_store',None)
+            if store:
+                seen=list(dict.fromkeys(seen+[r['bvid'] for r in store.rows.values() if r.get('origin')==origin and r.get('state') in {'reserved','confirmed','unknown'}]))[-150:]
             data = await self.discover(keyword, excluded=seen, mode=mode)
             if not data['items']:
                 return ('本轮前一个视频已经发送成功；这次追加搜索' if receipt else '') + '暂时没有找到匹配且没分享过的视频' + ('；' + '；'.join(data['warnings']) if data['warnings'] else '')
@@ -298,21 +333,45 @@ class Main(star.Star):
                     await final_check()
 
             await check()
+            reservation=None
+            if store:
+                reservation=hashlib.sha256((origin+'|'+item['bvid']).encode()).hexdigest()
+                store.put(reservation,{'origin':origin,'bvid':item['bvid'],'at':time.time(),'state':'reserved'})
+                await store.flush(reservation,timeout=min(2,remaining(2)))
             # Review remains at the shared transport boundary; ordinary manual
             # replies keep their current sender and target, timers set an explicit route.
-            with chat_delivery(origin), delivery_policy(check):
-                if event is not None:
-                    await event.send(MessageChain([Plain(text)]))
-                else:
-                    with explicit_route(origin):
-                        if await self.context.send_message(origin, MessageChain([Plain(text)])) is False:
-                            raise RuntimeError('没有匹配的平台，未发送')
+            receipts=[]
+            try:
+                with observe_receipts(origin) as receipts,chat_delivery(origin), delivery_policy(check):
+                    if event is not None:
+                        await event.send(MessageChain([Plain(text)]))
+                    else:
+                        with explicit_route(origin):
+                            if await self.context.send_message(origin, MessageChain([Plain(text)])) is False:
+                                raise RuntimeError('没有匹配的平台，未发送')
+                if not receipts or not all(r['state']=='confirmed' for r in receipts):
+                    raise RuntimeError('QQ未返回有效发送编号，结果未知，不自动重发')
+                if completion is not None:completion['confirmed']=True
+            except BaseException:
+                if store:
+                    state='failed' if receipts and all(r['state']=='failed' for r in receipts) else 'unknown'
+                    store.put(reservation,{**store.rows[reservation],'state':state,'receipts':receipts})
+                raise
             actual = sent_text(origin, text)
+            if store:
+                # Transport guard has required a real platform receipt. Memory
+                # becomes visible before optional history/dedup persistence.
+                store.put(reservation,{**store.rows[reservation],'state':'confirmed','receipts':receipts})
             if event is not None:
                 event.set_extra('qqbot_bili_sent', {'keyword': keyword, 'mode': mode, 'text': actual, 'url': item['url']})
-            await remember_sent(self, origin, cid, actual, 'bilibili')
+            meta=self.context.get_registered_star('astrbot_plugin_proactive_agent') if hasattr(self.context,'get_registered_star') else None
+            companion=meta.star_cls if meta and meta.activated else self
             try:
-                await self.put_kv_data(key, (seen + [item['bvid']])[-100:])
+                # External delivery is complete. Optional storage must not turn
+                # it into an apparent send failure or trigger another share.
+                async with asyncio.timeout(remaining(2)):
+                    await remember_sent(companion, origin, cid, actual, 'bilibili')
+                    await self.put_kv_data(key, (seen + [item['bvid']])[-100:])
             except Exception:
                 self.logger.error('B站链接已发送，但去重记录保存失败；不要重发本轮')
             return '已向当前会话分享了视频链接；不要再发送一次，也不要复述文案'
@@ -368,13 +427,14 @@ class Main(star.Star):
     async def tick(self):
         v, now = self.values(), time.time()
         state = await self.get_kv_data('timers', {})
+        previous=copy.deepcopy(state)
         targets = self.targets()
         interval = v['interval_minutes'] * 60
         state = {k: r for k, r in state.items() if k in targets}
         for origin in targets:
             if origin not in state or state[origin].get('interval') != interval:
                 state[origin] = {'interval': interval, 'due': now + interval, 'status': 'waiting'}
-        await self.put_kv_data('timers', copy.deepcopy(state))
+        if state!=previous:await self.put_kv_data('timers', copy.deepcopy(state))
         if not v['enabled'] or not v['auto_enabled'] or self.quiet():
             return
         keywords = [x.strip() for x in re.split('[,，]', v['keywords']) if x.strip()] or ['']

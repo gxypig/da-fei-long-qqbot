@@ -320,5 +320,35 @@
     "type": "bool",
     "default": true,
     "description": "空闲时补全梗的表达意图、反例和变体；使用已有资料，不在聊天前增加一次模型调用"
+  },
+  "reply_queue_enabled": {
+    "description": "统一待回复队列（关闭可恢复原等待逻辑）",
+    "type": "bool",
+    "default": false
+  },
+  "reply_queue_concurrency": {
+    "description": "跨会话同时处理数量（1至8，模型仍受原容量限制）",
+    "type": "int",
+    "default": 2
+  },
+  "adaptive_context_enabled": {
+    "description": "普通短聊使用12轮/6000token上下文预算，复杂任务沿用原预算",
+    "type": "bool",
+    "default": false
+  },
+  "image_memory_enabled": {
+    "description": "记住平台实际确认发送的图片，空闲时补全语义",
+    "type": "bool",
+    "default": false
+  },
+  "ai_profiles_enabled": {
+    "description": "跨群与私聊观察AI账号，仅在严格证据门槛满足时确认",
+    "type": "bool",
+    "default": false
+  },
+  "ai_probe_enabled": {
+    "description": "在已有回复机会中自然试探，每账号每天最多3次",
+    "type": "bool",
+    "default": false
   }
 }

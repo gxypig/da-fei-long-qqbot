@@ -181,6 +181,7 @@
     renderSnapshot('performance-emoji',performance?.emoji,'尚未提供表情统计');
     renderSnapshot('performance-context',performance?.context_window,'尚未提供压缩统计');
     renderSnapshot('performance-timings',performance?.timings,'尚未提供耗时数据');
+    for(const [id,key] of [['timing-window','timing_window'],['database-pool','database_pool'],['image-memory','image_memory'],['delivery-storage','delivery'],['audit-storage','audit_persistence']]){if($('performance-'+id))renderSnapshot('performance-'+id,performance?.[key],'当前没有记录');}
     renderLearning(performance?.learning);
     return available;
   }
@@ -219,8 +220,9 @@
     const report=data.report, job=data.job;
     const running=job?.status==='running';
     $('job-status').textContent=running?'正在检查，修复时可能短暂断线，请稍候…':job?.status==='failed'?'上次检查未完成，请查看本机日志':job?.status==='completed'?`上次任务已完成${job.exit_code===0?'':'，仍有项目需要处理'}`:'后台守护持续检查中';
+    if(!running&&data.watchdog?.heartbeat&&Date.now()/1000-data.watchdog.heartbeat>240)$('job-status').textContent='守护心跳已过期，请运行独立的一键检查修复脚本';
     document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=running);
-    $('health-summary').textContent=report?`${report.ok?'本轮检查正常':'本轮有项目需要处理'} · ${new Date(report.time).toLocaleString('zh-CN')} · ${report.deep?'含真实模型实测':'连接与组件检查'}`:'还没有检查报告，请在项目目录运行「一键检查修复.bat」';
+    $('health-summary').textContent=report?`${report.stale?'报告已过期，请运行独立检查脚本；旧结果：':''}${report.ok?'本轮检查正常':'本轮有项目需要处理'} · ${new Date(report.time).toLocaleString('zh-CN')} · ${report.deep?'含空闲能力检查，繁忙时延期':'连接与组件检查'}`:'还没有检查报告，请在项目目录运行「一键检查修复.bat」';
     $('health-results').replaceChildren();
     (report?.checks||[]).forEach(r=>{
       const row=document.createElement('div');row.className='health-row';

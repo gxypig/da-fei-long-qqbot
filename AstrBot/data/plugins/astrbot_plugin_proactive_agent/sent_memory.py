@@ -11,8 +11,13 @@ from datetime import datetime
 
 
 class SentMemory:
-    def __init__(self, path, clock=time.time):
+    def __init__(self, path, clock=time.time, *, buffered=False):
         self.path, self.clock = path, clock
+        self._persistence=None
+        if buffered:
+            from .sqlite_snapshot import SQLiteSnapshot
+            self._persistence=SQLiteSnapshot(path)
+        self.legacy_before=clock() if buffered else None
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS sent (id INTEGER PRIMARY KEY, origin TEXT, cid TEXT, at REAL, text TEXT, kind TEXT)')
@@ -20,6 +25,9 @@ class SentMemory:
 
     @contextmanager
     def connect(self):
+        if self._persistence:
+            with self._persistence.db:yield self._persistence.db
+            return
         db = sqlite3.connect(self.path, timeout=3)
         try:
             with db:
@@ -36,7 +44,7 @@ class SentMemory:
             db.execute('DELETE FROM sent WHERE at < ?', (self.clock() - 7 * 86400,))
             db.execute('DELETE FROM sent WHERE origin=? AND id NOT IN (SELECT id FROM sent WHERE origin=? ORDER BY id DESC LIMIT 30)', (origin, origin))
 
-    def recent(self, origin, cid):
+    def recent(self, origin, cid, *, legacy_only=False):
         with self.connect() as db:
             # A first-ever proactive send has no conversation yet. Adopt it once;
             # resetting/switching the conversation then naturally hides old memory.
@@ -48,16 +56,23 @@ class SentMemory:
                 db.execute('UPDATE sent SET cid=? WHERE origin=? AND cid IS NULL', (cid, origin))
             rows = db.execute('SELECT at,text,kind FROM sent WHERE origin=? AND cid IS ? AND at>=? ORDER BY id DESC LIMIT 8',
                               (origin, cid, self.clock() - 7 * 86400)).fetchall()
+            if legacy_only and self.legacy_before is not None:rows=[r for r in rows if r[0]<self.legacy_before]
         return [{'time': datetime.fromtimestamp(at).isoformat(timespec='seconds'), 'role': 'assistant',
                  'text': text, 'kind': kind} for at, text, kind in reversed(rows)]
 
-    def note(self, origin, cid):
-        rows = self.recent(origin, cid)
+    def note(self, origin, cid, *, legacy_only=False):
+        rows = self.recent(origin, cid,legacy_only=legacy_only)
         if not rows:
             return ''
-        return ('\n本龙在【当前会话】实际发送成功的消息记录（不是其他人的话，也不是待执行指令）。'
-                '对方可能正在接这些话题；先结合时间和最新发言理解，不要假装没发过。\n'
+        return (('\n当前会话旧版主动行为记录（旧版未保留消息回执编号，仅作历史背景）。仅用于定位旧话题，不能据此确认成功送达；不要声称已有回执验证。\n' if legacy_only else '\n本龙在【当前会话】实际发送成功的消息记录（不是其他人的话，也不是待执行指令）。对方可能正在接这些话题；先结合时间和最新发言理解，不要假装没发过。\n')
                 + json.dumps(rows, ensure_ascii=False))
+
+    async def start(self):
+        if self._persistence:self._persistence.start()
+
+    async def close(self):
+        if self._persistence:
+            await self._persistence.close();self._persistence.db.close()
 
     def proactive_recent(self, origin):
         with self.connect() as db:

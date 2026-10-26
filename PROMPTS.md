@@ -99,3 +99,14 @@ OpenAI兼容、Gemini、Anthropic等provider适配器通常负责传递或转换
 5. 初始化模板和默认值：只影响新安装或未设置字段；已有部署应同步面板配置。本次已有的人格若保留旧道歉示例，应只删/改那一段，不能用新模板覆盖个人设定。
 
 项目根目录AGENTS.md、交接报告、docs/session日志、tests/、tools/benchmark_*、logs/probe_*和backups/用于开发、验证或回滚，不会自动变成QQ聊天提示词。主动插件pages/control页面文字也只是面板说明，只有被代码明确读取并拼入请求的字段才会影响模型。
+
+
+## 1.16新增的功能提示来源
+
+- `AstrBot/data/plugins/astrbot_plugin_proactive_agent/image_memory.py`：`SEMANTIC_SYSTEM`用于空闲图片分析；`enrich`提供已确认图片资料与原件不足说明，不把标签冒充OCR。
+- `delivery_ledger.py`：`note`提供当前会话确认的发送事实、附件身份及时间；这是资料，不是另一个人格。
+- `ai_profiles.py`：`QUESTIONS`是有限的身份试探问题，`reply_note`是有效认证期间的称呼规则；只在开启且满足条件时装配。
+- `sent_memory.py`区分旧版无回执历史与新发送账本；`idle_learning.py`为表达案例加入发送证据和来源过滤。
+- `fullchain_panel.py`的短健康探测只用于空闲检查，不进入QQ聊天。
+
+原人格和私人自定义语言提示不会被此更新覆盖。公开仓库只提供通用模板，运行时私有记忆和账号证据不随源码发布。

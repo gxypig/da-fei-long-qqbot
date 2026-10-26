@@ -454,6 +454,15 @@ class ModelScheduler:
             if len(running) >= self._limit(job.key):
                 if job.kind == 'interactive':
                     for duplicate in running:
+                        if (duplicate.after_primary and duplicate.kind=='auxiliary'
+                                and duplicate.trace_id!=job.trace_id and not duplicate.paused
+                                and duplicate.worker is not None and not duplicate.worker.done()):
+                            # Only the optional shared risk/image prediction is
+                            # disposable. Its caller falls back to local image
+                            # matching and the normal final review contract.
+                            duplicate.paused=True
+                            duplicate.worker.cancel()
+                            break
                         if (duplicate.hedge is not None and duplicate.hedge.redundant
                                 and not duplicate.preempted
                                 and (duplicate.worker is None or not duplicate.worker.done())):
@@ -461,7 +470,7 @@ class ModelScheduler:
                             if duplicate.worker is not None:
                                 duplicate.worker.cancel()
                             # Hold the slot until worker cleanup actually finishes.
-                            # Never cancel the caller, primary, prediction or tools.
+                            # Never cancel the caller, primary or tools.
                             break
                 continue
             if job.kind == 'auxiliary' and any(item.kind == 'auxiliary' for item in running):
@@ -806,7 +815,7 @@ def _success(result):
     if result.get('status', 'ok') != 'ok' or result.get('retcode', 0) != 0:
         return False
     data = result.get('data', result)
-    return isinstance(data, dict) and data.get('message_id') is not None
+    return isinstance(data, dict) and not isinstance(data.get('message_id'),bool) and data.get('message_id') not in (None,'',0,'0')
 
 
 def _extra(event, key):
@@ -898,6 +907,8 @@ class WorkRuntime:
             # A diagnostic getter must not break/retry a valid model request.
             fields['request_shape_complete'] = False
         observation = {'status': 'cancelled', 'seconds': 0.0, 'usage': _usage_metrics(None)}
+        from .chain_metrics import stage,phase,model_completed
+        if fields['work_kind']=='interactive':stage('review' if phase.get()=='review' else 'model')
         token = _provider_observation.set(owner)
         self._audit('model_request', dict(fields))
         try:
@@ -912,6 +923,7 @@ class WorkRuntime:
             raise
         finally:
             _provider_observation.reset(token)
+            model_completed(observation['seconds'],fields.get('queue_ms',0),fields['work_kind'])
             self._audit('model_provider_call', {**fields, **observation['usage'],
                 'status': observation['status'], 'provider_elapsed_ms': round(observation['seconds'] * 1000)})
 

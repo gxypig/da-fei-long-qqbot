@@ -211,4 +211,10 @@ class ReplyPipelineMixin:
                 'work': work.status() if work else {}, 'learning': learning.snapshot() if learning else {},
                 'prediction': getattr(self, '_prediction_stats', {}), 'emoji': emoji,
                   'context_window': dict(getattr(getattr(self, '_context_window', None), 'stats', {})),
-                'timings': self._latency_summary()}
+                'timings': self._latency_summary(),
+                'timing_window':{'started_at':getattr(self,'_timing_started',None),'max_samples_per_stage':100,
+                    'note':'阶段为各自耗时；total为包络，含内部排队/调用，不能把所有项相加'},
+                'image_memory':self._image_memory.snapshot() if getattr(self,'_image_memory',None) else {},
+                'database_pool':self._db_pressure.snapshot() if getattr(self,'_db_pressure',None) else {},
+                'delivery':self._delivery.store.snapshot() if getattr(self,'_delivery',None) else {},
+                'audit_persistence':dict(self._audit_writer.stats) if getattr(self,'_audit_writer',None) else {}}

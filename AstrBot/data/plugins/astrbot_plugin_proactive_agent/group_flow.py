@@ -82,6 +82,10 @@ class GroupFlow:
                 + json.dumps([{'sender': r['sender'], 'text': r['text']} for r in rows], ensure_ascii=False))
 
     async def process(self, previous, stage, event, prefix):
+        if event.get_extra('qqbot_unified_admitted'):
+            if self.prepare:self.prepare(event)
+            async for result in previous(stage,event,prefix):yield result
+            return
         if (not self.cfg('group_flow_enabled', True) or not event.get_group_id() or event.get_extra('qqbot_arrival') is None
                 or event.get_platform_id() != self.cfg('platform_id', 'aiocqhttp')):
             async for result in previous(stage, event, prefix):

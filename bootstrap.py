@@ -108,6 +108,7 @@ def main():
     if sys.version_info < (3,12): raise SystemExit('Python 3.12+ required; tested with 3.12')
     settings_path = (ROOT / args.settings).resolve()
     if not settings_path.exists():
+        if args.check:raise SystemExit('Settings missing: '+str(settings_path)+'; check mode does not create files')
         settings_path.parent.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(ROOT/'settings.example.json',settings_path)
         raise SystemExit('Created '+str(settings_path)+'; fill your API details and password, then rerun')

@@ -46,6 +46,14 @@ from .panel import PanelMixin
 from .fixed_schedule import FixedScheduler, STATE_KEY
 from .sent_memory import SentMemory, conversation_id, remember_sent
 from .route_guard import bind_route, explicit_route, install_route_guard
+from .reply_jobs import ReplyQueue
+from .delivery_ledger import DeliveryLedger, install_delivery_transport, install_delivery_history
+from .fullchain import install_fullchain
+from .fullchain_panel import register_fullchain_panel
+from .ai_profiles import AIProfiles
+from .image_memory import ImageMemory
+from .async_audit import AuditWriter
+from .chain_metrics import operation as metric_operation,timed as metric_timed
 from datetime import datetime
 from datetime import time as dt_time
 from pathlib import Path
@@ -82,7 +90,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._auxiliary_lane = AuxiliaryLane()
         self._meme_hints = MemeHints(Path(__file__).resolve().parents[2] / "plugin_data" / "astrbot_plugin_smart_imagechat_hub" / "image_index.json")
         self._data_dir = Path(__file__).resolve().parents[2] / "plugin_data" / "astrbot_plugin_proactive_agent"
-        self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3')
+        self._audit_writer=AuditWriter(self._data_dir/'conversation-audit.jsonl')
+        self._timing_started=time.time()
+        self._reply_queue = ReplyQueue(self._cfg, self._audit)
+        self._delivery = DeliveryLedger(self._data_dir / 'delivery-ledger.sqlite3')
+        self._restore_delivery = self._restore_delivery_history = self._restore_fullchain = None
+        self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3',buffered=True)
         self._live_journal = LiveJournal(self._data_dir / 'live-messages.sqlite3')
         self._restore_live = self._restore_chat_lane = self._restore_context_window = None
         self._reviewer = ReplyReviewer(self._generate_json, self._audit)
@@ -90,6 +103,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._meme_prefetch = MemePrefetch(self._memory)
         self._init_reply_pipeline()
         self._work = WorkRuntime(self._cfg, self._audit)
+        self._ai_profiles = AIProfiles(self._data_dir/'ai-profiles.sqlite3',self._cfg,self._work.busy)
+        self._image_memory = ImageMemory(self,self._data_dir/'image-memory')
+        self._delivery.image_details = self._image_memory.details
         self._restore_work = None
         self._learning = IdleLearning(self._data_dir / 'idle-learning.sqlite3', self._cfg,
             self._memory, self._generate_json, self._reviewer, self._audit, self._work.busy)
@@ -98,7 +114,16 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     # ==================== 生命周期 ====================
 
     async def initialize(self) -> None:
+        await self._audit_writer.start()
+        await self._sent_memory.start()
+        await self._delivery.start()
+        self._sent_memory.legacy_before=self._delivery.legacy_cutoff
+        await self._ai_profiles.start()
+        await self._image_memory.start()
+        self._restore_delivery = install_delivery_transport(self)
+        self._restore_delivery_history = install_delivery_history(self)
         self.register_panel()
+        register_fullchain_panel(self)
         await self._live_journal.start()
         self._restore_live = install_live_journal(self)
         try:
@@ -116,6 +141,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._restore_group_flow = install_group_flow(self._group_flow)
         self._restore_tool_prelude = install_tool_prelude(self)
         self._restore_work = install_work_runtime(self)
+        self._restore_fullchain = install_fullchain(self)
         await self._learning.start()
         self.context.register_web_api("/astrbot_plugin_proactive_agent/health", self.health_api, ["GET"], "只读链路和功能健康检查")
         self.context.register_web_api("/astrbot_plugin_proactive_agent/status", self.status_api, ["GET"], "主动行为运行状态")
@@ -123,7 +149,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.15.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.16.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -141,7 +167,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         except Exception:
             checks["onebot"] = False
         checks['idle_learning'] = bool(self._learning.snapshot().get('worker_running', False))
-        return jsonify({"status": "ok", "data": {"version": "1.15.0", "checks": checks,
+        checks['delivery_ledger'] = self._delivery.store.snapshot()['worker_running']
+        checks['reply_queue'] = not self._reply_queue.closed
+        checks['image_memory'] = not self._cfg('image_memory_enabled',False) or bool(self._image_memory.task and not self._image_memory.task.done())
+        checks['ai_profiles'] = not self._cfg('ai_profiles_enabled',False) or bool(self._ai_profiles.task and not self._ai_profiles.task.done())
+        checks['live_journal'] = bool(self._live_journal.task and not self._live_journal.task.done())
+        return jsonify({"status": "ok", "data": {"version": "1.16.0", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -149,7 +180,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats, "group_flow": self._group_flow.stats}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.15.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.16.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -172,6 +203,13 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
 
     async def terminate(self) -> None:
+        queue=getattr(self,'_reply_queue',None)
+        if queue:await queue.drain()
+        profiles=getattr(self,'_ai_profiles',None)
+        if profiles:await profiles.close()
+        images=getattr(self,'_image_memory',None)
+        if images:await images.close()
+        if self._restore_fullchain:self._restore_fullchain()
         window = getattr(self, '_context_window', None)
         if window:
             await window.close()
@@ -212,6 +250,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if self._restore_live:
             self._restore_live()
         await self._live_journal.close()
+        if self._restore_delivery_history:self._restore_delivery_history()
+        if self._restore_delivery:self._restore_delivery()
+        await self._delivery.close()
+        await self._sent_memory.close()
+        writer=getattr(self,'_audit_writer',None)
+        if writer:await writer.close()
         self.logger.info("主动行为插件已停止")
 
 
@@ -236,7 +280,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 prompt=json.dumps(payload, ensure_ascii=False, separators=(",", ":")), system_prompt=system,
                 request_max_retries=1,
             )
-            response = await asyncio.wait_for(generate(provider, **kwargs) if generate else provider.text_chat(**kwargs), timeout=40)
+            with metric_operation(stage.removesuffix('_model')):
+                response = await asyncio.wait_for(generate(provider, **kwargs) if generate else provider.text_chat(**kwargs), timeout=40)
             ok = True
             return response.completion_text
         finally:
@@ -259,8 +304,16 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
     def _audit(self, kind, fields):
         # Only metrics/public meme terms; never persist chat drafts or credentials here.
-        if isinstance(fields.get("elapsed_ms"), int):
+        if isinstance(fields.get("elapsed_ms"), int) and kind!='reply_stage':
             self._timings.setdefault(kind, deque(maxlen=100)).append(fields["elapsed_ms"])
+        if kind=='reply_job_end':
+            for name,value in fields.get('stages_ms',{}).items():
+                label=('milestone_' if name.endswith('_complete_ms') else 'stage_')+name
+                self._timings.setdefault(label,deque(maxlen=100)).append(value)
+        writer=getattr(self,'_audit_writer',None)
+        if writer:
+            writer.add(kind,fields)
+            return
         try:
             self._data_dir.mkdir(parents=True, exist_ok=True)
             path = self._data_dir / "conversation-audit.jsonl"
@@ -795,8 +848,29 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             self._meme_prefetch.start(event, event.get_message_str() or '', [r['text'] for r in recent[-4:]])
 
     @filter.on_llm_request(priority=-100)
+    @metric_timed('context_prepare_ms')
     async def enrich_conversation(self, event: AstrMessageEvent, req) -> None:
         event.set_extra('qqbot_agent_final_done', False)
+        profiles=getattr(self,'_ai_profiles',None)
+        if profiles:
+            req.system_prompt=(req.system_prompt or '')+profiles.reply_note(event.get_platform_id(),str(event.get_sender_id()))
+            if not event.get_extra('qqbot_probe_prepared'):
+                event.set_extra('qqbot_probe_prepared',True)
+                probe=await profiles.prepare_probe(event.get_platform_id(),str(event.get_sender_id()),
+                    str(getattr(event.message_obj,'message_id','')),event.unified_msg_origin)
+                event.set_extra('qqbot_ai_probe',probe)
+                if probe:req.system_prompt+='\n这次原本就在回复对方，可在自然接话时顺口问一句：'+probe['question']+' 不必额外单独发消息；场景不合适则不问'
+        ledger=getattr(self,'_delivery',None)
+        if ledger:
+            cid=getattr(getattr(req,'conversation',None),'cid',None)
+            job=event.get_extra('qqbot_reply_job')
+            if job:
+                job.cid=cid;job.generation=ledger.scope(job.origin,cid)
+            if isinstance(getattr(req,'contexts',None),list):
+                req.contexts=ledger.filter_history(event.unified_msg_origin,cid,req.contexts,getattr(req.conversation,'history',None))
+            req.system_prompt=(req.system_prompt or '')+ledger.note(event.unified_msg_origin,cid)
+        images=getattr(self,'_image_memory',None)
+        if images:await images.enrich(event,req)
         text = str(req.prompt or "")
         state = self.character_context(event)
         optimized = self._cfg('latency_optimization_enabled', False)
@@ -829,7 +903,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if hasattr(self, '_sent_memory'):
             cid = getattr(getattr(req, 'conversation', None), 'cid', None)
             cid = cid or await conversation_id(self, event.unified_msg_origin)
-            req.system_prompt += self._sent_memory.note(event.unified_msg_origin, cid)
+            req.system_prompt += self._sent_memory.note(event.unified_msg_origin, cid,legacy_only=ledger is not None)
         if optimized:
             req.system_prompt += '\n' + LOCAL_MEMORY_RULE
             learning = getattr(self, '_learning', None)
@@ -862,7 +936,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     @filter.after_message_sent(priority=-1000)
     async def record_reply_latency(self, event: AstrMessageEvent):
         started = event.get_extra("qqbot_received_at")
-        if started is not None:
+        if started is not None and not event.get_extra('qqbot_reply_job'):
             event.set_extra("qqbot_received_at", None)
             self._audit("reply_total", {"elapsed_ms": int((time.monotonic() - started) * 1000)})
         sample = event.get_extra('qqbot_pending_style_sample')

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 import uuid
 
 from quart import jsonify, request
@@ -352,6 +353,13 @@ class PanelMixin:
 
     async def panel_health_api(self):
         if request.method == "GET":
-            return jsonify({"status": "ok", "data": {"report": local_json("health-status.json"), "job": current_job()}})
+            report=local_json('health-status.json')
+            if isinstance(report,dict):
+                report=dict(report)
+                try:
+                    generated=report.get('generated_at') or datetime.fromisoformat(report['time']).timestamp()
+                    report['age_seconds']=max(0,time.time()-generated);report['stale']=time.time()>report.get('expires_at',generated+240)
+                except (KeyError,ValueError,TypeError):report['stale']=True
+            return jsonify({"status": "ok", "data": {"report": report, "job": current_job(),"watchdog":local_json('watchdog-heartbeat.json')}})
         # The repair runner must survive AstrBot being offline. No panel execution.
         return jsonify({"status": "error", "message": "请在项目目录运行一键检查修复.bat，面板仅展示最近报告"}), 405

@@ -2,10 +2,19 @@
 import random
 import re
 import time
+import copy
 
 from astrbot.api.message_components import At, Plain
 from astrbot.core.pipeline.waking_check.stage import WakingCheckStage
 from astrbot.core.star.session_plugin_manager import SessionPluginManager
+
+
+def wake_match(text,word,anywhere=True):
+    if not word:return False
+    # Latin wake words must be whole tokens: "ai" in "train" is not a call.
+    pattern=re.escape(word)
+    if re.fullmatch(r'[A-Za-z0-9_]+',word):pattern=r'(?<![A-Za-z0-9_])'+pattern+r'(?![A-Za-z0-9_])'
+    return bool(re.search(pattern,text,re.I) if anywhere else re.match(pattern,text.lstrip(),re.I))
 
 
 def group_wake_reason(event, config, cfg, roll=random.random):
@@ -21,12 +30,12 @@ def group_wake_reason(event, config, cfg, roll=random.random):
     words = re.split(r"[,，\s]+", str(cfg("group_wake_words", "大肥龙,肥龙")))
     if cfg("group_wake_anywhere", True):
         words += [p for p in prefixes if isinstance(p, str) and any(c.isalnum() for c in p)]
-        if any(word and word in text for word in words):
+        if any(wake_match(text,word) for word in words):
             return "keyword"
-    elif any(word and text.lstrip().startswith(word) for word in words):
+    elif any(wake_match(text,word,False) for word in words):
         return "keyword"
     # Existing explicit prefix/mention/reply rules remain AstrBot's responsibility.
-    if any(text.lstrip().startswith(p) for p in prefixes):
+    if any(wake_match(text,p,False) for p in prefixes):
         return None
     groups = set(re.split(r"[,，\s]+", str(cfg("group_chat_ids", ""))))
     if str(event.get_group_id()) not in groups or not text.strip():
@@ -42,6 +51,16 @@ def install_group_wake(plugin):
     previous = WakingCheckStage.process
 
     async def process(stage, event):
+        # Per-event view: never change a shared framework config while other
+        # sessions are waking concurrently. Native prefix stripping stays intact.
+        if event.get_platform_id() == plugin._cfg('platform_id', 'aiocqhttp'):
+            prefixes=stage.ctx.astrbot_config.get('wake_prefix',[])
+            text=getattr(event,'get_message_str',lambda:getattr(event,'message_str',''))() or ''
+            safe=[p for p in prefixes if not re.fullmatch(r'[A-Za-z0-9_]+',p)
+                  or wake_match(text,p,False)]
+            if safe!=prefixes:
+                stage=copy.copy(stage);stage.ctx=copy.copy(stage.ctx)
+                stage.ctx.astrbot_config={**stage.ctx.astrbot_config,'wake_prefix':safe}
         if event.get_platform_id() == plugin._cfg('platform_id', 'aiocqhttp') and event.get_extra('qqbot_received_at') is None:
             event.set_extra('qqbot_received_at', time.monotonic())
         enabled = stage.ctx.astrbot_config.get("plugin_set", ["*"])

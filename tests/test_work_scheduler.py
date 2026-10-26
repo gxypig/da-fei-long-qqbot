@@ -32,6 +32,37 @@ class Clock:
         self.value += seconds
 
 
+class PredictionPriority(unittest.IsolatedAsyncioTestCase):
+    async def test_other_reply_preempts_optional_prediction_but_waits_for_cleanup(self):
+        runtime=WorkRuntime({'latency_optimization_enabled':True,'model_concurrency':2}.get,lambda *_:None)
+        self.addAsyncCleanup(runtime.close)
+        primary_entered=asyncio.Event();primary_release=asyncio.Event()
+        predicted=asyncio.Event();cancelled=asyncio.Event();cleanup=asyncio.Event();other_entered=asyncio.Event()
+        self.addCleanup(primary_release.set)
+        self.addCleanup(cleanup.set)
+        async def primary():primary_entered.set();await primary_release.wait();return 'primary'
+        async def predict():
+            predicted.set()
+            try:await asyncio.Event().wait()
+            except asyncio.CancelledError:cancelled.set();await cleanup.wait();raise
+        async def other():other_entered.set();return 'other'
+        event=Event(message_id='first')
+        with runtime.reply_work(event):
+            first=asyncio.create_task(runtime.scheduler.run(provider(),primary,kind='interactive'))
+            await primary_entered.wait()
+            with runtime.prediction_work(event):
+                prediction=asyncio.create_task(runtime.scheduler.run(provider(),predict,kind='auxiliary'))
+            await asyncio.wait_for(predicted.wait(),1)
+            with runtime.reply_work(Event(target='aiocqhttp:GroupMessage:second',message_id='second')):
+                second=asyncio.create_task(runtime.scheduler.run(provider(),other,kind='interactive'))
+                await asyncio.wait_for(cancelled.wait(),1)
+                self.assertFalse(other_entered.is_set());self.assertFalse(first.done())
+                cleanup.set()
+                with self.assertRaises(BackgroundPaused):await prediction
+                self.assertEqual(await second,'other')
+            primary_release.set();self.assertEqual(await first,'primary')
+
+
 def provider(source='one', **config):
     return SimpleNamespace(provider_config={'provider_source_id': source, **config})
 

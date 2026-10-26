@@ -180,6 +180,11 @@ class Bili(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):await p.share('aiocqhttp:FriendMessage:20')
             self.assertEqual(p._sent_memory.recent('aiocqhttp:FriendMessage:20',None), [])
             p.context.send_message.return_value=True
+            async def confirmed(*args):
+                from data.plugins.astrbot_plugin_bili_scroll.receipts import capture
+                capture.get()[1].append({'state':'confirmed','message_id':'test-qq-42'})
+                return True
+            p.context.send_message.side_effect=confirmed
             await p.share('aiocqhttp:FriendMessage:20')
             self.assertIn('最终文案',p._sent_memory.note('aiocqhttp:FriendMessage:20','next'))
 

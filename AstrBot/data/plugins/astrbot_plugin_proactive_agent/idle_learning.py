@@ -32,6 +32,8 @@ from .chat_style_policy import output_issues
 from .conversation_review import ReviewUnavailable, json_object
 from .dragon_character import limit_emoji, limit_father_address, speech_issues
 from .meme_memory import normalize
+from .sqlite_snapshot import SQLiteSnapshot
+from .reply_jobs import current_job,error_fingerprint
 
 try:
     from .work_scheduler import model_work
@@ -228,7 +230,8 @@ class IdleLearning:
         self._last_snapshot = None
         self._next_prune = 0.0
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(str(self.path), timeout=0.1)
+        self._persistence=SQLiteSnapshot(self.path)
+        db = self._persistence.db
         db.row_factory = sqlite3.Row
         self._db = db
         try:
@@ -269,6 +272,18 @@ class IdleLearning:
             """)
             with db:
                 db.execute("UPDATE jobs SET status='pending' WHERE status='running'")
+                if not db.execute("SELECT 1 FROM meta WHERE key='receipt_evidence_v2'").fetchone():
+                    # Older samples have no receipt/source provenance. Preserve
+                    # their raw payload, but do not silently treat it as human
+                    # style evidence or publish a strategy from it.
+                    for row in db.execute('SELECT id,payload FROM cases').fetchall():
+                        payload=json.loads(row['payload'])
+                        if payload.get('send_state')!='confirmed':
+                            payload.update(exclude_evidence=True,exclusion_reason='legacy_unverified_delivery',source='legacy_unverified')
+                            db.execute('UPDATE cases SET payload=? WHERE id=?',(_json(payload),row['id']))
+                    db.execute("UPDATE jobs SET status='quarantined' WHERE kind IN ('review','validate') AND COALESCE(json_extract(payload,'$.send_state'),'unverified')!='confirmed'")
+                    db.execute("INSERT OR REPLACE INTO meta VALUES('receipt_evidence_v2','true')")
+                    db.execute("INSERT OR REPLACE INTO meta VALUES('active_version','0')")
             self._prune()
         except BaseException:
             db.close()
@@ -326,12 +341,13 @@ class IdleLearning:
         recent = [recent] if isinstance(recent, str) else list(recent or ())[-6:]
         return {"text": str(text)[:1200], "recent": [str(x)[:500] for x in recent],
                 "origin": str(origin)[:240], "character": character,
-                "mode": state.get("mode", "chat") if state.get("mode", "chat") in {"chat", "management", "qzone"} else "management"}
+                "mode": state.get("mode", "chat") if state.get("mode", "chat") in {"chat", "management", "qzone"} else "management",
+                "source":state.get('source',{'kind':'unverified'}),"send_state":state.get('send_state','unverified'),
+                "automated_chain":bool(state.get('automated_chain',False))}
 
     def _enqueue(self, kind, payload, key=None, expires=None):
         if self._closed or self._mutating or not self._enabled(kind):
             return False
-        self._prune()
         if kind in {'meme','usage'} and any(self._mentions(payload, {}, r[0]) for r in self._db.execute("SELECT phrase FROM forgets")):
             return False
         key, now = key or _hash([kind, payload]), time.time()
@@ -352,6 +368,7 @@ class IdleLearning:
     def enqueue_meme(self, text, recent, origin):
         if not isinstance(text, str) or not text.strip():
             return False
+        if error_fingerprint(text):return False
         case = self._case(text[:800], recent, origin)
         return self._enqueue("meme", case)
 
@@ -360,6 +377,15 @@ class IdleLearning:
             return False
         if corrected is not None and (not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 1200):
             return False
+        job=current_job.get()
+        if job and not getattr(job,'learning_finalized',False):
+            samples=getattr(job,'learning_samples',[])
+            if len(samples)<4:samples.append((text,list(recent or []),origin,dict(state or {}),force,corrected))
+            job.learning_samples=samples
+            return True
+        if (isinstance(state,dict) and (state.get('automated_chain') or state.get('source',{}).get('kind') in {'automatic_confirmed','automatic_suspected'})):
+            return False
+        if error_fingerprint(text) or any(error_fingerprint(str(x)) for x in recent or []):return False
         case = self._case(text, recent, origin, state)
         if _protected(case):
             return False
@@ -375,6 +401,21 @@ class IdleLearning:
         case["fingerprint"] = fingerprint
         return self._enqueue("review", case, key="review:" + fingerprint)
 
+    def confirmed_job(self,job,ledger,profiles=None):
+        job.learning_finalized=True
+        actual=ledger.confirmed_text(job)
+        if not actual:return
+        source={'platform':job.origin.split(':',1)[0],'account':job.sender,'kind':'unverified'}
+        if profiles:source['kind']=profiles.source_label(source['platform'],source['account'])
+        for text,recent,origin,state,force,corrected in getattr(job,'learning_samples',[]):
+            # Only the delivered version becomes expression evidence. Retain
+            # rejected drafts in the delivery audit, not the naturalness corpus.
+            delivered=corrected or text
+            if _canonical(delivered,{})!=_canonical(actual,{}):continue
+            state={**state,'source':source,'send_state':'confirmed','automated_chain':source['kind'].startswith('automatic')}
+            self.enqueue_review(actual,recent,origin,state,force=force)
+        job.learning_samples=[]
+
     async def start(self):
         async with self._control:
             if self._closed:
@@ -384,6 +425,7 @@ class IdleLearning:
                     self._runner.result()  # Do not hide a crashed worker.
                 return
             await self._finish_forgets()
+            self._persistence.start()
             self._idle_since = None
             self._runner = asyncio.create_task(self._run(), name="idle-learning", context=Context())
 
@@ -399,9 +441,11 @@ class IdleLearning:
                     if isinstance(results[0], Exception):
                         raise results[0]
             finally:
+                self._prune(force=True)
                 self._last_snapshot = self.snapshot()
                 self._closed = True
                 self._last_snapshot.update(closed=True, running=0, worker_running=False)
+                await self._persistence.close()
                 self._db.close()
 
     def _checkpoint(self):
@@ -602,7 +646,8 @@ class IdleLearning:
             self._save_progress(job, progress)
         category = progress["category"]
         self.record_detail('review', {'before':case['text'], 'after':progress.get('checked'),
-            'category':category, 'status':'observed'}, job['expires'])
+            'category':category, 'status':'observed','source':case.get('source',{'kind':'legacy_unverified'}),
+            'send_state':case.get('send_state','unverified'),'automated_chain':case.get('automated_chain',False)}, job['expires'])
         if category == "none":
             return
         # Passing, unchanged samples cannot be relabeled as failures by a model.
@@ -630,7 +675,7 @@ class IdleLearning:
         for category in RULES:
             if category in current:
                 continue
-            rows = self._db.execute("SELECT id,expires FROM cases WHERE category=? AND created>? ORDER BY id DESC LIMIT 6",
+            rows = self._db.execute("SELECT id,expires FROM cases WHERE category=? AND created>? AND COALESCE(json_extract(payload,'$.exclude_evidence'),0)=0 ORDER BY id DESC LIMIT 6",
                                     (category, self._meta("evidence_after", 0))).fetchall()
             if len(rows) < 4:
                 continue
@@ -646,7 +691,9 @@ class IdleLearning:
         rows = [self._db.execute("SELECT payload FROM cases WHERE id=? AND expires>?", (i, time.time())).fetchone() for i in ids]
         if any(r is None for r in rows):
             raise _Rejected("expired_evidence")
-        return [json.loads(r[0]) for r in rows]
+        cases=[json.loads(r[0]) for r in rows]
+        if any(case.get('exclude_evidence') or case.get('automated_chain') for case in cases):raise _Rejected('excluded_evidence')
+        return cases
 
     def _validation_current(self, payload):
         if payload["base"] != self._meta("active_version") or payload["epoch"] != self._meta("style_epoch"):
@@ -798,7 +845,8 @@ class IdleLearning:
             payload, progress = json.loads(r['payload']), json.loads(r['progress'])
             row = {'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
                 'text':str(payload.get('text',''))[:800], 'phrases':progress.get('phrases',[]),
-                'stage':progress.get('stage'), 'attempts':r['attempts']}
+                'stage':progress.get('stage'), 'attempts':r['attempts'],'source':payload.get('source',{'kind':'legacy_unverified'}),
+                'send_state':payload.get('send_state','unverified'),'automated_chain':payload.get('automated_chain',False)}
             if matches({'text':payload.get('text',''), 'phrases':row['phrases'], 'stage':row['stage']}):
                 jobs.append(row)
         events = []
@@ -819,19 +867,19 @@ class IdleLearning:
     def snapshot(self):
         if self._closed:
             return dict(self._last_snapshot)
-        self._prune(force=True)
-        grouped = {r["status"]: r["n"] for r in self._db.execute("SELECT status,count(*) n FROM jobs GROUP BY status")}
+        grouped = {r["status"]: r["n"] for r in self._db.execute("SELECT status,count(*) n FROM jobs WHERE expires>? GROUP BY status",(time.time(),))}
         candidate = self._db.execute("SELECT progress FROM jobs WHERE kind='validate' ORDER BY id LIMIT 1").fetchone()
         error = self._meta("last_error", None)
         if self._runner is not None and self._runner.done() and not self._runner.cancelled():
             exc = self._runner.exception()
             if exc is not None:
                 error = type(exc).__name__
-        return {"closed": False, "idle_learning_enabled": self._enabled("meme"),
+        return {"closed": False, "persistence":dict(self._persistence.stats), "idle_learning_enabled": self._enabled("meme"),
                 "worker_running": self._runner is not None and not self._runner.done(),
                 "style_learning_enabled": self._enabled("review"), "scheduler_available": model_work is not None,
                 "pending": grouped.get("pending", 0), "running": grouped.get("running", 0),
-                "cases": self._db.execute("SELECT count(*) FROM cases").fetchone()[0],
+                "cases": self._db.execute("SELECT count(*) FROM cases WHERE expires>? AND COALESCE(json_extract(payload,'$.exclude_evidence'),0)=0",(time.time(),)).fetchone()[0],
+                "quarantined_cases":self._db.execute("SELECT count(*) FROM cases WHERE COALESCE(json_extract(payload,'$.exclude_evidence'),0)=1").fetchone()[0],
                 "pending_forgets": self._db.execute("SELECT count(*) FROM forgets").fetchone()[0],
                 "candidate_stage": json.loads(candidate[0]).get("stage", "proposal") if candidate else None,
                 "active_version": self._meta("active_version"), "last_publish": self._meta("last_publish", None),

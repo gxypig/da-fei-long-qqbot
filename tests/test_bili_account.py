@@ -193,6 +193,15 @@ class Writes(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('rpid', row['detail'])
         self.x.visibility.assert_not_awaited()
 
+    async def test_visibility_failure_cannot_erase_successful_comment_receipt(self):
+        self.x.visibility.side_effect=TimeoutError()
+        await self.x.run()
+        row=self.x.ledger.rows('100')[0]
+        self.assertEqual(row['state'],'sent')
+        self.assertEqual(row['detail']['rpid'],'900')
+        self.assertEqual(row['detail']['visibility'],'unknown')
+        await self.x.run();self.a.post.assert_awaited_once()
+
     async def test_dm_only_suppresses_comment_and_reply(self):
         self.config.update(dm_mode='only', dm_uid='300', reply_comments=True)
         self.x.replies = AsyncMock()

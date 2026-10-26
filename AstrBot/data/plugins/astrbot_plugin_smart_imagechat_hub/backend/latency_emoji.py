@@ -570,7 +570,9 @@ class LatencyEmojiMixin:
                                bool(turn.snapshot.get_group_id()))
                     turn.sending += 1
                     try:
-                        sent = await self.context.send_message(turn.origin, MessageEventResult().file_image(str(turn.path)))
+                        from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import optional_attachment
+                        with optional_attachment():
+                            sent = await self.context.send_message(turn.origin, MessageEventResult().file_image(str(turn.path)))
                     except asyncio.CancelledError:
                         raise
                     except Exception:
