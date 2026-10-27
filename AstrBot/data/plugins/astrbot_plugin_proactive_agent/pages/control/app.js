@@ -315,7 +315,7 @@
   async function loadMemes(){const serial=++memeRequest,requested=memeOffset;memeLoading=true;try{
     const d=await api('meme_repository',undefined,{q:$('meme-search').value,offset:requested});if(serial!==memeRequest)return;memeOffset=d.offset??requested;memeTotal=d.total;$('meme-list').replaceChildren();
     for(const r of d.rows){const card=document.createElement('article');card.className='card';const h=document.createElement('h3');h.textContent=r.phrase;card.append(h);
-      contentLine(card,'来源',r.provenance==='custom'?'管理员自定义，未联网核实':r.fresh?'联网核实':'联网核实记录已过期，等待重新查证');
+      contentLine(card,'来源',r.provenance==='custom'?'管理员自定义，未联网核实':r.provenance==='memewiki'?'memewiki 主词库 · cnmeme.wiki 公开词条':r.fresh?'联网核实':'联网核实记录已过期，等待重新查证');
       for(const [k,label] of [['meaning','含义'],['usage','适用场景'],['examples','接法示例'],['triggers','场景线索'],['intent','表达意图与反差'],['avoid','不适合的场合'],['adaptations','灵活接法']])contentLine(card,label,Array.isArray(r[k])?r[k].join(' / '):r[k]);
       for(const s of r.sources||[]){try{const u=new URL(s.url);if(!['https:','http:'].includes(u.protocol))continue;const a=document.createElement('a');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=s.title||u.hostname;card.append(a,document.createElement('br'));}catch{}}
       $('meme-list').append(card);

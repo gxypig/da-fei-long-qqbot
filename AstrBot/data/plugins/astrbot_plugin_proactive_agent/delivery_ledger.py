@@ -150,8 +150,10 @@ class DeliveryLedger:
         self.scope(origin,cid)
         rows=self.recent(origin,cid)
         if not rows:return ''
-        return '\n当前会话平台已确认发送的记录（仅表示发送成功，不表示对方已读；图片用途推断不是图片原文）：\n'+json.dumps([
+        voice='；语音 transcript 是合成时的原文，无 transcript 的语音内容未知，不能拿生成稿补猜' if any(a.get('kind')=='record' for r in rows for a in r.get('attachments',[])) else ''
+        return '\n当前会话平台已确认发送的记录（仅表示发送成功，不表示对方已读；图片用途推断不是图片原文'+voice+'）：\n'+json.dumps([
             {'消息编号':r['message_id'],'时间':r['at'],'文字':r['text'] if not r.get('history_saved') else '',
+             **({'发送形式':'语音'} if any(a.get('kind')=='record' for a in r.get('attachments',[])) else {}),
              '附件':[self.image_details(a) for a in r.get('attachments',[])]} for r in rows],ensure_ascii=False)
 
     def blocked_hashes(self,origin,cid):
@@ -226,6 +228,7 @@ def install_delivery_transport(plugin):
                 else:output.append(part)
             return output
         parts=flatten(parts)
+        from .voice_memory import record_transcript,spoken_text
         attachments=[]
         images=getattr(plugin,'_image_memory',None)
         for part in parts:
@@ -235,8 +238,11 @@ def install_delivery_transport(plugin):
                         async with asyncio.timeout(2):attachments.append(await images.describe_transport(part))
                     except Exception:attachments.append({'kind':part['type'],'semantic_status':'unknown'})
                 else:attachments.append({'kind':part['type'],'semantic_status':'unknown'})
+                transcript=record_transcript(part,bot,origin)
+                if transcript:
+                    attachments[-1].update(transcript=transcript,transcript_source='tts_input',semantic_status='known')
         if not lease.active:return await previous(bot,action,**params)
-        text=plain(parts);id_=ledger.begin(origin,cid,text,attachments,job)
+        text=spoken_text(parts,bot,origin);id_=ledger.begin(origin,cid,text,attachments,job)
         attempt=delivery_scope.get()
         if attempt is not None:attempt.update(state='preparing',id=id_)
         # A failed durability barrier prevents sending; later writes only retry storage.

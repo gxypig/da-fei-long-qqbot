@@ -455,6 +455,10 @@ class ModelScheduler:
             if job.kind == 'background' and not idle:
                 continue
             running = [item for item in self._active if item.key == job.key]
+            # Speculative idle learning must not occupy every upstream slot.
+            # Keep all work queued; real replies retain the configured concurrency.
+            if job.kind=='background' and any(item.kind=='background' for item in running):
+                continue
             if len(running) >= self._limit(job.key):
                 if job.kind == 'interactive':
                     for duplicate in running:
@@ -1322,6 +1326,11 @@ class WorkRuntime:
                             getattr(scope.trace.event, 'message_obj', None), 'message_id', '') or ''))
         before = receipt() if eligible and receipt else None
         original = _text(params.get('message'), params.get('auto_escape', False)) if eligible else ''
+        voice=''
+        if eligible and not original.strip():
+            from .voice_memory import spoken_text
+            parts=params.get('message')
+            if isinstance(parts,list):voice=spoken_text(parts,bot,scope.trace.event.unified_msg_origin)
         # Snapshot authority BEFORE awaiting guards/transport. A marker arriving
         # during an unrelated send cannot turn that in-flight send into the final.
         own_scope = eligible and scope.owner is asyncio.current_task()
@@ -1339,13 +1348,14 @@ class WorkRuntime:
                     or checked.get('original') != original):
                 return result  # A changed, unmatched guard receipt is ambiguous.
             actual = checked.get('text', '')
+        if not actual and voice:actual=voice
         if not isinstance(actual, str) or not actual.strip():
             return result
         state = scope.trace
         state.sends.append((at, _digest(actual)))
         self._audit('reply_text_send', {'elapsed_ms': round((at - started) * 1000), 'trace_id': state.trace_id})
-        if final_ready and (expected is None or expected == _digest(original)):
-            self._delivered(state, at, 'final_ready')
+        if final_ready and (expected is None or expected == _digest(original or voice)):
+            self._delivered(state, at, 'voice_final_ready' if voice else 'final_ready')
         return result
 
     async def close(self):
@@ -1413,7 +1423,8 @@ def install_work_runtime(plugin):
     @wraps(previous_process)
     async def process(stage, event, provider_wake_prefix):
         iterator = previous_process(stage, event, provider_wake_prefix)
-        if not lease.active:
+        from .reply_admission import has_agent_content
+        if not lease.active or not has_agent_content(event):
             try:
                 async for item in iterator:yield item
             finally:await _aclose(iterator)

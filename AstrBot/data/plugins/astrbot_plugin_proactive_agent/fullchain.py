@@ -3,13 +3,14 @@ import asyncio
 from contextvars import ContextVar
 import time
 from functools import wraps
-from contextlib import nullcontext
+from contextlib import nullcontext, asynccontextmanager
 from aiocqhttp import CQHttp
 from .reply_jobs import ReplyJob, ReplyCancelled, current_job, TERMINAL
 from .group_flow import mergeable
 from .route_guard import bind_route
 from .hook_lifecycle import HookLease
 from .session_fence import get_fence
+from .reply_admission import has_agent_content, initial_admission, is_command
 
 _conversion=ContextVar('qqbot_conversion',default=None)
 
@@ -22,11 +23,13 @@ def install_fullchain(plugin):
     from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_platform_adapter import AiocqhttpAdapter
     from astrbot.core.pipeline.scheduler import PipelineScheduler
     from astrbot.core.pipeline.process_stage.stage import ProcessStage
+    from astrbot.core.pipeline.process_stage.method.agent_request import AgentRequestSubStage
     from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
     from .chain_metrics import operation,stage as metric_stage,add as metric_add
     queue=plugin._reply_queue;ledger=plugin._delivery
     old_convert=AiocqhttpAdapter.convert_message;old_execute=PipelineScheduler.execute
     old_process=ProcessStage.process;old_action=CQHttp.call_action
+    old_agent=AgentRequestSubStage.process
     old_tool=FunctionToolExecutor.execute;tool_descriptor=FunctionToolExecutor.__dict__['execute']
 
     async def tool_execute(cls,tool,run_context,**arguments):
@@ -101,41 +104,30 @@ def install_fullchain(plugin):
                 try:learning.confirmed_job(job,ledger,profiles)
                 except Exception as exc:plugin._audit('learning_ingress',{'status':'failed','error':type(exc).__name__})
             plugin._audit('reply_job_end',{'job_id':job.id,'state':job.state,'reason':job.reason,
+                'admission':getattr(job,'admission',None),
                 'elapsed_ms':round((time.monotonic()-job.received)*1000),
                 'stages_ms':{k:round(v,2) for k,v in job.timings.items() if k.endswith('_ms')}})
             current_job.reset(token)
 
-    @wraps(old_process)
-    async def process(stage,event):
-        if not lease.active:
-            async for x in old_process(stage,event):yield x
-            return
-        job=event.get_extra('qqbot_reply_job')
-        profiles=getattr(plugin,'_ai_profiles',None)
-        if job and profiles and str(event.get_sender_id())!=str(event.get_self_id()):
-            profiles.observe(event.get_platform_id(),str(event.get_sender_id()),job.text,job.origin,job.source_id)
-        # Observer hooks may run on passive messages. Only real response opportunities queue.
-        from astrbot.core.star.filter.command import CommandFilter
-        command=any(isinstance(f,CommandFilter) for h in event.get_extra('activated_handlers') or [] for f in h.event_filters)
-        wanted=bool(getattr(event,'is_at_or_wake_command',False) or command or event.get_extra('provider_request'))
-        if not job or not wanted:
-            async for x in old_process(stage,event):yield x
-            return
+    @asynccontextmanager
+    async def admit(event,job,reason):
+        command=is_command(event)
         work=getattr(plugin,'_work',None)
         with work.reply_work(event) if work else nullcontext():
             entered=time.monotonic()
+            job.admission=reason
             job.timings['wake_permissions_ms']=max(0,(entered-job.received)*1000-job.timings.get('conversion_ms',0))
             if plugin._cfg('reply_queue_enabled',False):
                 try:
                     queue.submit(job,mergeable=not command and mergeable(event),probability=event.get_extra('qqbot_group_wake')=='probability')
                     await queue.wait(job)
                 except ReplyCancelled:
-                    event.stop_event();return
+                    event.stop_event();yield False;return
                 event.set_extra('qqbot_unified_admitted',True)
                 event.set_extra('qqbot_flow_started',True)
             else:
                 if queue.closed:
-                    queue.finish(job,'cancelled','service_shutdown');event.stop_event();return
+                    queue.finish(job,'cancelled','service_shutdown');event.stop_event();yield False;return
                 job.state='running';job.stage='preparing';job.timings['started']=time.monotonic()
                 queue.active[job.id]=job
             job.timings['reply_queue_ms']=(time.monotonic()-entered)*1000
@@ -146,10 +138,40 @@ def install_fullchain(plugin):
             fence=get_fence(manager)
             job.session_epoch=fence.epoch(job.origin) if fence else 0
             bind_route(job.origin,job.sender,job.source_id,bool(event.get_group_id()))
+            yield True
+
+    @wraps(old_process)
+    async def process(stage,event):
+        if not lease.active:
             async for x in old_process(stage,event):yield x
+            return
+        job=event.get_extra('qqbot_reply_job')
+        profiles=getattr(plugin,'_ai_profiles',None)
+        if job and profiles and str(event.get_sender_id())!=str(event.get_self_id()):
+            profiles.observe(event.get_platform_id(),str(event.get_sender_id()),job.text,job.origin,job.source_id)
+        reason=initial_admission(stage,event)
+        if not job or not reason:
+            # Preserve journal, group context, learning and plugin callbacks.
+            # Requests produced by observers are admitted at agent() below.
+            async for x in old_process(stage,event):yield x
+            return
+        async with admit(event,job,reason) as accepted:
+            if accepted:
+                async for x in old_process(stage,event):yield x
+
+    @wraps(old_agent)
+    async def agent(stage,event):
+        job=event.get_extra('qqbot_reply_job')
+        if not lease.active or not job or job.state!='received' or not has_agent_content(event):
+            async for x in old_agent(stage,event):yield x
+            return
+        async with admit(event,job,'handler_provider_request') as accepted:
+            if accepted:
+                async for x in old_agent(stage,event):yield x
 
     patches=[(AiocqhttpAdapter,'convert_message',convert,old_convert),(PipelineScheduler,'execute',execute,old_execute),
-             (ProcessStage,'process',process,old_process),(CQHttp,'call_action',action,old_action)]
+             (ProcessStage,'process',process,old_process),(AgentRequestSubStage,'process',agent,old_agent),
+             (CQHttp,'call_action',action,old_action)]
     wrapped_tool=classmethod(tool_execute);FunctionToolExecutor.execute=wrapped_tool
     for cls,name,wrapper,_ in patches:setattr(cls,name,wrapper)
     def restore():

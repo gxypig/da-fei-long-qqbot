@@ -12,6 +12,8 @@ for source in (root/'bundled_plugins').iterdir():
     if source.is_dir():
         shutil.copytree(source,root/'AstrBot/data/plugins'/source.name,dirs_exist_ok=True)
 config=root/'AstrBot/data/cmd_config.json'
+from tools.install_memewiki import install as install_dictionary
+print('Public meme dictionary:', install_dictionary(root))
 if not config.exists():
     configure(json.loads((root/'local/settings.json').read_text(encoding='utf-8-sig')),container=True)
 from tools.repair_dashboard import inspect_view

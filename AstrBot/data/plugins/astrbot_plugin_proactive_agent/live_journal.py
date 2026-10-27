@@ -12,7 +12,7 @@ from aiocqhttp import CQHttp, Message
 from .route_guard import canonical, destination, SEND_ACTIONS
 
 
-def text_parts(parts):
+def text_parts(parts,voice_lookup=None):
     if isinstance(parts, str):
         parts = list(Message(parts))
     output = []
@@ -27,6 +27,9 @@ def text_parts(parts):
             output.append(str(data.get('text', '')))
         elif str(kind).lower() == 'at':
             output.append('@' + str(data.get('qq', '')))
+        elif str(kind).lower()=='record' and voice_lookup:
+            transcript=voice_lookup(part)
+            output.append('[语音] '+transcript if transcript else '[语音，内容未知]')
         elif kind != 'reply':
             output.append({'image': '[图片]', 'record': '[语音]', 'video': '[视频]', 'forward': '[合并转发]', 'file': '[文件]'}.get(str(kind).lower(), '[附件]'))
     return ''.join(output)[:6000]
@@ -174,8 +177,10 @@ def install_live_journal(plugin):
         platform = plugin._platform()
         if delivery=='confirmed' and platform is not None and getattr(platform, 'bot', None) is bot and action.removesuffix('_async') in SEND_ACTIONS:
             try:
-                text = text_parts(params.get('message')) or ('[合并转发]' if params.get('messages') else '')
-                plugin._live_journal.add(destination(action, params, plugin._cfg('platform_id', 'aiocqhttp')), text, 'assistant',message_id=message_id)
+                from .voice_memory import record_transcript
+                origin=destination(action,params,plugin._cfg('platform_id','aiocqhttp'))
+                text = text_parts(params.get('message'),lambda p:record_transcript(p,bot,origin)) or ('[合并转发]' if params.get('messages') else '')
+                plugin._live_journal.add(origin,text,'assistant',message_id=message_id)
             except Exception as exc:
                 plugin._live_journal.error = type(exc).__name__
         return result

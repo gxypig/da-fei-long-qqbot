@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 # Reuse the suite's import sandbox: AstrBot must not initialize in live data.
 from test_maintenance import ROOT
 from astrbot.api.event import MessageEventResult
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import Image, Plain, Record
 from astrbot.core.message.message_event_result import ResultContentType
 from data.plugins.astrbot_plugin_smart_imagechat_hub.main import SmartImageSenderPlugin
 from data.plugins.astrbot_plugin_smart_imagechat_hub.backend.retrieval import RetrievalMixin
@@ -246,6 +246,41 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                 await self.drain(turn)
                 self.assertEqual(self.p.context.send_message.await_count - before, int(not embedded))
                 self.assertEqual(event.result.get_plain_text(), "哈哈，好开心呀")
+
+    async def test_voice_reply_still_emits_selected_emoji_after_record_extraction(self):
+        from astrbot.core.pipeline.respond.stage import RespondStage
+        from astrbot.core.config.default import DEFAULT_CONFIG
+        stage=RespondStage();config=copy.deepcopy(DEFAULT_CONFIG)
+        config['platform_settings']['segmented_reply']['enable']=False
+        await stage.initialize(SimpleNamespace(astrbot_config=config))
+        for separate in (0,100):
+            with self.subTest(separate=separate):
+                self.companion.config['meme_separate_probability']=separate
+                event=Event();turn=await self.ready(event);await self.decorate(event)
+                text=event.result.chain[0].text
+                voice=Record(file='voice.wav',text=text)
+                event.result.chain[0]=voice
+                event.set_extra('qqbot_voice_result_text',text)
+                before=self.p.context.send_message.await_count
+                # Run the installed native stage, including destructive Record
+                # extraction. Its other plugin hooks are covered separately.
+                with patch('astrbot.core.pipeline.respond.stage.call_event_hook',AsyncMock()):
+                    await stage.process(event)
+                await SmartImageSenderPlugin.after_message_sent(self.p,event)
+                await self.drain(turn)
+                self.assertTrue(turn.confirmed)
+                self.assertEqual(self.p.context.send_message.await_count-before,int(separate==100))
+
+    async def test_failed_voice_cannot_authorize_late_emoji(self):
+        turn=await self.ready();await self.decorate()
+        voice=Record(file='voice.wav',text='哈哈，好开心呀')
+        self.event.set_extra('qqbot_voice_result_text',voice.text)
+        self.event.result.chain=[]
+        self.event.transport.side_effect=RuntimeError('audio send failed')
+        with self.assertRaises(RuntimeError):await self.event.send(MessageEventResult(chain=[voice]))
+        await SmartImageSenderPlugin.after_message_sent(self.p,self.event)
+        await self.drain(turn)
+        self.p.context.send_message.assert_not_awaited()
 
     async def test_late_window_expires_without_cancelling_shared_prediction(self):
         self.companion.config["emoji_late_grace_seconds"] = .02
@@ -503,6 +538,21 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         for call in self.p.context.send_message.await_args_list:
             image = call.args[1].chain[0]
             self.assertIn("sad.png", str(image.file))
+
+    async def test_message_snapshot_excludes_live_reply_future_and_event_backreference(self):
+        for origin in ('aiocqhttp:GroupMessage:100','aiocqhttp:FriendMessage:200'):
+            with self.subTest(origin=origin):
+                event=Event(origin=origin)
+                event.message_obj.raw_message={'job':SimpleNamespace(ready=asyncio.get_running_loop().create_future(),event=event)}
+                turn=await self.ready(event)
+                self.assertEqual(turn.snapshot.message_obj.message_id,'m-original')
+                self.assertFalse(hasattr(turn.snapshot.message_obj,'raw_message'))
+                await self.decorate(event)
+                await self.sent(event)
+                await self.drain(turn)
+                self.assertTrue(turn.confirmed)
+                self.assertEqual(self.p.context.send_message.call_args.args[0],origin)
+        self.assertEqual(self.p._latency_emoji_stats['sent_separate'],2)
 
     async def test_fixed_original_context_and_existing_route_guard(self):
         seen = []

@@ -238,10 +238,7 @@ class PanelMixin:
             offset = max(0,int(request.args.get('offset',0)))
         except ValueError:
             offset = 0
-        rows = [dict(row, fresh=memory.fresh(row)) for row in memory.entries.values()
-                if not query or query in json.dumps(row,ensure_ascii=False).casefold()]
-        rows.sort(key=lambda row:(-row.get('imported_at',row.get('verified_at',0)),row['phrase']))
-        return jsonify({'status':'ok','data':{'total':len(rows),'offset':offset,'rows':rows[offset:offset+30]}})
+        return jsonify({'status':'ok','data':memory.repository(query,offset)})
 
     def _emoji_library(self):
         lookup = getattr(self.context, "get_registered_star", None)

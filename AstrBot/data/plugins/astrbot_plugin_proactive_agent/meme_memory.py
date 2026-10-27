@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from aiohttp import ClientError
 from contextlib import asynccontextmanager
 from collections import OrderedDict
 import hashlib
@@ -45,8 +46,9 @@ def normalize(phrase):
 
 
 class MemeMemory:
-    def __init__(self, path: Path, generate, search, audit, ttl_days=90):
+    def __init__(self, path: Path, generate, search, audit, ttl_days=90, wiki=None):
         self.path, self.generate, self.search, self.audit = path, generate, search, audit
+        self.wiki=wiki
         self.ttl = max(1, ttl_days) * 86400
         self.entries = {}
         self._key_locks = {}
@@ -83,6 +85,11 @@ class MemeMemory:
                 self._key_locks[key] = (lock, users - 1)
 
     async def _detect(self, text, recent, origin):
+        if self.wiki:
+            known=self.wiki.explicit_known(text)
+            if known:
+                self.stats['detection_hits']+=1
+                return known
         payload = {"当前发言": text[:800], "同一会话上文": list(recent)[-3:]}
         # Only identical model inputs in the SAME conversation share extraction.
         # No review verdict or generated reply is cached. Nothing private goes to disk.
@@ -109,8 +116,51 @@ class MemeMemory:
 
     def match(self, text):
         folded = unicodedata.normalize("NFKC", text).casefold()
-        return [row for key, row in sorted(self.entries.items(), key=lambda x: len(x[0]), reverse=True)
-                if key in folded and self.fresh(row)][:4]
+        learned=[row for key, row in sorted(self.entries.items(), key=lambda x: len(x[0]), reverse=True)
+                 if key in folded and self.fresh(row)]
+        primary=self.wiki.match(text) if self.wiki else []
+        result={}
+        for row in [r for r in learned if r.get('provenance')=='custom']+primary+learned:
+            key=row['phrase'].casefold()
+            if key in result:continue
+            result[key]=self._with_understanding(row)
+        return list(result.values())[:4]
+
+    def _with_understanding(self,row):
+        previous=self.entries.get(row['phrase'].casefold(),{})
+        if row.get('provenance')=='memewiki' and previous.get('provenance')!='custom':
+            row={**row,**{k:v for k,v in previous.items() if k in {'intent','avoid','adaptations','triggers','understood_at'}}}
+        return row
+
+    def _remember_wiki(self,row):
+        key=row['phrase'].casefold();old=self.entries.get(key)
+        if old and old.get('provenance')=='custom':return old
+        row=self._with_understanding(row)
+        if old and self.fresh(old) and all(old.get(k)==row.get(k) for k in ('meaning','usage','provenance')):
+            return old
+        previous=dict(self.entries)
+        if key not in self.entries and len(self.entries)>=500:
+            candidates=[k for k,v in self.entries.items() if v.get('provenance')!='custom']
+            if not candidates:return row  # Dictionary is already persistent; never evict user imports.
+            self.entries.pop(min(candidates,key=lambda k:self.entries[k].get('verified_at',0)))
+        self.entries[key]=row
+        try:self._save()
+        except OSError:self.entries=previous;raise
+        return row
+
+    def repository(self,query='',offset=0,limit=30):
+        rows=[]
+        for previous in self.entries.values():
+            primary=self.wiki.exact(previous['phrase']) if self.wiki and previous.get('provenance')!='custom' else None
+            row=self._with_understanding(primary or previous)
+            if not query or query.casefold() in json.dumps(row,ensure_ascii=False).casefold():
+                rows.append(dict(row,fresh=bool(primary) or self.fresh(row)))
+        rows.sort(key=lambda row:(-row.get('imported_at',row.get('verified_at',0)),row['phrase']))
+        selected=rows[offset:offset+limit]
+        wiki=self.wiki.catalog(query,self.entries,max(0,offset-len(rows)),max(0,limit-len(selected))) if self.wiki else {'total':0,'rows':[]}
+        selected += [dict(self._with_understanding(row),fresh=True) for row in wiki['rows']]
+        return {'total':len(rows)+wiki['total'],'offset':offset,'rows':selected,
+                'dictionary':self.wiki.status() if self.wiki else None,'learned_entries':len(self.entries)}
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +181,7 @@ class MemeMemory:
         previous = '\n'.join(str(t) for t in recent[-4:]).casefold()
         ranked = []
         for key, row in self.entries.items():
-            if row in direct or not self.fresh(row) or key in previous:
+            if key in {r['phrase'].casefold() for r in direct} or not self.fresh(row) or key in previous:
                 continue
             triggers = row.get('triggers', [])
             triggered = any(t.casefold() in text.casefold() for t in triggers if isinstance(t,str) and len(t)>=2)
@@ -249,6 +299,11 @@ class MemeMemory:
         # Coalesce the SAME meme; unrelated chats and cached facts never queue behind it.
         async with self._key_lock("lookup:" + key):
             row = self.entries.get(key)
+            if self.wiki and (not row or row.get('provenance')!='custom'):
+                primary=self.wiki.exact(phrase)
+                if primary:
+                    self.stats['memory_hits']+=1
+                    return {'status':'remembered','entry':self._remember_wiki(primary)}
             if row and self.fresh(row):
                 self.stats["memory_hits"] += 1
                 return {"status": "remembered", "entry": row}
@@ -262,6 +317,14 @@ class MemeMemory:
             phase = "search"
             try:
                 async with asyncio.timeout(60), self._lookup_slots:
+                    if self.wiki:
+                        try:primary=await self.wiki.remote(phrase)
+                        except (OSError,ValueError,asyncio.TimeoutError,ClientError) as exc:
+                            self.audit('memewiki',{'status':'fallback_search','error':type(exc).__name__})
+                            primary=None
+                        if primary:
+                            row=self._remember_wiki(primary);self._retry_after.pop(key,None)
+                            return {'status':'learned','entry':row}
                     raw = await self.search(f"{phrase} 梗 含义 用法", origin)
                     data = json.loads(raw) if isinstance(raw, str) else raw
                     sources = []

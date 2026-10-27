@@ -5,6 +5,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from astrbot.api.message_components import Record
 
 from .common import (
     Image, MessageEventResult, Plain, PROACTIVE_EMOJI_INTERNAL_LLM_EXTRA_KEY,
@@ -245,7 +246,15 @@ class LatencyEmojiMixin:
         origin = str(event.unified_msg_origin)
         group = str(event.get_group_id() or "")
         sender = str(event.get_sender_id() or "")
-        message_obj = copy.deepcopy(getattr(event, "message_obj", None))
+        original_message = getattr(event, "message_obj", None)
+        # AstrBot's raw message can carry a reply job, Future and an event backref.
+        # Copy only the transport identity we need; deepcopy of the graph fails
+        # before preparation starts and can also traverse unrelated runtime state.
+        message_obj = SimpleNamespace(
+            message_id=str(getattr(original_message, "message_id", "") or ""),
+            sender=SimpleNamespace(user_id=sender), group_id=group,
+            self_id=str(getattr(original_message, "self_id", "") or ""),
+        )
         # Never give a background send the live mutable message/session object.
         snapshot = SimpleNamespace(
             unified_msg_origin=origin, message_obj=message_obj,
@@ -417,11 +426,14 @@ class LatencyEmojiMixin:
             from ...astrbot_plugin_proactive_agent.conversation_review import attachment_policy, sent_text, text_slots
             from ...astrbot_plugin_proactive_agent.route_guard import canonical, destination
 
-            if turn.embedded and (not self._current_latency_image(turn)
-                    or not self._latency_choice_fits(turn, _plain(event.get_result()))):
+            expected=event.get_extra('qqbot_voice_result_text') or _plain(event.get_result())
+            if turn.embedded and (turn.failed or not self._current_latency_image(turn)
+                    or not self._latency_choice_fits(turn, expected)):
                 self._drop_latency_attachment(turn, message)
                 self._finish_latency_turn(turn, "changed_before_send")
-            text = _plain(message)
+            from ...astrbot_plugin_proactive_agent.voice_memory import component_body
+            text = component_body(message)
+            has_voice=any(isinstance(p,Record) and p.text for p in message.chain)
             receipt_original = "\n".join(part.text for part in message.chain if isinstance(part, Plain) and part.text)
             images = [part for part in message.chain if isinstance(part, Image)]
             attachment_index = next((i for i, part in enumerate(images) if part is turn.attachment), None)
@@ -438,6 +450,8 @@ class LatencyEmojiMixin:
                 if not isinstance(parts, list):
                     return
                 checked = "\n".join(container[key] for container, key in text_slots(parts) if container[key])
+                if not checked and event.get_extra('qqbot_voice_result_text'):
+                    checked=''.join(turn.sent_parts)
                 if self._current_latency_image(turn) and self._latency_choice_fits(turn, checked):
                     return
                 indices = [i for i, part in enumerate(parts) if isinstance(part, dict) and part.get("type") == "image"]
@@ -464,7 +478,7 @@ class LatencyEmojiMixin:
                     turn.failed = True
                     self._finish_latency_turn(turn, "body_failed")
                 else:
-                    actual = sent_text(":".join(canonical(turn.origin)), receipt_original)
+                    actual = text if has_voice else sent_text(":".join(canonical(turn.origin)), receipt_original)
                     # Without an outbound receipt use the original component
                     # text, not the newline-normalized review lookup string.
                     turn.sent_parts.append(actual if actual != receipt_original else text)
@@ -529,7 +543,7 @@ class LatencyEmojiMixin:
         # AstrBot may call this hook even after swallowing a send exception.
         sent_text = "".join(turn.sent_parts)
         if (turn.failed or not turn.decorated or not sent_text.strip()
-                or "".join(turn.sent_original_parts).strip() != _plain(event.get_result()).strip()
+                or "".join(turn.sent_original_parts).strip() != (event.get_extra('qqbot_voice_result_text') or _plain(event.get_result())).strip()
                 or not self._valid_latency_turn(turn)):
             self._finish_latency_turn(turn)
             return True

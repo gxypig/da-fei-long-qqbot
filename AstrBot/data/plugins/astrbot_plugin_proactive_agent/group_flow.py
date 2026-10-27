@@ -9,6 +9,7 @@ from astrbot.api.message_components import Plain, At
 from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
 from .route_guard import canonical
 from .visual_intent import generation_kind
+from .reply_admission import has_agent_content
 
 
 def group_key(event):
@@ -82,6 +83,9 @@ class GroupFlow:
                 + json.dumps([{'sender': r['sender'], 'text': r['text']} for r in rows], ensure_ascii=False))
 
     async def process(self, previous, stage, event, prefix):
+        if not has_agent_content(event):
+            async for result in previous(stage,event,prefix):yield result
+            return
         if event.get_extra('qqbot_unified_admitted'):
             if self.prepare:self.prepare(event)
             async for result in previous(stage,event,prefix):yield result

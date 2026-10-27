@@ -241,6 +241,19 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await asyncio.wait_for(scheduler.run(provider(), lambda: asyncio.sleep(0, result=7), kind='background'), 1), 7)
         self.assertIsNone(scheduler._timer)
 
+    async def test_idle_models_serialize_per_provider_without_losing_work(self):
+        self.clock.advance(5)
+        entered=[];first=asyncio.Event()
+        async def work(n):
+            entered.append(n)
+            if n==0:await first.wait()
+            return n
+        tasks=[asyncio.create_task(self.scheduler.run(provider(),lambda n=n:work(n),kind='background')) for n in range(3)]
+        await until(lambda:len(entered)==1)
+        self.assertEqual(entered,[0]);self.assertEqual(self.scheduler.status()['waiting'],2)
+        first.set();self.assertEqual(await asyncio.gather(*tasks),[0,1,2])
+        self.assertEqual(entered,[0,1,2])
+
     async def test_preempt_background_model_only_and_raise_reschedulable_exception(self):
         self.clock.advance(5)
         started, cancelled = asyncio.Event(), asyncio.Event()

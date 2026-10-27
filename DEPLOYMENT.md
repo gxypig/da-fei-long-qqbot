@@ -1,6 +1,8 @@
 # 部署细节与故障排查
 
-本说明对应本仓库固定的 AstrBot 4.29.1、主动插件 1.6.0、图库插件 2.8.6 本地修改版。上游文档：[AstrBot Docker](https://docs.astrbot.app/deploy/astrbot/docker.html)、[AstrBot 源码](https://github.com/AstrBotDevs/AstrBot)、[OneBot 接入](https://docs.astrbot.app/platform/aiocqhttp.html)。升级前先看维护文档，不要直接覆盖运行数据。
+本说明对应本仓库固定的 AstrBot 4.29.1、主动插件 1.18.0、图库插件 2.8.6 本地修改版、B站插件1.3.1。上游文档：[AstrBot Docker](https://docs.astrbot.app/deploy/astrbot/docker.html)、[AstrBot 源码](https://github.com/AstrBotDevs/AstrBot)、[OneBot 接入](https://docs.astrbot.app/platform/aiocqhttp.html)。升级前先看维护文档，不要直接覆盖运行数据。
+
+1.18 首次部署会下载并校验 memewiki 公共词典；旧部署需另运行 `python tools/install_memewiki.py`。网络受限的离线安装、已有字典保护、语音请求与回退步骤见 [MEMORY_AND_VOICE.md](MEMORY_AND_VOICE.md)。语音供应商仍由部署者在AstrBot中配置，本项目不附带语音账号或额度。
 
 2026-10-23 补充：本页把独立 QQ 接入端的准备、人工交接、配置、验收和排错展开。它不是“给一个网址就不需要任何账号、授权、扫码的全自动安装承诺”。首次使用请先看下面的责任表，再按路线执行。
 

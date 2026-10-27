@@ -19,6 +19,8 @@
 
 ## 修改说明
 
+memewiki 集成取自 [in1t1a1/astrbot_plugin_memewiki](https://github.com/in1t1a1/astrbot_plugin_memewiki/tree/386dd63ed889251253576d44066c6de8d476f4f7)，固定提交 `386dd63ed889251253576d44066c6de8d476f4f7`、上游 1.5.2，Copyright 2026 in1t1a1，MIT 许可全文见插件目录 `MEMEWIKI_LICENSE.md`。本仓库改造其完整词条匹配、本地优先和公共 API 查询，将其接入已有后台学习、语境理解和梗仓库，未另外移植其聊天黑话写入指令。上游数据库由部署安装器下载并验证，不随本仓库分发；词条文本来自 cnmeme.wiki/贡献者，其内容权利不因代码 MIT 许可自动转移，使用与再分发应核对内容来源要求。详情见 [MEMORY_AND_VOICE.md](MEMORY_AND_VOICE.md)。
+
 项目基于已有 AstrBot 部署整理，图库插件安装元数据显示 2.8.6，原安装未保留可核实的上游 Git commit，**不编造一个提交号**。本仓库以 `SOURCE_MANIFEST.json` 记录分发文件的 SHA-256，并由仓库提交固定具体源码。
 
 图库本地修改包括：私聊/群聊图片生成意图与现有图库检索分流，多维度具体标签，人工标签保留，重打标失败保留旧数据，冷启动与模型失败退避，回复准备的并行处理。修改发生在 2026-10-22 至 2026-10-23；完整修改源码随目录提供。

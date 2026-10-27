@@ -124,6 +124,8 @@ def main():
         command = [str(python),str(Path(__file__).resolve()),'--settings',str(settings_path)]
         if args.container: command.append('--container')
         subprocess.run(command,check=True); return
+    from tools.install_memewiki import install as install_dictionary
+    print('Public meme dictionary:', install_dictionary(ROOT))
     configure(settings,container=args.container)
     from tools.repair_dashboard import inspect_view
     result = inspect_view(repair=True)

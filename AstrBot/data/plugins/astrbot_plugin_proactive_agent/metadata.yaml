@@ -1,5 +1,5 @@
 name: astrbot_plugin_proactive_agent
 desc: 大肥龙控制面板：群聊规则、主动消息和动态、龙娘设定与运行报告；全项目检查修复使用根目录独立脚本
 author: gxypig（项目维护，AI 辅助开发）
-version: 1.17.0
+version: 1.18.0
 repo: https://github.com/gxypig/da-fei-long-qqbot

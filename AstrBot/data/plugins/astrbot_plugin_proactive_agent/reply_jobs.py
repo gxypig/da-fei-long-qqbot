@@ -67,6 +67,7 @@ class ReplyJob:
         return {'id':self.id,'origin':self.origin,'sender':self.sender,'message_id':self.source_id,
                 'summary':self.text[:300],'source_count':len(self.sources),'state':self.state,
                 'stage':self.stage,'reason':self.reason,'force_quote':self.force_quote,
+                'admission':getattr(self,'admission',None),
                 'adjusted':self.manually_adjusted,'wait_ms':round(1000*max(0,self.timings.get('started',now)-self.received)),
                 'elapsed_ms':round(1000*max(0,self.timings.get('ended',now)-self.received)),
                 'stages_ms':{k:round(v,2) for k,v in self.timings.items() if k.endswith('_ms')}}
@@ -162,13 +163,20 @@ class ReplyQueue:
     def finish(self,job,state,reason='',*,pump=True):
         if job.state in TERMINAL:return
         assert state in TERMINAL
+        passive_only=(state=='ignored' and job.state=='received' and not job.sends)
+        occupied=job.id in self.active or job.id in self.pending
         if job.id in self.pending:self.pending.remove(job.id)
         self.active.pop(job.id,None)
         job.state=state;job.stage='ended';job.reason=reason;job.timings['ended']=self.clock()
+        if passive_only:
+            # The journal/audit retain incoming traffic. It must not invalidate
+            # queue edits, evict reply history or repeatedly scan all waiters.
+            self.jobs.pop(job.id,None)
+            return
         if job.gate and not job.gate.done():job.gate.set_result(False)
         if len(self.ended)==self.ended.maxlen:self.jobs.pop(self.ended[0],None)
         self.ended.append(job.id);self.changed('finished',job)
-        if pump:self.pump()
+        if pump and occupied:self.pump()
 
     def action(self,body):
         if not isinstance(body,dict):raise ValueError('操作必须为对象')
