@@ -350,5 +350,40 @@
     "description": "在已有回复机会中自然试探，每账号每天最多3次",
     "type": "bool",
     "default": false
+  },
+  "learning_record_days": {
+    "type": "int",
+    "default": 30,
+    "description": "学习过程最长保留天数（1至365）"
+  },
+  "proactive_min_gap_minutes": {
+    "type": "int",
+    "default": 5,
+    "description": "普通主动消息最短冷却分钟（1至1440）"
+  },
+  "proactive_life_enabled": {
+    "type": "bool",
+    "default": false,
+    "description": "按连续生活、事件依据和联系动机决定主动消息；关闭可回退旧逻辑"
+  },
+  "learning_record_limit": {
+    "type": "int",
+    "default": 2000,
+    "description": "学习过程最多保留条数（50至50000），不限制知识学习"
+  },
+  "proactive_unanswered_limit": {
+    "type": "int",
+    "default": 2,
+    "description": "连续多少次主动消息未回应后暂停普通主动联系（1至10）"
+  },
+  "fixed_message_required": {
+    "type": "bool",
+    "default": false,
+    "description": "群聊私聊定时规则作为明确必发任务；关闭时为自然闲聊检查机会"
+  },
+  "fixed_qzone_required": {
+    "type": "bool",
+    "default": false,
+    "description": "动态定时规则作为明确必发任务；关闭时允许跳过无依据的动态"
   }
 }

@@ -8,11 +8,14 @@ from aiocqhttp import CQHttp
 from .reply_jobs import ReplyJob, ReplyCancelled, current_job, TERMINAL
 from .group_flow import mergeable
 from .route_guard import bind_route
+from .hook_lifecycle import HookLease
+from .session_fence import get_fence
 
 _conversion=ContextVar('qqbot_conversion',default=None)
 
 
 def install_fullchain(plugin):
+    lease=HookLease('fullchain',plugin)
     from .db_pressure import DatabasePressure
     plugin._db_pressure=DatabasePressure(plugin)
     restore_db=plugin._db_pressure.install()
@@ -27,6 +30,9 @@ def install_fullchain(plugin):
     old_tool=FunctionToolExecutor.execute;tool_descriptor=FunctionToolExecutor.__dict__['execute']
 
     async def tool_execute(cls,tool,run_context,**arguments):
+        if not lease.active:
+            async for result in old_tool(tool,run_context,**arguments):yield result
+            return
         metric_stage('tool');started=time.monotonic();iterator=old_tool(tool,run_context,**arguments)
         try:
             async for result in iterator:yield result
@@ -36,6 +42,7 @@ def install_fullchain(plugin):
 
     @wraps(old_convert)
     async def convert(adapter,event):
+        if not lease.active:return await old_convert(adapter,event)
         if event.get('post_type')!='message':return await old_convert(adapter,event)
         platform=plugin._cfg('platform_id','aiocqhttp')
         if adapter is not plugin._platform():return await old_convert(adapter,event)
@@ -56,6 +63,7 @@ def install_fullchain(plugin):
 
     @wraps(old_action)
     async def action(bot,action,**params):
+        if not lease.active:return await old_action(bot,action,**params)
         job=_conversion.get()
         if job and action in {'get_msg','get_group_member_info','get_stranger_info'}:
             started=time.monotonic()
@@ -68,6 +76,7 @@ def install_fullchain(plugin):
 
     @wraps(old_execute)
     async def execute(scheduler,event):
+        if not lease.active:return await old_execute(scheduler,event)
         if event.get_platform_id()!=plugin._cfg('platform_id','aiocqhttp'):
             return await old_execute(scheduler,event)
         job=getattr(getattr(event,'message_obj',None),'_qqbot_ingress_job',None)
@@ -98,6 +107,9 @@ def install_fullchain(plugin):
 
     @wraps(old_process)
     async def process(stage,event):
+        if not lease.active:
+            async for x in old_process(stage,event):yield x
+            return
         job=event.get_extra('qqbot_reply_job')
         profiles=getattr(plugin,'_ai_profiles',None)
         if job and profiles and str(event.get_sender_id())!=str(event.get_self_id()):
@@ -131,6 +143,8 @@ def install_fullchain(plugin):
             async with asyncio.timeout(5):
                 job.cid=await manager.get_curr_conversation_id(job.origin) if manager else None
             job.generation=ledger.scope(job.origin,job.cid)
+            fence=get_fence(manager)
+            job.session_epoch=fence.epoch(job.origin) if fence else 0
             bind_route(job.origin,job.sender,job.source_id,bool(event.get_group_id()))
             async for x in old_process(stage,event):yield x
 
@@ -139,6 +153,7 @@ def install_fullchain(plugin):
     wrapped_tool=classmethod(tool_execute);FunctionToolExecutor.execute=wrapped_tool
     for cls,name,wrapper,_ in patches:setattr(cls,name,wrapper)
     def restore():
+        lease.close()
         restore_db()
         queue.close()
         if FunctionToolExecutor.__dict__['execute'] is wrapped_tool:FunctionToolExecutor.execute=tool_descriptor

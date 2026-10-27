@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from difflib import SequenceMatcher
 
 from .conversation_review import approve_once, request_scope
@@ -102,7 +103,7 @@ class ProactiveVariety:
                 return True
         return False
 
-    async def deliver(self, origin, content, send):
+    async def deliver(self, origin, content, send,attempt=None):
         content = await self.checked(content, origin)
         async with self.lock:
             if await self.duplicate(origin, content):
@@ -111,10 +112,24 @@ class ProactiveVariety:
             # cause another recipient to receive the same generated template.
             state = await self.state()
             rows = [r for r in state.get('fingerprints', []) if time.time() - r['at'] < 7*86400]
-            state['fingerprints'] = (rows + [{'at': time.time(), 'hashes': fingerprint(content)}])[-1000:]
+            reservation=uuid.uuid4().hex
+            state['fingerprints'] = (rows + [{'id':reservation,'at': time.time(), 'hashes': fingerprint(content)}])[-1000:]
             await self.plugin.put_kv_data(KEY, state)
-            approve_once(origin, content)
+        from .delivery_ledger import delivery_scope
+        attempt=attempt if attempt is not None else {'state':'preparing'};token=delivery_scope.set(attempt)
+        approve_once(origin, content)
+        try:
             await send(content)
+        except BaseException:
+            # Explicit rejection or pre-transport cancellation releases a reservation.
+            # Once submitted with no answer the content stays reserved, never replayed.
+            if attempt['state'] in {'preparing','failed'}:
+                async with self.lock:
+                    state=await self.state()
+                    state['fingerprints']=[r for r in state.get('fingerprints',[]) if r.get('id')!=reservation]
+                    await self.plugin.put_kv_data(KEY,state)
+            raise
+        finally:delivery_scope.reset(token)
         return content
 
 

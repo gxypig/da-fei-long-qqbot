@@ -253,7 +253,10 @@ class MemeMemory:
                 self.stats["memory_hits"] += 1
                 return {"status": "remembered", "entry": row}
             if time.monotonic() < self._retry_after.get(key, 0):
-                return {"status": "unverified", "hint": "刚才没有核实，稍后再查；不要编造含义"}
+                return {"status": "unverified", 'retryable':key in getattr(self,'_transient_keys',set()),
+                        "hint": "刚才没有核实，稍后再查；不要编造含义"}
+            if not hasattr(self,'_transient_keys'):self._transient_keys=set()
+            self._transient_keys.discard(key)
             self._retry_after = {k: v for k, v in self._retry_after.items() if v > time.monotonic()}
             self._retry_after[key] = time.monotonic() + 600
             phase = "search"
@@ -269,7 +272,7 @@ class MemeMemory:
                         sources.append({"id": len(sources)+1, "title": str(item.get("title", ""))[:120],
                                         "url": url, "snippet": str(item.get("snippet", ""))[:1500]})
                     if not sources:
-                        raise ValueError("Search returned no usable sources")
+                        return {'status':'unverified','hint':'搜索未返回可核实的公开来源，不写入知识'}
                     phase = "learn"
                     learned = json_object(await self.generate(LEARN_SYSTEM, {"梗词": phrase, "搜索资料": sources}, origin))
                     ids = learned.get("source_ids", [])
@@ -312,8 +315,11 @@ class MemeMemory:
                 if type(exc).__name__ == 'BackgroundPaused':
                     self._retry_after.pop(key, None)
                     raise
+                self._retry_after[key]=time.monotonic()+3
+                self._transient_keys.add(key)
                 self.audit("meme", {"status": "unverified", "phase": phase, "error": type(exc).__name__})
-                return {"status": "unverified", "hint": "搜索或核实暂未完成，别装作知道，也别说已记住"}
+                return {"status": "unverified", "retryable":True, "error":type(exc).__name__,
+                        "hint": "搜索或核实暂未完成，将在空闲时重试，别装作知道，也别说已记住"}
 
     async def enrich(self, text, recent, origin):
         found = self.match(text)

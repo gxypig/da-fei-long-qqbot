@@ -8,7 +8,9 @@ import time
 import uuid
 from difflib import SequenceMatcher
 from contextvars import ContextVar
-from contextlib import contextmanager
+from contextlib import contextmanager,asynccontextmanager
+from .hook_lifecycle import HookLease
+from .session_fence import get_fence,captured_session
 from aiocqhttp import CQHttp, Message
 from .record_store import AsyncRecordStore
 from .reply_jobs import current_job
@@ -26,7 +28,8 @@ def optional_attachment():
 
 
 class DeliveryUnconfirmed(RuntimeError):
-    pass
+    def __init__(self,message,state='failed'):
+        super().__init__(message);self.state=state
 
 
 def receipt_status(result):
@@ -73,6 +76,11 @@ class DeliveryLedger:
         return self.generations[origin][1]
 
     def begin(self,origin,cid,text,attachments,job=None):
+        # Reserve the derived circuit row before submission. Receipt completion
+        # may happen while new-key capacity is exhausted; both updates must then
+        # remain possible without turning an accepted message into an exception.
+        target='__target__:'+digest(origin)
+        if target not in self.store.rows:self.store.put(target,{'origin':origin,'consecutive_failures':0,'pause_until':0})
         id_=uuid.uuid4().hex
         row={'id':id_,'job_id':job.id if job else None,'origin':origin,'cid':cid,'source_id':job.source_id if job else '',
             'sender':job.sender if job else '', 'generation':job.generation if job else self.scope(origin,cid),
@@ -84,8 +92,29 @@ class DeliveryLedger:
 
     def result(self,id_,state,message_id=None,reason=''):
         row=self.store.rows[id_]
-        self.store.put(id_,{**row,'state':state,'message_id':message_id,'reason':reason,'confirmed_at':time.time() if state=='confirmed' else None})
+        self.store.put(id_,{**row,'state':state,'message_id':message_id,'reason':reason,'result_at':time.time(),'confirmed_at':time.time() if state=='confirmed' else None})
         if state in self.stats:self.stats[state]+=1
+        attempt=delivery_scope.get()
+        if attempt is not None:attempt.update(state=state,id=id_,message_id=message_id)
+        if state=='confirmed' or state=='failed' and not reason.startswith(('outbox_','session_reset','hook_unloaded','pre_send_')):
+            key='__target__:'+digest(row['origin']);previous=self.store.rows.get(key,{})
+            failures=previous.get('consecutive_failures',0)+1 if state=='failed' else 0
+            self.store.put(key,{**previous,'origin':row['origin'],'consecutive_failures':failures,
+                'last_state':state,'last_result_at':time.time(),
+                'pause_until':time.time()+1800 if failures>=3 else 0,
+                'recovered_at':time.time() if state=='confirmed' and previous.get('consecutive_failures') else previous.get('recovered_at')})
+
+    def health(self,now=None):
+        now=time.time() if now is None else now
+        records=[r for r in self.store.rows.values() if r.get('state') in {'confirmed','failed','unknown','sending'}]
+        recent=[r for r in records if r.get('result_at',r.get('at',0))>=now-86400]
+        waiting=[r for r in records if r.get('state')=='sending']
+        targets=[dict(r) for k,r in self.store.rows.items() if k.startswith('__target__:')]
+        return {'window_hours':24,'counts':{s:sum(r['state']==s for r in recent) for s in ('confirmed','failed','unknown')},
+            'inflight':len(waiting),'oldest_pending_at':min((r['at'] for r in waiting),default=None),
+            'targets':targets,'current_faults':[t for t in targets if t.get('consecutive_failures',0)>=3],
+            'historical_failures':sum(r['state']=='failed' for r in records),
+            'persistence':self.store.snapshot(),'last_confirmed_at':max((r.get('confirmed_at',0) or 0 for r in records if r['state']=='confirmed'),default=None)}
 
     def state(self,job):
         rows=[self.store.rows[x] for x in job.sends if x in self.store.rows and not self.store.rows[x].get('optional')]
@@ -159,7 +188,17 @@ class DeliveryLedger:
 
 def install_delivery_transport(plugin):
     previous=CQHttp.call_action;ledger=plugin._delivery
+    lease=HookLease('delivery',plugin)
+    restored=False
+    fence=get_fence(getattr(plugin.context,'conversation_manager',None))
+    if fence:fence.acquire()
+    @asynccontextmanager
+    async def boundary(origin):
+        if fence:
+            async with fence.boundary(origin):yield
+        else:yield
     async def send(bot,action,**params):
+        if not lease.active:return await previous(bot,action,**params)
         platform=plugin._platform();base=action.removesuffix('_async')
         if platform is None or getattr(platform,'bot',None) is not bot or base not in SEND_ACTIONS:
             return await previous(bot,action,**params)
@@ -169,6 +208,9 @@ def install_delivery_transport(plugin):
         manager=getattr(plugin.context,'conversation_manager',None)
         async with asyncio.timeout(3):
             cid=await manager.get_curr_conversation_id(origin) if manager else None
+        epoch=fence.epoch(origin) if fence else 0
+        captured=captured_session.get()
+        expected=(job.cid,job.session_epoch) if job else ((captured[1],captured[2]) if captured and captured[0]==origin else (cid,epoch))
         if job and job.cid is not None and cid!=job.cid:
             raise DeliveryUnconfirmed('会话已重置，已取消旧会话附件/回复')
         if job:
@@ -193,28 +235,53 @@ def install_delivery_transport(plugin):
                         async with asyncio.timeout(2):attachments.append(await images.describe_transport(part))
                     except Exception:attachments.append({'kind':part['type'],'semantic_status':'unknown'})
                 else:attachments.append({'kind':part['type'],'semantic_status':'unknown'})
+        if not lease.active:return await previous(bot,action,**params)
         text=plain(parts);id_=ledger.begin(origin,cid,text,attachments,job)
+        attempt=delivery_scope.get()
+        if attempt is not None:attempt.update(state='preparing',id=id_)
         # A failed durability barrier prevents sending; later writes only retry storage.
         persisted=time.monotonic()
         try:await ledger.store.flush(id_)
         except Exception:
-            ledger.result(id_,'failed',reason='outbox_persistence_unavailable');raise
+            if lease.active and not ledger.store.closed:ledger.result(id_,'failed',reason='outbox_persistence_unavailable')
+            raise
         if job:job.timings['persistence_ms']=job.timings.get('persistence_ms',0)+(time.monotonic()-persisted)*1000
-        started=time.monotonic();metric_stage('sending')
-        try:result=await previous(bot,action,**params)
+        started=time.monotonic();metric_stage('sending');submitted=False
+        try:
+            async with boundary(origin):
+                if not lease.active or ledger.store.closed:return await previous(bot,action,**params)
+                latest=await manager.get_curr_conversation_id(origin) if manager else None
+                if not lease.active or ledger.store.closed:return await previous(bot,action,**params)
+                if ((expected[0] is not None and latest!=expected[0]) or latest!=cid
+                    or fence and expected[1] is not None and fence.epoch(origin)!=expected[1]):
+                    ledger.result(id_,'failed',reason='session_reset_before_send')
+                    raise DeliveryUnconfirmed('会话已重置，已取消旧会话附件/回复')
+                from .conversation_review import _delivery_check
+                final_check=_delivery_check.get()
+                if final_check:await final_check()
+                submitted=True
+                if attempt is not None:attempt.update(state='submitted')
+                result=await previous(bot,action,**params)
         except BaseException as exc:
-            explicit=isinstance(getattr(exc,'retcode',None),int) or type(exc).__name__=='ActionFailed'
-            ledger.result(id_,'failed' if explicit else 'unknown',reason=type(exc).__name__)
+            if not lease.active or ledger.store.closed:raise
+            if ledger.store.rows[id_].get('state')=='failed':raise
+            explicit=not submitted or isinstance(getattr(exc,'retcode',None),int) or type(exc).__name__=='ActionFailed'
+            ledger.result(id_,'failed' if explicit else 'unknown',reason=('pre_send_' if not submitted else '')+type(exc).__name__)
             if job:job.timings['send_ms']=job.timings.get('send_ms',0)+(time.monotonic()-started)*1000
             raise
+        if not lease.active or ledger.store.closed:return result
         state,message_id=receipt_status(result);ledger.result(id_,state,message_id)
         record=ledger.store.rows[id_]
         ledger.store.put(id_,{**record,'send_ms':(time.monotonic()-started)*1000,
                               'elapsed_ms':(time.monotonic()-job.received)*1000 if job else None})
         profiles=getattr(plugin,'_ai_profiles',None)
-        if profiles and job and job.event:profiles.delivery(job.event.get_extra('qqbot_ai_probe'),text,state)
+        if profiles and job and job.event:profiles.delivery(job.event.get_extra('qqbot_ai_probe'),text,state,id_,message_id)
         if job:job.timings['send_ms']=job.timings.get('send_ms',0)+(time.monotonic()-started)*1000
-        if state!='confirmed':raise DeliveryUnconfirmed('平台未确认发送：'+state)
+        if state!='confirmed':raise DeliveryUnconfirmed('平台未确认发送：'+state,state)
+        life=getattr(plugin,'_life',None)
+        if life:
+            try:life.confirmed(ledger.store.rows[id_])
+            except Exception as exc:plugin.logger.error('已发送承诺的后台提取待恢复：%s',type(exc).__name__)
         if job:
             label='optional_attachment_complete_ms' if record.get('optional') else 'required_complete_ms'
             job.timings[label]=(time.monotonic()-job.received)*1000
@@ -226,6 +293,11 @@ def install_delivery_transport(plugin):
         return result
     CQHttp.call_action=send
     def restore():
+        nonlocal restored
+        if restored:return
+        restored=True
+        lease.close()
+        if fence:fence.release()
         if CQHttp.call_action is send:CQHttp.call_action=previous
     return restore
 
@@ -233,7 +305,9 @@ def install_delivery_transport(plugin):
 def install_delivery_history(plugin):
     from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
     previous=InternalAgentSubStage._save_to_history
+    lease=HookLease('delivery_history',plugin)
     async def save(stage,event,req,response,messages,stats,user_aborted=False):
+        if not lease.active:return await previous(stage,event,req,response,messages,stats,user_aborted)
         started=time.monotonic()
         job=event.get_extra('qqbot_reply_job')
         if not job:return await previous(stage,event,req,response,messages,stats,user_aborted)
@@ -250,10 +324,11 @@ def install_delivery_history(plugin):
                     message=copy.copy(message);message._no_save=True;copies[i]=message
         result=await previous(stage,event,req,response,copies,stats,user_aborted)
         metric_add('history_save_ms',(time.monotonic()-started)*1000)
-        if draft and confirmed and digest(confirmed)==digest(draft) and req and req.conversation:
+        if lease.active and draft and confirmed and digest(confirmed)==digest(draft) and req and req.conversation:
             ledger.history_saved(job)
         return result
     InternalAgentSubStage._save_to_history=save
     def restore():
+        lease.close()
         if InternalAgentSubStage._save_to_history is save:InternalAgentSubStage._save_to_history=previous
     return restore

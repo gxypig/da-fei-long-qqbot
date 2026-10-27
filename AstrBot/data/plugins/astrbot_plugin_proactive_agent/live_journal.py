@@ -160,12 +160,15 @@ class LiveJournal:
 
 
 def install_live_journal(plugin):
+    from .hook_lifecycle import HookLease
+    lease=HookLease('live_journal',plugin)
     from astrbot.dashboard.services.conversation_service import ConversationService
     previous_send = CQHttp.call_action
     previous_detail = ConversationService.get_conversation_detail
 
     async def send(bot, action, **params):
         result = await previous_send(bot, action, **params)
+        if not lease.active:return result
         from .delivery_ledger import receipt_status
         delivery,message_id=receipt_status(result)
         platform = plugin._platform()
@@ -179,6 +182,7 @@ def install_live_journal(plugin):
 
     async def detail(service, data):
         result = await previous_detail(service, data)
+        if not lease.active:return result
         # Original endpoint has already validated the selected conversation.
         result['qqbot_live_history'] = plugin._live_journal.history(result['user_id'])
         result['qqbot_live_error'] = plugin._live_journal.error
@@ -187,6 +191,7 @@ def install_live_journal(plugin):
     CQHttp.call_action = send
     ConversationService.get_conversation_detail = detail
     def restore():
+        lease.close()
         if CQHttp.call_action is send:
             CQHttp.call_action = previous_send
         if ConversationService.get_conversation_detail is detail:

@@ -5,6 +5,13 @@
   <div id="notice" role="status" aria-live="polite"></div>
   <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="performance">性能与审查</button><button class="tab" data-tab="learning">空闲学习</button><button class="tab" data-tab="memes">梗仓库</button><button class="tab" data-tab="health">运行报告</button></nav>
   <form id="settings"><section id="groups" class="tab-panel">
+    <div id="round2-settings-hidden" hidden>
+      <input id="proactive_life_enabled" type="checkbox"><input id="fixed_message_required" type="checkbox"><input id="fixed_qzone_required" type="checkbox">
+      <input id="proactive_unanswered_limit" type="number"><input id="proactive_min_gap_minutes" type="number"><input id="learning_record_limit" type="number"><input id="learning_record_days" type="number">
+      <textarea id="group_ids"></textarea><textarea id="private_ids"></textarea><input id="min_action_gap_minutes" type="number"><input id="group_min_gap_minutes" type="number"><input id="private_min_gap_minutes" type="number">
+      <button id="learning-prev" type="button">上一页记录</button><button id="learning-next" type="button">下一页记录</button><button id="learning-jobs-prev" type="button">上一页任务</button><button id="learning-jobs-next" type="button">下一页任务</button><div id="learning-truth"></div><dialog id="rule-editor"></dialog>
+      <div id="learning-review-report"></div><div id="learning-release-report"></div><p id="rule-save-status"></p>
+    </div>
     <div class="section-head"><div><h2>哪些群可以自然接话</h2><p>勾选后成为特殊接话群；未勾选的群继续按原有唤醒规则回复</p></div><button id="load-groups" type="button" class="secondary">刷新群列表</button></div>
     <div id="group-list" class="group-list" aria-label="特殊接话群">正在读取群列表…</div>
     <details><summary>手动填写或检查群号</summary><label for="group_chat_ids">特殊群号，多个用逗号分隔</label><textarea id="group_chat_ids" rows="2" placeholder="未选择特殊群"></textarea></details>
@@ -18,10 +25,10 @@
     <div class="card-grid"><article class="card"><label class="toggle"><input id="discretionary_enabled" type="checkbox">保留 AI 自由主动模式</label><h2>自由模式检查间隔</h2><label for="interval_minutes">每隔多少分钟判断一次是否适合开口</label><div class="inline"><input id="interval_minutes" type="number" min="5" max="1440" required><span>分钟</span></div><p>到点会做判断，不保证每轮都发；原有发送冷却保留</p></article><article class="card"><h2>免打扰时段</h2><label for="quiet_hours">使用 24 小时制，留空表示不限制</label><input id="quiet_hours" type="text" placeholder="23:00-07:00"><p>约束定时主动行为，不阻止被唤醒后的正常回复</p></article></div>
   </section>
   <section id="fixed" class="tab-panel" hidden>
-    <div class="section-head"><div><h2>每个勾选对象，都有自己的定时安排</h2><p>到点给所有勾选群和好友分别生成消息，不共用发送名额；同一个对象不会再被自由模式重复选中</p></div><button id="load-targets" type="button" class="secondary">刷新好友和群</button></div>
-    <div class="card-grid"><article class="card"><label class="toggle master"><input id="fixed_messages_enabled" type="checkbox">开启固定消息</label><label for="fixed_message_interval_minutes">群聊和私聊发送间隔（分钟）</label><input id="fixed_message_interval_minutes" type="number" min="5" max="10080" required><label class="toggle"><input id="fixed_message_random_enabled" type="checkbox">使用随机间隔范围</label><div class="inline"><label>下限（分钟）<input id="fixed_message_min_minutes" type="number" min="5" max="10080" required></label><label>上限（分钟）<input id="fixed_message_max_minutes" type="number" min="5" max="10080" required></label></div><p>开启后固定间隔不生效，例如60至100分钟。每个对象每轮各自抽签，重启保留已抽好的时间；动态仍用独立固定间隔</p><p>每个目标首次勾选或改间隔后，等待一个完整间隔。生成和审阅会有少量耗时；单个失败独立重试</p></article>
-    <article class="card"><label class="toggle master"><input id="fixed_qzone_enabled" type="checkbox">开启固定动态</label><label for="fixed_qzone_interval_minutes">动态发布间隔（分钟）</label><input id="fixed_qzone_interval_minutes" type="number" min="5" max="10080" required><p>动态使用独立时钟，不占用消息名额，也不受原来自由动态冷却限制</p></article></div>
-    <div class="callout">仍遵守「主动行为」总开关、群聊/私聊/动态渠道开关和免打扰。免打扰期间不发，恢复后每个到期目标最多补一次。未勾选任何对象就不发送消息</div>
+    <div class="section-head"><div><h2>每个勾选对象，都有自己的定时安排</h2><p>每个勾选群和好友都有独立检查机会，不共用名额；普通闲聊没有依据可以跳过，明确必发单独开启。同一个对象不会被自由模式重复选中</p></div><button id="load-targets" type="button" class="secondary">刷新好友和群</button></div>
+    <div class="card-grid"><article class="card"><label class="toggle master"><input id="fixed_messages_enabled" type="checkbox">开启定时消息机会</label><label for="fixed_message_interval_minutes">群聊和私聊发送间隔（分钟）</label><input id="fixed_message_interval_minutes" type="number" min="5" max="10080" required><label class="toggle"><input id="fixed_message_random_enabled" type="checkbox">使用随机间隔范围</label><div class="inline"><label>下限（分钟）<input id="fixed_message_min_minutes" type="number" min="5" max="10080" required></label><label>上限（分钟）<input id="fixed_message_max_minutes" type="number" min="5" max="10080" required></label></div><p>开启后固定间隔不生效，例如60至100分钟。每个对象每轮各自抽签，重启保留已抽好的时间；动态仍用独立固定间隔</p><p>每个目标首次勾选或改间隔后，等待一个完整间隔。生成和审阅会有少量耗时；单个失败独立重试</p></article>
+    <article class="card"><label class="toggle master"><input id="fixed_qzone_enabled" type="checkbox">开启定时动态机会</label><label for="fixed_qzone_interval_minutes">动态发布间隔（分钟）</label><input id="fixed_qzone_interval_minutes" type="number" min="5" max="10080" required><p>动态使用独立时钟，不占用消息名额，也不受原来自由动态冷却限制</p></article></div>
+    <div class="callout">仍遵守「主动行为」总开关、群聊/私聊/动态渠道开关和免打扰。免打扰期间不发，恢复后重新判断每个到期目标的时机，不补发过期文案。未勾选任何对象就不发送消息</div>
     <h2>定时群聊</h2><div id="fixed-group-list" class="group-list"></div><details><summary>手动填写群号</summary><textarea id="fixed_group_ids" rows="2"></textarea></details>
     <h2>定时私聊</h2><div id="fixed-friend-list" class="group-list"></div><details><summary>手动填写好友QQ号</summary><textarea id="fixed_private_ids" rows="2"></textarea></details>
     <h2>各目标的运行状态</h2><button type="button" id="refresh-schedule" class="secondary">刷新定时状态</button><div id="schedule-status" class="callout">保存选择后约10秒开始计时</div>
@@ -78,4 +85,4 @@
     <p class="footnote">独立脚本会检查服务、QQ连接、模型和审阅，并重启可恢复的故障服务。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
   </section>
   <footer>设置保存后生效 · 特殊群默认不选 · 固定定时独立计时 · 管理员权限保持不变</footer>
-</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./fullchain.js?v=1.16.0"></script><script src="./app.js?v=1.16.0"></script></body></html>
+</main><link rel="stylesheet" href="./round2.css?v=1.17.0-r6"><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./fullchain.js?v=1.17.0-r6"></script><script src="./round2.js?v=1.17.0-r6"></script><script src="./app.js?v=1.17.0-r6"></script></body></html>

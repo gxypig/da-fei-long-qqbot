@@ -270,9 +270,12 @@ class OutboundGuard:
 def install_outbound_guard(plugin, reviewer):
     """CQHttp's dynamic send_* methods and call_action share this one boundary."""
     previous = CQHttp.call_action
+    from .hook_lifecycle import HookLease
+    lease=HookLease('review',plugin)
     guard = OutboundGuard(plugin, reviewer)
 
     async def guarded(bot, action, **params):
+        if not lease.active:return await previous(bot,action,**params)
         platform = plugin._platform()
         if platform is not None and getattr(platform, "bot", None) is bot:
             original = copy.deepcopy(params)
@@ -302,6 +305,7 @@ def install_outbound_guard(plugin, reviewer):
     CQHttp.call_action = guarded
 
     def restore():
+        lease.close()
         if CQHttp.call_action is guarded:
             CQHttp.call_action = previous
     return restore

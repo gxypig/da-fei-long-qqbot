@@ -44,12 +44,12 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.store.rows[self.key]['state'],'suspected')
         self.assertEqual(self.service.reply_note('qq','123'),'')
 
-    async def test_two_different_confirmed_probe_rounds_and_sustained_independent_evidence(self):
+    async def test_regex_claims_and_machine_errors_only_open_observation(self):
         await self.seed_suspect();a=await self.probe_answer('我是机器人，这个账号是程序自动回复')
         self.assertEqual(self.service.store.rows[self.key]['state'],'suspected')
         b=await self.probe_answer('我是AI，这个账号由程序自动回复')
-        self.assertNotEqual(a['id'],b['id']);self.assertEqual(self.service.store.rows[self.key]['state'],'auto_confirmed')
-        self.assertIn('弱鸡ai',self.service.reply_note('qq','123'))
+        self.assertNotEqual(a['id'],b['id']);self.assertEqual(self.service.store.rows[self.key]['state'],'suspected')
+        self.assertEqual('',self.service.reply_note('qq','123'))
         self.assertNotIn('insufficient_quota',self.service.reply_note('qq','123'))
 
     async def test_roleplay_quotes_and_contradiction_block_confirmation(self):
@@ -67,6 +67,7 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(p)
             self.assertIsNone(await self.service.prepare_probe('qq','123','other','qq:GroupMessage:2'))
             self.service.delivery(p,p['question'],'unknown');self.service.end_turn(p)
+            self.now+=601 # Unknown delivery cannot be retried as if it never happened.
         self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2'))
         self.action('revoke');self.observe('我是AI机器人');self.assess()
         self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2'))

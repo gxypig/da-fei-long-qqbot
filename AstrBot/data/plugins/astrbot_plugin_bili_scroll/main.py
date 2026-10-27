@@ -297,12 +297,23 @@ class Main(star.Star):
         return await self.client.discover(keyword, excluded=excluded, mode=mode or v['mode'],
                                           up_list=v['up_list'], mygo=v['mygo'])
 
+    def life_event(self,origin,item,operation,summary):
+        getter=getattr(self.context,'get_registered_star',None)
+        meta=getter('astrbot_plugin_proactive_agent') if getter else None
+        life=getattr(meta.star_cls,'_life',None) if meta and meta.activated else None
+        if life and life.enabled():
+            try:
+                life.event('tool',summary,visibility=origin,source_ids=[item['bvid'],operation],completed=True,
+                    extra={'operation':operation,'url':item.get('url'),'video_watched':False})
+            except Exception:
+                self.logger.error('B站活动记忆暂存失败，投递状态仍以发送回执为准')
+
     async def share(self, origin, keyword='', event=None, final_check=None, mode=None):
         completion={}
         try:
             async with total_budget(50):
                 return await self._share(origin,keyword,event,final_check,mode,completion)
-        except TimeoutError:
+        except Exception:
             if completion.get('confirmed'):
                 return '已向当前会话分享了视频链接；不要再发送一次，也不要复述文案'
             raise
@@ -323,6 +334,12 @@ class Main(star.Star):
             if not data['items']:
                 return ('本轮前一个视频已经发送成功；这次追加搜索' if receipt else '') + '暂时没有找到匹配且没分享过的视频' + ('；' + '；'.join(data['warnings']) if data['warnings'] else '')
             item = data['items'][0]
+            self.life_event(origin,item,'discovered','检索发现视频：'+item['title'][:150])
+            self.life_event(origin,item,'metadata_read','读取标题/简介：'+item['title'][:150]+'；'+str(item.get('description',item.get('desc','')))[:250])
+            evidence=item.get('chishi',item.get('score_detail',item.get('evidence',{})))
+            comments=item.get('comments') or (evidence.get('comments') if isinstance(evidence,dict) else None)
+            if comments:self.life_event(origin,item,'comments_read','读取评论样本；评论是用户观点，不代表视频事实：'+str(comments)[:300])
+            if evidence or 'score' in item:self.life_event(origin,item,'metadata_analyzed','根据标题、简介或评论进行了筛选；未播放完整视频')
             cid = await conversation_id(self, origin)
             text = await self.make_copy(item, origin)
 
@@ -334,14 +351,17 @@ class Main(star.Star):
 
             await check()
             reservation=None
-            if store:
-                reservation=hashlib.sha256((origin+'|'+item['bvid']).encode()).hexdigest()
-                store.put(reservation,{'origin':origin,'bvid':item['bvid'],'at':time.time(),'state':'reserved'})
-                await store.flush(reservation,timeout=min(2,remaining(2)))
             # Review remains at the shared transport boundary; ordinary manual
             # replies keep their current sender and target, timers set an explicit route.
             receipts=[]
+            from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import delivery_scope
+            attempt={'state':'preparing'};token=delivery_scope.set(attempt)
             try:
+                if store:
+                    reservation=hashlib.sha256((origin+'|'+item['bvid']).encode()).hexdigest()
+                    store.put(reservation,{'origin':origin,'bvid':item['bvid'],'at':time.time(),'state':'reserved'})
+                    await store.flush(reservation,timeout=min(2,remaining(2)))
+                await check()
                 with observe_receipts(origin) as receipts,chat_delivery(origin), delivery_policy(check):
                     if event is not None:
                         await event.send(MessageChain([Plain(text)]))
@@ -353,10 +373,11 @@ class Main(star.Star):
                     raise RuntimeError('QQ未返回有效发送编号，结果未知，不自动重发')
                 if completion is not None:completion['confirmed']=True
             except BaseException:
-                if store:
-                    state='failed' if receipts and all(r['state']=='failed' for r in receipts) else 'unknown'
+                if store and reservation in store.rows:
+                    state='failed' if attempt['state'] in {'preparing','failed'} or receipts and all(r['state']=='failed' for r in receipts) else 'unknown'
                     store.put(reservation,{**store.rows[reservation],'state':state,'receipts':receipts})
                 raise
+            finally:delivery_scope.reset(token)
             actual = sent_text(origin, text)
             if store:
                 # Transport guard has required a real platform receipt. Memory
@@ -364,6 +385,7 @@ class Main(star.Star):
                 store.put(reservation,{**store.rows[reservation],'state':'confirmed','receipts':receipts})
             if event is not None:
                 event.set_extra('qqbot_bili_sent', {'keyword': keyword, 'mode': mode, 'text': actual, 'url': item['url']})
+            self.life_event(origin,item,'share_confirmed','确认向本会话分享了视频网址：'+item['url'])
             meta=self.context.get_registered_star('astrbot_plugin_proactive_agent') if hasattr(self.context,'get_registered_star') else None
             companion=meta.star_cls if meta and meta.activated else self
             try:

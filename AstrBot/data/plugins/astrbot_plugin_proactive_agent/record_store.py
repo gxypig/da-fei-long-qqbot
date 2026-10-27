@@ -14,6 +14,7 @@ class AsyncRecordStore:
         self.path=Path(path);self.limit=limit;self.rows={};self.pending={};self.persisted={}
         self.wake=asyncio.Event();self.progress=asyncio.Event();self.task=None;self.closed=False
         self._io=None
+        self._stats_dirty=False
         self.stats={'failures':0,'dropped':0,'last_error':None,'last_error_at':None,'recovered_at':None}
 
     def _load(self):
@@ -41,6 +42,7 @@ class AsyncRecordStore:
         except (ValueError,TypeError,AttributeError) as exc:
             self.stats.update(failures=self.stats['failures']+1,last_error='invalid_recovery_spool',last_error_at=time.time())
         self.task=asyncio.create_task(self._worker(),name='persist-'+self.path.stem)
+        self.task.add_done_callback(lambda _: self.progress.set())
         if self.pending:self.wake.set()
 
     def put(self,key,body):
@@ -59,7 +61,25 @@ class AsyncRecordStore:
             while self.persisted.get(key,0)<revision:
                 self.progress.clear()
                 if self.persisted.get(key,0)>=revision:break
+                self._check_worker()
                 await self.progress.wait()
+
+    def _check_worker(self):
+        if self.closed or not self.task or self.task.done():
+            cause=None
+            if self.task and self.task.done() and not self.task.cancelled():
+                cause=self.task.exception()
+            raise RuntimeError('persistence worker unavailable; pending records retained') from cause
+
+    def _queue_stats(self):
+        # Telemetry is best effort. It must never stop delivery facts being committed.
+        if not self._stats_dirty or self.closed:return
+        if '__persistence_stats__' not in self.pending and len(self.pending)>=self.limit:return
+        try:
+            self.put('__persistence_stats__',{'stats':dict(self.stats)})
+            self._stats_dirty=False
+        except Exception:
+            self._stats_dirty=True
 
     async def _worker(self):
         delay=.1
@@ -72,15 +92,17 @@ class AsyncRecordStore:
                     await asyncio.shield(self._io)
                 except Exception as exc:
                     self.stats.update(failures=self.stats['failures']+1,last_error=type(exc).__name__,last_error_at=time.time())
+                    self._stats_dirty=True
                     await asyncio.sleep(delay);delay=min(5,delay*2)
                     continue
-                if self.stats['last_error']:
-                    self.stats['recovered_at']=time.time();self.stats['latest_error']=self.stats['last_error'];self.stats['last_error']=None
-                    self.put('__persistence_stats__',{'stats':dict(self.stats)})
                 for key,(revision,_) in batch.items():
                     self.persisted[key]=revision
                     if self.pending.get(key,(None,))[0]==revision:self.pending.pop(key,None)
                 self.progress.set();delay=.1
+                if self.stats['last_error']:
+                    self.stats['recovered_at']=time.time();self.stats['latest_error']=self.stats['last_error'];self.stats['last_error']=None
+                    self._stats_dirty=True
+                self._queue_stats()
 
     def snapshot(self):
         return {**self.stats,'pending':len(self.pending),'closed':self.closed,
@@ -95,14 +117,15 @@ class AsyncRecordStore:
 
     async def close(self,timeout=5):
         if self.closed:return
-        self.put('__persistence_stats__',{'stats':dict(self.stats)})
+        self._stats_dirty=True;self._queue_stats()
         try:
             async with asyncio.timeout(timeout):
                 while self.pending:
                     self.progress.clear()
                     if not self.pending:break
+                    self._check_worker()
                     await self.progress.wait()
-        except TimeoutError:pass
+        except (TimeoutError,RuntimeError):pass
         if self.task:
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)
         if self._io:

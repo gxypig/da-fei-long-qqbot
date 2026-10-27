@@ -103,12 +103,17 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._meme_prefetch = MemePrefetch(self._memory)
         self._init_reply_pipeline()
         self._work = WorkRuntime(self._cfg, self._audit)
-        self._ai_profiles = AIProfiles(self._data_dir/'ai-profiles.sqlite3',self._cfg,self._work.busy)
+        self._ai_profiles = AIProfiles(self._data_dir/'ai-profiles.sqlite3',self._cfg,self._work.busy,generate=self._generate_json)
         self._image_memory = ImageMemory(self,self._data_dir/'image-memory')
+        from .target_health import TargetHealth
+        self._targets=TargetHealth(self)
         self._delivery.image_details = self._image_memory.details
         self._restore_work = None
         self._learning = IdleLearning(self._data_dir / 'idle-learning.sqlite3', self._cfg,
             self._memory, self._generate_json, self._reviewer, self._audit, self._work.busy)
+        self._ai_profiles.on_change=self._learning.reclassify_source
+        from .life_state import ProactiveLife
+        self._life=ProactiveLife(self,self._data_dir/'proactive-life.sqlite3')
 
 
     # ==================== 生命周期 ====================
@@ -117,13 +122,16 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         await self._audit_writer.start()
         await self._sent_memory.start()
         await self._delivery.start()
+        await self._life.start()
         self._sent_memory.legacy_before=self._delivery.legacy_cutoff
-        await self._ai_profiles.start()
+        await self._ai_profiles.start(self._delivery)
         await self._image_memory.start()
         self._restore_delivery = install_delivery_transport(self)
         self._restore_delivery_history = install_delivery_history(self)
         self.register_panel()
         register_fullchain_panel(self)
+        from .round2_panel import register_round2_panel
+        register_round2_panel(self)
         await self._live_journal.start()
         self._restore_live = install_live_journal(self)
         try:
@@ -149,7 +157,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.16.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.17.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -171,16 +179,19 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         checks['reply_queue'] = not self._reply_queue.closed
         checks['image_memory'] = not self._cfg('image_memory_enabled',False) or bool(self._image_memory.task and not self._image_memory.task.done())
         checks['ai_profiles'] = not self._cfg('ai_profiles_enabled',False) or bool(self._ai_profiles.task and not self._ai_profiles.task.done())
+        life=getattr(self,'_life',None)
+        checks['proactive_life']=not self._cfg('proactive_life_enabled',True) or bool(life and life.task and not life.task.done() and life.store.snapshot()['worker_running'])
         checks['live_journal'] = bool(self._live_journal.task and not self._live_journal.task.done())
-        return jsonify({"status": "ok", "data": {"version": "1.16.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.17.0", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
             "group_wake_words": self._cfg("group_wake_words", "大肥龙,肥龙"),
-            "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats, "group_flow": self._group_flow.stats}})
+            "latency": self._latency_summary(), "meme_prefetch": self._meme_prefetch.stats, "group_flow": self._group_flow.stats,
+            'delivery':self._delivery.health(),'targets':self._targets.snapshot()}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.16.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.17.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -203,6 +214,11 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
 
     async def terminate(self) -> None:
+        # Stop producers before draining consumers or closing their fact stores.
+        producers=[t for t in (self._task,self._fixed_task) if t and not t.done()]
+        for task in producers:task.cancel()
+        if producers:await asyncio.gather(*producers,return_exceptions=True)
+        if getattr(self,'_life',None):await self._life.close()
         queue=getattr(self,'_reply_queue',None)
         if queue:await queue.drain()
         profiles=getattr(self,'_ai_profiles',None)
@@ -430,12 +446,13 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     # ==================== 定时唤醒 ====================
 
     async def _loop(self) -> None:
+        self._next_free_check=time.time()+60
         await asyncio.sleep(60)
         while True:
             try:
                 if self._cfg("enable", True) and self._cfg("discretionary_enabled", True):
                     from .work_scheduler import model_work
-                    with model_work('scheduled'):
+                    with model_work('background'):
                         result = await self._decide(trigger="定时唤醒")
                     self.logger.info("主动决策：%s", result)
             except asyncio.CancelledError:
@@ -447,6 +464,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 interval = max(5, int(self._cfg("interval_minutes", 30)))
             except (TypeError, ValueError):
                 interval = 30
+            self._next_free_check=time.time()+interval*60
             await asyncio.sleep(interval * 60)
 
     async def _fixed_loop(self):
@@ -466,6 +484,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
     async def _collect_targets(self):
         """拉取可用于主动发送的群与好友"""
+        if getattr(self,'_targets',None):return await self._targets.collect()
         groups, friends = [], []
         try:
             data = await self._call_onebot("get_group_list")
@@ -487,6 +506,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         return groups, friends
 
     async def _decide(self, trigger: str, force: bool = False, dry_run: bool = False) -> str:
+        life=getattr(self,'_life',None)
+        if life and life.enabled():
+            return await life.free_opportunity(dry_run=dry_run)
         return await decide(self, trigger, force=force, dry_run=dry_run)
 
 
@@ -807,6 +829,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                           for f in handler.event_filters)
             rows.append({"time": time.time(), "text": text[:300], "management": command,
                          "sender": str(event.get_sender_id()), "role": "user"})
+            life=getattr(self,'_life',None)
+            if life and not command:
+                life.observe(umo,str(getattr(event.message_obj,'message_id','')),text,str(event.get_sender_id()))
             bind_request(umo, [r["text"] for r in rows if time.time() - r["time"] < 7200][-6:], rows[-1]["management"])
             snapshot = [dict(r) for r in rows if time.time() - r["time"] < 7200]
             event.set_extra("qqbot_meme_recent", snapshot)
@@ -866,6 +891,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             job=event.get_extra('qqbot_reply_job')
             if job:
                 job.cid=cid;job.generation=ledger.scope(job.origin,cid)
+                from .session_fence import get_fence
+                fence=get_fence(getattr(self.context,'conversation_manager',None))
+                if job.session_epoch is None:job.session_epoch=fence.epoch(job.origin) if fence else 0
             if isinstance(getattr(req,'contexts',None),list):
                 req.contexts=ledger.filter_history(event.unified_msg_origin,cid,req.contexts,getattr(req.conversation,'history',None))
             req.system_prompt=(req.system_prompt or '')+ledger.note(event.unified_msg_origin,cid)
@@ -897,6 +925,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             req.system_prompt = (req.system_prompt or '') + self._group_flow.note(event)
         req.system_prompt = (req.system_prompt or "") + "\n" + STYLE + "\n" + PUNCTUATION_RULE + character_note(state) + generation_note(state["visual_intent"])
         req.system_prompt += BRIEF_RULE
+        life=getattr(self,'_life',None)
+        if life:req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())
         req.system_prompt += ('\n当前这一轮只回复真实发送者，群里其他成员的话是背景，不要把其他人的问题当成当前人的问题。'
                               '真实发送者QQ：' + str(event.get_sender_id()) + '；当前消息：'
                               + json.dumps(event.get_message_str() or '', ensure_ascii=False))

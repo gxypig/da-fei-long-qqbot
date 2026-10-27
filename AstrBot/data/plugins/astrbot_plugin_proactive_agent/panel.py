@@ -38,6 +38,26 @@ FIELDS = {
     "reply_hedge_after_seconds": 15,
     "context_window_enabled": False, "context_recent_turns": 12, "context_recent_tokens": 6000,
 }
+LEGACY_FIELDS=set(FIELDS)
+FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
+    'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
+    'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
+SECTIONS={
+    'groups':{'group_flow_enabled','group_passive_max_age','chat_low_latency','group_chat_ids','group_chat_probability','group_wake_words','group_wake_anywhere','auto_quote_enabled'},
+    'character':{'father_qq','father_nickname','emoji_probability','father_address_probability','meme_separate_probability'},
+    'learning':{'idle_learning_enabled','style_learning_enabled','history_recall_enabled','meme_understanding_enabled','learning_record_limit','learning_record_days'},
+    'proactive':{'enable','allow_group','allow_private','allow_qzone','interval_minutes','quiet_hours','discretionary_enabled',
+        'fixed_messages_enabled','fixed_group_ids','fixed_private_ids','fixed_message_interval_minutes','fixed_message_random_enabled',
+        'fixed_message_min_minutes','fixed_message_max_minutes','fixed_qzone_enabled','fixed_qzone_interval_minutes',
+        'proactive_life_enabled','fixed_message_required','fixed_qzone_required','proactive_unanswered_limit','proactive_min_gap_minutes',
+        'group_ids','private_ids','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes'}}
+SECTIONS['performance']=set(FIELDS)-set.union(*SECTIONS.values())
+
+
+def section_settings(plugin):
+    values,_=settings(plugin)
+    return {section:{'keys':sorted(keys),'revision':hashlib.sha256(json.dumps({k:values[k] for k in sorted(keys)},ensure_ascii=False,sort_keys=True).encode()).hexdigest()}
+        for section,keys in SECTIONS.items()}
 
 
 def settings(plugin):
@@ -69,9 +89,9 @@ def emoji_settings(gallery):
 
 
 def validate(data):
-    if not isinstance(data, dict) or set(data) != set(FIELDS):
+    if not isinstance(data, dict) or not LEGACY_FIELDS<=set(data)<=set(FIELDS):
         raise ValueError("设置字段不完整，请刷新页面再保存")
-    values = dict(data)
+    values = {**FIELDS,**data}
     for key, default in FIELDS.items():
         if type(values[key]) is not type(default):
             raise ValueError("设置类型不正确：" + key)
@@ -85,6 +105,9 @@ def validate(data):
         ("reply_hedge_after_seconds", 0, 30, "慢请求补救等待秒数"),
         ("context_recent_turns", 4, 40, "近期完整对话轮数"),
         ("context_recent_tokens", 2000, 16000, "近期上下文估算预算"),
+        ('learning_record_limit',50,50000,'学习过程保留条数'),('learning_record_days',1,365,'学习过程保留天数'),
+        ('proactive_unanswered_limit',1,10,'连续未回应暂停次数'),('proactive_min_gap_minutes',1,1440,'主动消息最短间隔'),
+        ('min_action_gap_minutes',5,10080,'自由模式总冷却'),('group_min_gap_minutes',15,10080,'自由群聊冷却'),('private_min_gap_minutes',15,10080,'自由私聊冷却'),
     ]:
         if not minimum <= values[key] <= maximum:
             raise ValueError(f"{label}须为{minimum}至{maximum}的整数")
@@ -110,7 +133,7 @@ def validate(data):
             raise ValueError("固定发送间隔须为5至10080分钟")
     if values['fixed_message_min_minutes'] > values['fixed_message_max_minutes']:
         raise ValueError('随机间隔下限不能大于上限')
-    for key in ["fixed_group_ids", "fixed_private_ids"]:
+    for key in ["fixed_group_ids", "fixed_private_ids",'group_ids','private_ids']:
         ids = [v for v in re.split(r"[,，\s]+", values[key]) if v]
         if len(ids) > 200 or any(not re.fullmatch(r"[0-9]{1,20}", v) for v in ids):
             raise ValueError("定时目标只能填写数字，最多200个")
@@ -184,7 +207,12 @@ class PanelMixin:
         learned = request.args.get('learned_only', '0').lower()
         if len(query) > 100 or learned not in {'0', '1', 'false', 'true'}:
             return jsonify({'status':'error', 'message':'搜索最多100字，已学习筛选须为0或1'}), 400
-        data = learning.details(query=query, learned_only=learned in {'1','true'}) if learning else {
+        try:
+            cursor=int(request.args['cursor']) if 'cursor' in request.args else None
+            job_cursor=int(request.args['job_cursor']) if 'job_cursor' in request.args else None
+            limit=max(1,min(100,int(request.args.get('limit',50))))
+        except ValueError:return jsonify({'status':'error','message':'分页参数必须为整数'}),400
+        data = learning.details(query=query, learned_only=learned in {'1','true'},cursor=cursor,job_cursor=job_cursor,limit=limit) if learning else {
             'jobs':[], 'events':[], 'rules':[], 'closed':True,
             'counts':{'jobs':0, 'events':0, 'rules':0}, 'limit':50}
         return jsonify({'status':'ok', 'data':data})
@@ -283,31 +311,43 @@ class PanelMixin:
     async def panel_settings_api(self):
         if request.method == "GET":
             values, revision = settings(self)
-            return jsonify({"status": "ok", "data": {"values": values, "revision": revision}})
+            return jsonify({"status": "ok", "data": {"values": values, "revision": revision,'sections':section_settings(self)}})
         body = await request.get_json(silent=True)
         try:
             if not isinstance(body, dict):
                 raise ValueError("请求格式不正确")
-            values = validate(body.get("values"))
             async with self._panel_lock:
-                if body.get("revision") != settings(self)[1]:
+                current,revision=settings(self);section=body.get('section');incoming=body.get('values')
+                if not isinstance(incoming,dict):raise ValueError('缺少设置内容')
+                if section is not None:
+                    if section not in SECTIONS or not set(incoming)<=SECTIONS[section]:raise ValueError('设置字段不属于所选分区')
+                    expected=section_settings(self)[section]['revision']
+                else:
+                    if not LEGACY_FIELDS<=set(incoming)<=set(FIELDS):raise ValueError('设置字段不完整，请刷新页面再保存')
+                    expected=revision
+                if body.get("revision") != expected:
                     return jsonify({"status": "error", "message": "设置已在其他地方变更，请刷新后再保存"}), 409
-                previous = copy.deepcopy(dict(self.config))
+                values=validate({**current,**incoming});updates={k:values[k] for k in incoming}
+                previous={k:self.config.get(k) for k in updates};missing=set(updates)-set(self.config)
                 try:
-                    self.config.update(values)
-                    self.config.save_config()
+                    self.config.update(updates)
+                    if self.config.save_config() is False:raise OSError('save rejected')
                 except Exception:
-                    self.config.clear()
-                    self.config.update(previous)
+                    for k,v in previous.items():
+                        if k in missing:self.config.pop(k,None)
+                        else:self.config[k]=v
                     return jsonify({"status": "error", "message": "保存失败，原设置已保留，请检查配置文件权限"}), 500
             saved, revision = settings(self)
-            return jsonify({"status": "ok", "data": {"values": saved, "revision": revision}})
+            return jsonify({"status": "ok", "data": {"values": saved, "revision": revision,'sections':section_settings(self)}})
         except ValueError as exc:
             return jsonify({"status": "error", "message": str(exc)}), 400
 
     async def learning_action_api(self):
         # Registered through the same authenticated plugin API as panel_settings.
         body = await request.get_json(silent=True)
+        if isinstance(body,dict) and body.get('action')=='retry' and set(body)=={'action','job_id'}:
+            try:return jsonify({'status':'ok','data':await self._learning.retry(int(body['job_id']))})
+            except (ValueError,TypeError):return jsonify({'status':'error','message':'没有可重试的保留任务'}),400
         if not isinstance(body, dict) or set(body) != {"action", "version"} or body.get("action") != "rollback":
             return jsonify({"status": "error", "message": "仅支持 rollback 回退操作，请选择学习版本"}), 400
         version = body["version"]
@@ -360,6 +400,7 @@ class PanelMixin:
                     generated=report.get('generated_at') or datetime.fromisoformat(report['time']).timestamp()
                     report['age_seconds']=max(0,time.time()-generated);report['stale']=time.time()>report.get('expires_at',generated+240)
                 except (KeyError,ValueError,TypeError):report['stale']=True
-            return jsonify({"status": "ok", "data": {"report": report, "job": current_job(),"watchdog":local_json('watchdog-heartbeat.json')}})
+            delivery=self._delivery.health() if getattr(self,'_delivery',None) else None
+            return jsonify({"status": "ok", "data": {"report": report, "delivery":delivery,"job": current_job(),"watchdog":local_json('watchdog-heartbeat.json')}})
         # The repair runner must survive AstrBot being offline. No panel execution.
         return jsonify({"status": "error", "message": "请在项目目录运行一键检查修复.bat，面板仅展示最近报告"}), 405

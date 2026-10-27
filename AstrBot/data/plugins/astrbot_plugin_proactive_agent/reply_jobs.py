@@ -49,6 +49,7 @@ class ReplyJob:
     reason: str = ''
     cid: str | None = None
     generation: str = ''
+    session_epoch: int | None = None
     force_quote: bool = False
     manually_adjusted: bool = False
     sources: list = field(default_factory=list)

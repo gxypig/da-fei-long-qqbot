@@ -68,6 +68,10 @@ def register_fullchain_panel(plugin):
         service=getattr(plugin,'_ai_profiles',None)
         if service is None:return jsonify(status='error',message='识别服务尚未就绪'),503
         try:
+            if request.args.get('account') is not None:
+                from .ai_profiles import identity
+                key=identity(request.args.get('platform'),request.args.get('account'))
+                return jsonify(status='ok',data={'instance':service.instance,'account_version':service.store.rows.get(key,{}).get('account_version',0)})
             return jsonify(status='ok',data=service.snapshot(request.args.get('q','')[:100],
                 request.args.get('state',''),int(request.args.get('offset',0))))
         except ValueError:return jsonify(status='error',message='分页参数错误'),400
@@ -111,7 +115,7 @@ def register_fullchain_panel(plugin):
         await plugin._reply_queue.drain(8)
         stores=[];waiters=[]
         for owner in companions:
-            for name in ('_delivery','_image_memory','_ai_profiles'):
+            for name in ('_delivery','_image_memory','_ai_profiles','_life'):
                 store=getattr(getattr(owner,name,None),'store',None)
                 if store:stores.append(store)
             store=getattr(owner,'_share_store',None)

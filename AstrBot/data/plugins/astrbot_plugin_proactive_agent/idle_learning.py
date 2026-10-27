@@ -52,6 +52,10 @@ MAX_RULES = 12
 MAX_POLICY_CHARS = 1200
 MAX_NOTE_CHARS = 400
 
+
+class UnverifiedKnowledge(Exception):
+    """No adequate public evidence; explicit retry stays available."""
+
 # Values and examples are trusted code, never private chat or model-authored
 # prose. The model learns WHICH small expression strategies help this bot.
 RULES = {
@@ -271,6 +275,9 @@ class IdleLearning:
                 PRAGMA user_version=1;
             """)
             with db:
+                if not db.execute("SELECT 1 FROM meta WHERE key='metrics_since'").fetchone():
+                    self._set_meta('metrics_since',time.time())
+                    self._set_meta('historical_metrics_incomplete',any(db.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone() for table in ('jobs','cases','versions','reports','learning_events')))
                 db.execute("UPDATE jobs SET status='pending' WHERE status='running'")
                 if not db.execute("SELECT 1 FROM meta WHERE key='receipt_evidence_v2'").fetchone():
                     # Older samples have no receipt/source provenance. Preserve
@@ -307,6 +314,12 @@ class IdleLearning:
     def _ttl(self):
         return max(1, min(30, int(self._cfg("idle_learning_private_days", 30)))) * DAY
 
+    @property
+    def _event_limit(self):return max(50,min(50000,int(self._cfg('learning_record_limit',2000))))
+
+    @property
+    def _event_ttl(self):return max(1,min(365,int(self._cfg('learning_record_days',30))))*DAY
+
     def _meta(self, key, default=0):
         row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
@@ -316,6 +329,15 @@ class IdleLearning:
 
     def _count(self, key):
         self._set_meta(key, self._meta(key) + 1)
+        if key in {'knowledge_added','knowledge_enriched'}:self._set_meta('last_progress_at',time.time())
+
+    def _processed(self,job):
+        row=self._db.execute('SELECT progress FROM jobs WHERE id=?',(job['id'],)).fetchone()
+        progress=json.loads(row[0]) if row else json.loads(job['progress'])
+        if not progress.get('_counted_processed'):
+            self._count('processed');progress['_counted_processed']=True
+            self._db.execute('UPDATE jobs SET progress=? WHERE id=?',(_json(progress),job['id']))
+        self._set_meta('last_processed_at',time.time())
 
     def _prune(self, force=False):
         now = time.time()
@@ -327,7 +349,8 @@ class IdleLearning:
             self._db.execute("DELETE FROM dedup WHERE created<=?", (now - self._ttl,))
             self._db.execute("DELETE FROM dedup WHERE key NOT IN (SELECT key FROM dedup ORDER BY created DESC, key DESC LIMIT ?)", (self._limit * 2,))
             self._db.execute("DELETE FROM cases WHERE id NOT IN (SELECT id FROM cases ORDER BY id DESC LIMIT 500)")
-            self._db.execute("DELETE FROM reports WHERE id NOT IN (SELECT id FROM reports ORDER BY id DESC LIMIT 20)")
+            self._prune_reports()
+            self._db.execute('DELETE FROM learning_events WHERE created<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT ?)',(now-self._event_ttl,self._event_limit))
         self._next_prune = now + 60
 
     @staticmethod
@@ -355,7 +378,7 @@ class IdleLearning:
             if (self._db.execute("SELECT 1 FROM dedup WHERE key=?", (key,)).fetchone()
                     or self._db.execute("SELECT 1 FROM jobs WHERE key=?", (key,)).fetchone()):
                 return False
-            if self._db.execute("SELECT count(*) FROM jobs").fetchone()[0] >= self._limit:
+            if self._db.execute("SELECT count(*) FROM jobs WHERE status IN ('pending','running')").fetchone()[0] >= self._limit:
                 self._count("dropped")
                 return False
             self._db.execute("INSERT INTO jobs(key,kind,payload,created,expires,ready) VALUES(?,?,?,?,?,?)",
@@ -544,24 +567,33 @@ class IdleLearning:
                         self._count("paused")
                     self._idle_since = None
                 elif isinstance(exc, _Rejected):
-                    self._report("rejected", reason=str(exc))
+                    self._report("rejected", report_type='release_validation' if job['kind']=='validate' else 'review',reason=str(exc))
                     with self._db:
+                        self._processed(job)
                         self._db.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
+                elif isinstance(exc,UnverifiedKnowledge):
+                    with self._db:
+                        self._db.execute("UPDATE jobs SET status='unverified' WHERE id=?",(job['id'],))
+                        self._processed(job)
                 elif isinstance(exc, Exception):
                     attempt = job["attempts"] + 1
                     with self._db:
                         self._count("failures")
                         self._set_meta("last_error", type(exc).__name__)
                         if attempt >= 3:
-                            self._db.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
+                            self._db.execute("UPDATE jobs SET status='failed',attempts=? WHERE id=?", (attempt,job["id"]))
+                            self._processed(job)
                         else:
                             self._db.execute("UPDATE jobs SET status='pending',attempts=?,ready=? WHERE id=?",
                                              (attempt, time.time() + 5 * 2 ** (attempt - 1), job["id"]))
+                    self.record_detail('failure',{'job_id':job['id'],'kind':job['kind'],'error':type(exc).__name__,
+                        'status':'failed' if attempt>=3 else 'retrying','attempt':attempt},time.time()+self._event_ttl)
                     self.audit("idle_learning", {"status": "failed", "kind": job["kind"], "error": type(exc).__name__, "attempt": attempt})
                 else:
                     raise
             else:
                 with self._db:
+                    self._processed(job)
                     self._db.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
                     self._count("completed")
         finally:
@@ -607,9 +639,11 @@ class IdleLearning:
             # lookup, never direct insertion: existing public-source validation,
             # key lock, atomic save, TTL and normal forgetting remain authoritative.
             result = await self._call(self.memory.lookup, progress["phrases"][progress["index"]], case["origin"])
+            if result.get('retryable'):raise RuntimeError('temporary_meme_lookup:'+str(result.get('error','network')))
             self.record_detail('meme', {'phrase':progress['phrases'][progress['index']],
                 'status':result.get('status'), 'entry':result.get('entry'), 'hint':result.get('hint')}, job['expires'])
             self.audit("idle_meme", {"status": str(result.get("status", "unverified"))[:32]})
+            if result.get('status')=='unverified':raise UnverifiedKnowledge(result.get('hint','evidence_insufficient'))
             progress["index"] += 1
             self._save_progress(job, progress)
 
@@ -645,6 +679,7 @@ class IdleLearning:
             progress["category"] = category
             self._save_progress(job, progress)
         category = progress["category"]
+        self._report('reviewed',report_type='review',category=category,job_id=job['id'])
         self.record_detail('review', {'before':case['text'], 'after':progress.get('checked'),
             'category':category, 'status':'observed','source':case.get('source',{'kind':'legacy_unverified'}),
             'send_state':case.get('send_state','unverified'),'automated_chain':case.get('automated_chain',False)}, job['expires'])
@@ -808,12 +843,54 @@ class IdleLearning:
             self._db.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
         self._report("published", version=version, **evidence)
 
-    def _report(self, status, **fields):
-        summary = {"status": status, **fields}
+    def _report(self, status, report_type='release_validation', **fields):
+        summary = {"status": status, 'report_type':report_type, **fields}
         with self._db:
             self._db.execute("INSERT INTO reports(created,summary) VALUES(?,?)", (time.time(), _json(summary)))
-            self._db.execute("DELETE FROM reports WHERE id NOT IN (SELECT id FROM reports ORDER BY id DESC LIMIT 20)")
+            self._prune_reports()
         self.audit("idle_validation", summary)
+
+    def _prune_reports(self):
+        for kind in ('review','release_validation','legacy'):
+            self._db.execute("DELETE FROM reports WHERE COALESCE(json_extract(summary,'$.report_type'),'legacy')=? AND id NOT IN (SELECT id FROM reports WHERE COALESCE(json_extract(summary,'$.report_type'),'legacy')=? ORDER BY id DESC LIMIT 20)",(kind,kind))
+
+    def latest_report(self,kind):
+        row=self._db.execute("SELECT summary FROM reports WHERE json_extract(summary,'$.report_type')=? ORDER BY id DESC LIMIT 1",(kind,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def retry(self,job_id):
+        async with self._control:
+            row=self._db.execute("SELECT * FROM jobs WHERE id=? AND status IN ('failed','unverified')",(int(job_id),)).fetchone()
+            if row is None:raise ValueError('没有可重试的保留任务')
+            with self._db:
+                self._db.execute("UPDATE jobs SET status='pending',attempts=0,ready=?,expires=? WHERE id=?",(time.time(),time.time()+self._ttl,row['id']))
+            progress=json.loads(row['progress'])
+            for phrase in progress.get('phrases',[]):
+                retry_after=getattr(self.memory,'_retry_after',{})
+                retry_after.pop(phrase.casefold(),None)
+            self._wake.set();return self.snapshot()
+
+    async def reclassify_source(self,platform,account,kind):
+        if self._closed or kind not in {'automatic_confirmed','automatic_suspected','automation','mixed'}:return 0
+        async with self._control:
+            self._mutating=True
+            try:
+                await self._cancel_active();changed=0
+                with self._db:
+                    for table in ('cases','jobs'):
+                        for row in self._db.execute(f'SELECT id,payload FROM {table}').fetchall():
+                            payload=json.loads(row['payload']);source=payload.get('source',{})
+                            if not isinstance(source,dict) or (source.get('platform'),str(source.get('account'))) != (platform,str(account)):continue
+                            payload.update(exclude_evidence=True,exclusion_reason='source_reclassified:'+kind,automated_chain=True)
+                            payload['source']={**source,'kind':kind}
+                            self._db.execute(f'UPDATE {table} SET payload=? WHERE id=?',(_json(payload),row['id']));changed+=1
+                            if table=='jobs':self._db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(row['id'],))
+                    if changed:
+                        self._set_meta('style_epoch',self._meta('style_epoch')+1)
+                        self._db.execute("UPDATE jobs SET status='quarantined' WHERE kind='validate'")
+                        self.record_detail('isolation',{'status':'quarantined','reason':'source_reclassified','count':changed},time.time()+self._event_ttl)
+                return changed
+            finally:self._mutating=False;self._wake.set()
 
     def style_note(self, text):
         if self._closed or not self._enabled("validate") or not isinstance(text, str):
@@ -823,10 +900,14 @@ class IdleLearning:
     def record_detail(self, kind, details, expires):
         with self._db:
             self._db.execute('INSERT INTO learning_events(created,kind,details,expires) VALUES(?,?,?,?)',
-                             (time.time(), kind, _json(details), expires))
-            self._db.execute('DELETE FROM learning_events WHERE expires<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT 200)', (time.time(),))
+                             (time.time(), kind, _json(details),min(expires,time.time()+self._event_ttl)))
+            self._db.execute('DELETE FROM learning_events WHERE expires<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT ?)', (time.time(),self._event_limit))
+            status=details.get('status')
+            if kind=='meme' and status=='learned':self._count('knowledge_added')
+            elif kind=='meme' and status=='remembered':self._count('knowledge_hits')
+            elif kind=='meme' and status=='understood':self._count('knowledge_enriched')
 
-    def details(self, query='', learned_only=False):
+    def details(self, query='', learned_only=False, cursor=None, job_cursor=None,limit=50):
         # Panel-only local reads: filter all retained rows BEFORE display limits.
         query = unicodedata.normalize('NFKC', str(query)[:100]).strip().casefold()
         tokens = query.split()
@@ -834,13 +915,13 @@ class IdleLearning:
             haystack = unicodedata.normalize('NFKC', _json(value)).casefold()
             return all(token in haystack for token in tokens)
         result = {'jobs':[], 'events':[], 'rules':[], 'closed':self._closed,
-                  'query':query, 'learned_only':bool(learned_only), 'limit':50,
+                  'query':query, 'learned_only':bool(learned_only), 'limit':max(1,min(100,int(limit))),
                   'counts':{'jobs':0, 'events':0, 'rules':0}}
         if self._closed:
             return result
         now = time.time()
         jobs = []
-        pending = () if learned_only else self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY status DESC,id DESC', (now,))
+        pending = () if learned_only else self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY id DESC', (now,))
         for r in pending:
             payload, progress = json.loads(r['payload']), json.loads(r['progress'])
             row = {'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
@@ -861,7 +942,11 @@ class IdleLearning:
         rules = [row for row in rules if matches(row)]
         for name, rows in (('jobs', jobs), ('events', events), ('rules', rules)):
             result['counts'][name] = len(rows)
-            result[name] = rows[:50]
+            boundary=cursor if name=='events' else job_cursor if name=='jobs' else None
+            filtered=[r for r in rows if boundary is None or r.get('id',0)<int(boundary)]
+            page=filtered[:result['limit']];result[name]=page
+            result['next_'+name+'_cursor']=page[-1]['id'] if name!='rules' and len(filtered)>len(page) and page else None
+        result['category_counts']={r['kind']:r['n'] for r in self._db.execute('SELECT kind,count(*) n FROM learning_events WHERE expires>? GROUP BY kind',(now,))}
         return result
 
     def snapshot(self):
@@ -870,6 +955,8 @@ class IdleLearning:
         grouped = {r["status"]: r["n"] for r in self._db.execute("SELECT status,count(*) n FROM jobs WHERE expires>? GROUP BY status",(time.time(),))}
         candidate = self._db.execute("SELECT progress FROM jobs WHERE kind='validate' ORDER BY id LIMIT 1").fetchone()
         error = self._meta("last_error", None)
+        stage_counts={r['category']:r['n'] for r in self._db.execute("SELECT category,count(*) n FROM cases WHERE expires>? AND created>? AND COALESCE(json_extract(payload,'$.exclude_evidence'),0)=0 GROUP BY category",(time.time(),self._meta('evidence_after',0)))}
+        quarantines={r['reason']:r['n'] for r in self._db.execute("SELECT COALESCE(json_extract(payload,'$.exclusion_reason'),'unverified') reason,count(*) n FROM cases WHERE COALESCE(json_extract(payload,'$.exclude_evidence'),0)=1 GROUP BY reason")}
         if self._runner is not None and self._runner.done() and not self._runner.cancelled():
             exc = self._runner.exception()
             if exc is not None:
@@ -885,9 +972,17 @@ class IdleLearning:
                 "active_version": self._meta("active_version"), "last_publish": self._meta("last_publish", None),
                 "versions": [{"version": r["id"], "published": r["published"], "rules": len(json.loads(r["rules"]))}
                              for r in self._db.execute("SELECT * FROM versions ORDER BY id DESC")],
-                "stats": {k: self._meta(k) for k in ("completed", "paused", "failures", "dropped")},
+                "stats": {k: self._meta(k) for k in ("completed", "paused", "failures", "dropped",'processed','knowledge_added','knowledge_hits','knowledge_enriched')},
+                'failed_jobs':grouped.get('failed',0),'unverified_jobs':grouped.get('unverified',0),
+                'records':self._db.execute('SELECT count(*) FROM learning_events WHERE expires>?',(time.time(),)).fetchone()[0],
+                'record_limit':self._event_limit,'record_days':self._event_ttl//DAY,
+                'metrics_since':self._meta('metrics_since'),'historical_metrics_incomplete':self._meta('historical_metrics_incomplete',True),
+                'last_progress_at':self._meta('last_progress_at',None),
+                'style_evidence':[{'category':k,'count':v,'required':4,'stage':'同类合格案例'} for k,v in stage_counts.items()],
+                'quarantine_reasons':quarantines,
+                'last_review':self.latest_report('review'),'last_release_validation':self.latest_report('release_validation'),
                 "last_error": error,
-                "last_validation": (lambda r: json.loads(r[0]) if r else None)(self._db.execute("SELECT summary FROM reports ORDER BY id DESC LIMIT 1").fetchone())}
+                "last_validation": self.latest_report('release_validation')}
 
     async def rollback(self, version=None):
         async with self._control:

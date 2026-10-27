@@ -110,3 +110,9 @@ OpenAI兼容、Gemini、Anthropic等provider适配器通常负责传递或转换
 - `fullchain_panel.py`的短健康探测只用于空闲检查，不进入QQ聊天。
 
 原人格和私人自定义语言提示不会被此更新覆盖。公开仓库只提供通用模板，运行时私有记忆和账号证据不随源码发布。
+
+## 1.17新增后台提示词
+
+- `astrbot_plugin_proactive_agent/life_state.py`：`EXTRACT_SYSTEM`从同会话原话抽取/结束事项；`COMPOSE_SYSTEM`根据来源、联系动机和时机生成主动候选。`role_context`合并既有人格、说话策略和有范围的生活资料。
+- `astrbot_plugin_proactive_agent/ai_profiles.py`：`ANALYZE_SYSTEM`用于空闲批量语义证据、反证、判断类型及最终试探/答复关联。
+- 这些后台任务使用现有模型通道；正常聊天只读取已保存资料，不增加前置分析模型调用。源码公开模板与维护者本机私人提示词可能不同，私人定制不随仓库上传。

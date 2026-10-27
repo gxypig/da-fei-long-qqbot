@@ -2,11 +2,16 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
+  let sections={},settingsRequest=0,memeRequest=0;
   let statusRequest, learningBusy = false, learningRollbackAvailable = false;
   let emojiRevision, emojiWritable = false, emojiDirty = false, emojiBusy = false;
   const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
+  booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required');
+  numbers.push('learning_record_limit','learning_record_days','proactive_unanswered_limit','proactive_min_gap_minutes','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes');
+  strings.push('group_ids','private_ids');
+  const fieldValue=k=>booleans.includes(k)?$(k).checked:numbers.includes(k)?Number($(k).value):$(k).value;
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function api(endpoint, body, params) {
     const result = await (body===undefined ? bridge.apiGet(endpoint, params) : bridge.apiPost(endpoint,body));
@@ -30,28 +35,43 @@
       $('group-list').append(label);
     });
   }
-  function fill(data) {
+  function fill(data,{discard=false,saved={}}={}) {
     if(!data?.values || [...booleans,...numbers,...strings].some(k=>!Object.hasOwn(data.values,k))){
       values=undefined;$('save').disabled=true;
       throw new Error('设置字段不完整，请重载插件并刷新页面后再保存');
     }
-    values=data.values;revision=data.revision;
-    booleans.forEach(k=>$(k).checked=values[k]);[...numbers,...strings].forEach(k=>$(k).value=values[k]);
-    $('probability-slider').value=values.group_chat_probability;
-    dirty=false;$('save-state').textContent='已与当前配置同步';$('save').disabled=false;renderGroups();renderTargets();
+    const old=values||{},local=Object.fromEntries([...booleans,...numbers,...strings].map(k=>[k,fieldValue(k)])),conflicts=new Set();
+    const next={...data.values};
+    for(const k of [...booleans,...numbers,...strings]){
+      const edited=values&&local[k]!==old[k],savedUnchanged=Object.hasOwn(saved,k)&&local[k]===saved[k];
+      if(!discard&&edited&&!savedUnchanged){
+        if(data.values[k]!==old[k]&&data.values[k]!==local[k]){conflicts.add(k);next[k]=old[k];}
+      }else $(k)[booleans.includes(k)?'checked':'value']=data.values[k];
+      $(k).classList?.toggle?.('draft-conflict',conflicts.has(k));
+    }
+    const nextSections={...data.sections};for(const [name,s] of Object.entries(sections))if(s.keys.some(k=>conflicts.has(k)))nextSections[name]=s;
+    sections=nextSections;values=next;revision=data.revision;
+    $('probability-slider').value=$('group_chat_probability').value;
+    dirty=[...booleans,...numbers,...strings].some(k=>fieldValue(k)!==values[k]);
+    $('save-state').textContent=conflicts.size?'远端与草稿同时变更，已保留草稿；冲突字段已标记':dirty?'保留未保存的草稿':'已与当前配置同步';
+    $('save').disabled=false;renderGroups();renderTargets();
   }
   async function loadGroups() {try{groups=await api('panel_groups');renderGroups();}catch(e){notice(e.message,true);renderGroups();}}
-  async function loadSettings() {try{fill(await api('panel_settings'));$('connection').textContent='面板已连接';}catch(e){notice(e.message,true);$('connection').textContent='连接失败';}}
+  async function loadSettings(discard=false) {const serial=++settingsRequest;try{const data=await api('panel_settings');if(serial!==settingsRequest)return;fill(data,{discard});$('connection').textContent='面板已连接';}catch(e){if(serial===settingsRequest){notice(e.message,true);$('connection').textContent='连接失败';}}}
   async function save(event) {
     event.preventDefault();if(!values)return;
-    const next={...values};booleans.forEach(k=>next[k]=$(k).checked);numbers.forEach(k=>next[k]=Number($(k).value));strings.forEach(k=>next[k]=$(k).value);
+    const section=$('rule-editor')?.open?'proactive':document.querySelector?.('nav .active')?.dataset.tab;
+    const keys=sections[section]?.keys||(Object.keys(sections).length?[]:[...booleans,...numbers,...strings]);if(!keys.length){notice('当前页面没有需要保存的设置');return;}
+    const next=Object.fromEntries(keys.filter(k=>$(k)).map(k=>[k,fieldValue(k)]));
     $('save').disabled=true;
     try{
-      fill(await api('panel_settings',{values:next,revision}));
+      const serial=++settingsRequest;const result=await api('panel_settings',{values:next,revision:sections[section]?.revision||revision,...(sections[section]?{section}:{})});
+      if(serial===settingsRequest)fill(result,{saved:next});
+      if(typeof CustomEvent==='function')document.dispatchEvent?.(new CustomEvent('qqbot:saved',{detail:{section}}));
       const available=await refreshPerformance();
-      notice('设置已保存，群聊规则立即生效；固定定时约10秒内生效，首次发送等待一个完整间隔。'+(available?'性能与学习配置供后续调度立即读取，已开始的任务继续完成。':'当前运行实例尚未提供性能状态，请确认插件已升级并重载后刷新。'));
+      notice('当前区域已保存，其他区域的草稿继续保留；定时规则约10秒内生效。'+(available?'':'性能状态暂不可用，请刷新查看。'));
     }
-    catch(e){notice(e.message,true);}finally{$('save').disabled=!values;}
+    catch(e){notice(e.message,true);if($('rule-save-status'))$('rule-save-status').textContent=e.message;}finally{$('save').disabled=!values;}
   }
   function emojiControls() {
     $('emoji-probability-percent').disabled=emojiBusy||!emojiWritable;
@@ -144,12 +164,18 @@
   const validVersion = version => (typeof version==='string' && version.trim()!=='') || (Number.isInteger(version) && version>=0);
   function renderLearning(data) {
     const learning=isRecord(data)?data:{};
+    if($('learning-truth')){
+      const s=learning.stats||{},e=learning.style_evidence||[];
+      $('learning-truth').textContent=`累计处理 ${s.processed||0} · 新增知识 ${s.knowledge_added||0} · 已有命中 ${s.knowledge_hits||0} · 待办 ${learning.pending||0} · 失败待重试 ${learning.failed_jobs||0} · 未核实 ${learning.unverified_jobs||0} · 现存过程记录 ${learning.records||0} / ${learning.record_limit||2000}；最长 ${learning.record_days||30} 天。${learning.historical_metrics_incomplete?'升级前累计指标不完整，已删除的旧记录不补造。':''}最后进展：${learning.last_progress_at?new Date(learning.last_progress_at*1000).toLocaleString():'暂无新进展'}；风格证据：${e.length?e.map(r=>r.category+' '+r.count+' / '+r.required).join('；'):'尚无同类合格案例 0 / 4'}；隔离原因：${JSON.stringify(learning.quarantine_reasons||{})}`;
+    }
     const current=learning.current_version ?? learning.active_version ?? learning.version;
     const worker=learning.worker_running===true?'学习后台运行中':learning.worker_running===false?'学习后台未运行':'学习状态已刷新';
     $('learning-status').textContent=learning.closed===true?'学习服务已关闭，请重载插件后刷新':Object.keys(learning).length?`${worker}；开关修改需保存后生效`:'学习服务尚未提供状态，请确认插件已升级并重载后刷新';
     $('learning-version').textContent=validVersion(current)?`当前学习版本：${current}`:'尚未提供当前版本，更多信息见学习服务详情';
     renderSnapshot('learning-pending',learning.pending ?? learning.todos ?? learning.todo ?? learning.queue,'尚未提供待办状态，更多信息见学习服务详情');
     renderSnapshot('learning-details',data,'尚未提供学习状态');
+    if($('learning-review-report'))renderSnapshot('learning-review-report',learning.last_review,'暂无普通复核报告');
+    if($('learning-release-report'))renderSnapshot('learning-release-report',learning.last_release_validation,'暂无策略发布验证');
     const select=$('learning-rollback-version'), selected=select.value;
     select.replaceChildren();
     const versions=Array.isArray(learning.versions)?[...learning.versions]:isRecord(learning.versions)?Object.keys(learning.versions):[];
@@ -210,6 +236,7 @@
       // Finish any older status request, then fetch the state after rollback.
       if(statusRequest)await statusRequest;
       await refreshPerformance();
+      await loadLearningContent();
     }catch(e){$('learning-action-status').textContent='回退失败：'+e.message;}
     finally{
       learningBusy=false;select.disabled=!learningRollbackAvailable;
@@ -237,7 +264,7 @@
   async function poll() {
     if(polling)return;polling=true;
     const deadline=Date.now()+900000;
-    while(Date.now()<deadline){await new Promise(r=>setTimeout(r,3000));if(!await refreshHealth())break;}
+    while(Date.now()<deadline&&!document.hidden&&!$('health').hidden){await new Promise(r=>setTimeout(r,3000));if(document.hidden||$('health').hidden)break;if(!await refreshHealth())break;}
     polling=false;
   }
   function renderTargets() {
@@ -276,7 +303,7 @@
   document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
     document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==button.dataset.tab);
-    $('save-bar').hidden=['health','memes'].includes(button.dataset.tab);
+    $('save-bar').hidden=['health','memes','ai-profiles'].includes(button.dataset.tab);
     if(button.dataset.tab==='fixed')refreshSchedule();
     if(button.dataset.tab==='memes')loadMemes();
     if(button.dataset.tab==='learning')loadLearningContent();
@@ -285,8 +312,8 @@
   }));
   let memeOffset=0, memeTotal=0, memeLoading=false;
   function contentLine(parent,title,body){const d=document.createElement('p');const b=document.createElement('strong');b.textContent=title+'：';d.append(b,document.createTextNode(String(body??'—')));parent.append(d);}
-  async function loadMemes(){if(memeLoading)return;memeLoading=true;try{
-    const d=await api('meme_repository',undefined,{q:$('meme-search').value,offset:memeOffset});memeTotal=d.total;$('meme-list').replaceChildren();
+  async function loadMemes(){const serial=++memeRequest,requested=memeOffset;memeLoading=true;try{
+    const d=await api('meme_repository',undefined,{q:$('meme-search').value,offset:requested});if(serial!==memeRequest)return;memeOffset=d.offset??requested;memeTotal=d.total;$('meme-list').replaceChildren();
     for(const r of d.rows){const card=document.createElement('article');card.className='card';const h=document.createElement('h3');h.textContent=r.phrase;card.append(h);
       contentLine(card,'来源',r.provenance==='custom'?'管理员自定义，未联网核实':r.fresh?'联网核实':'联网核实记录已过期，等待重新查证');
       for(const [k,label] of [['meaning','含义'],['usage','适用场景'],['examples','接法示例'],['triggers','场景线索'],['intent','表达意图与反差'],['avoid','不适合的场合'],['adaptations','灵活接法']])contentLine(card,label,Array.isArray(r[k])?r[k].join(' / '):r[k]);
@@ -295,24 +322,36 @@
     }
     if(!d.rows.length)$('meme-list').textContent='暂无匹配词条';$('meme-page').textContent=` 共${memeTotal}条 · 第${Math.floor(memeOffset/30)+1}页 `;
     $('meme-prev').disabled=memeOffset===0;$('meme-next').disabled=memeOffset+30>=memeTotal;
-  }catch(e){notice(e.message,true);}finally{memeLoading=false;}}
-  let learningRequest=0;
-  async function loadLearningContent(){const serial=++learningRequest;try{
-    const d=await api('learning_content',undefined,{q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0'});
+  }catch(e){if(serial===memeRequest)notice(e.message,true);}finally{if(serial===memeRequest)memeLoading=false;}}
+  let learningRequest=0,learningLoading=false,eventCursors=[null],jobCursors=[null],nextEvent=null,nextJob=null;
+  async function loadLearningContent(paging=false){if(paging!==true){eventCursors=[null];jobCursors=[null];}const serial=++learningRequest;learningLoading=true;try{
+    const params={q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0'};
+    if(eventCursors.at(-1)!==null)params.cursor=eventCursors.at(-1);if(jobCursors.at(-1)!==null)params.job_cursor=jobCursors.at(-1);
+    const d=await api('learning_content',undefined,params);
     if(serial!==learningRequest)return;
     const root=$('learning-content');root.replaceChildren();
     const counts=d.counts||{jobs:(d.jobs||[]).length,events:(d.events||[]).length,rules:(d.rules||[]).length};
-    $('learning-content-count').textContent=`匹配：待办${counts.jobs}条，学习记录${counts.events}条，生效策略${counts.rules}条；每类最多显示${d.limit||50}条，可缩小关键词范围`;
+    nextEvent=d.next_events_cursor;nextJob=d.next_jobs_cursor;
+    $('learning-prev').disabled=eventCursors.length===1;$('learning-next').disabled=nextEvent==null;
+    $('learning-jobs-prev').disabled=jobCursors.length===1;$('learning-jobs-next').disabled=nextJob==null;
+    $('learning-content-count').textContent=`匹配：任务${counts.jobs}条，学习记录${counts.events}条，生效策略${counts.rules}条；记录第${eventCursors.length}页，任务第${jobCursors.length}页，每页${d.limit||50}条`;
     for(const r of d.rules||[])contentLine(root,'当前生效策略',r.rule);
     for(const j of d.jobs||[])contentLine(root,`待办 #${j.id} · ${{meme:'识别与查证梗',usage:'理解梗的语境',review:'观察回复风格',validate:'验证表达策略'}[j.kind]||j.kind} · ${{pending:'等待空闲',running:'正在学习'}[j.status]||j.status}`,j.text+(j.phrases?.length?' · 已识别：'+j.phrases.join('、'):''));
+    for(const j of d.jobs||[])if(['failed','unverified'].includes(j.status)){const b=document.createElement('button');b.type='button';b.textContent=`重试任务 #${j.id}`;b.onclick=async()=>{b.disabled=true;try{await api('learning_action',{action:'retry',job_id:j.id});await loadLearningContent(true);}catch(e){notice(e.message,true);b.disabled=false;}};root.append(b);}
     for(const e of d.events||[]){const card=document.createElement('article');card.className='card';contentLine(card,new Date(e.created*1000).toLocaleString('zh-CN'),e.kind==='meme'?'梗查证':'回复风格学习');
       if(e.kind==='meme'){contentLine(card,e.phrase,({learned:'已核实并入库',remembered:'已有记忆',unverified:'证据不足，未入库',understood:'已整理表达意图与反例',none:'无需学习'}[e.status]||e.status));if(e.entry)contentLine(card,'学到的内容',[e.entry.meaning,e.entry.usage,e.entry.intent,e.entry.avoid].filter(Boolean).join('；'));}
+      else if(e.kind==='failure'||e.kind==='isolation'){contentLine(card,'状态',e.status);contentLine(card,'原因',e.error||e.reason);}
       else {contentLine(card,'状态','已观察，不代表策略已生效');contentLine(card,'原话',e.before);contentLine(card,'审阅后',e.after);contentLine(card,'观察类别',e.category);}
       root.append(card);
     }
     if(!root.childNodes.length)root.textContent=d.closed?'学习服务尚未启动':$('learning-search').value.trim()||$('learning-only-learned').checked?'暂无符合筛选条件的学习内容':'暂无学习内容，新任务会在空闲时执行';
-  }catch(e){if(serial===learningRequest){$('learning-content').textContent=e.message;$('learning-content-count').textContent='读取失败，可重新搜索或刷新';}}}
+  }catch(e){if(serial===learningRequest){$('learning-content').textContent=e.message;$('learning-content-count').textContent='读取失败，可重新搜索或刷新';}}finally{if(serial===learningRequest)learningLoading=false;}}
   $('refresh-learning-content').addEventListener('click',loadLearningContent);
+  $('learning-prev').onclick=()=>{if(!learningLoading&&eventCursors.length>1){eventCursors.pop();loadLearningContent(true);}};
+  $('learning-next').onclick=()=>{if(!learningLoading&&nextEvent!=null){eventCursors.push(nextEvent);loadLearningContent(true);}};
+  $('learning-jobs-prev').onclick=()=>{if(!learningLoading&&jobCursors.length>1){jobCursors.pop();loadLearningContent(true);}};
+  $('learning-jobs-next').onclick=()=>{if(!learningLoading&&nextJob!=null){jobCursors.push(nextJob);loadLearningContent(true);}};
+  document.addEventListener?.('qqbot:view',e=>{$('save-bar').hidden=!['idle','speed'].includes(e.detail);if(e.detail==='memes')loadMemes();if(e.detail==='idle')loadLearningContent();if(e.detail==='speed')refreshPerformance();});
   $('search-learning').addEventListener('click',loadLearningContent);
   $('learning-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();return loadLearningContent();}});
   $('learning-search').addEventListener('search',loadLearningContent);
@@ -324,8 +363,8 @@
   $('meme-next').addEventListener('click',()=>{if(!memeLoading&&memeOffset+30<memeTotal){memeOffset+=30;loadMemes();}});
   $('meme-file').addEventListener('change',async()=>{const f=$('meme-file').files[0];if(!f)return;if(f.size>250000){$('meme-import-status').textContent='文件不能超过250KB';return;}$('meme-import').value=await f.text();});
   $('import-memes').addEventListener('click',async()=>{const button=$('import-memes');button.disabled=true;try{const entries=JSON.parse($('meme-import').value.replace(/^\uFEFF/,''));const d=await api('meme_repository',{entries,overwrite:$('meme-overwrite').checked});$('meme-import-status').textContent=`成功导入${d.imported}条，跳过${d.skipped}条`;memeOffset=0;await loadMemes();}catch(e){$('meme-import-status').textContent=e.message;}finally{button.disabled=false;}});
-  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if(!['learning-rollback-version','emoji-probability-percent','learning-search','learning-only-learned'].includes(event.target.id))changed();});
-  $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings();});
+  $('settings').addEventListener('submit',save);$('settings').addEventListener('input',event=>{if([...booleans,...numbers,...strings,'probability-slider'].includes(event.target.id))changed();});
+  $('reload').addEventListener('click',()=>{if(!dirty||window.confirm('重新读取会放弃未保存的修改，继续吗？'))loadSettings(true);});
   $('load-groups').addEventListener('click',loadGroups);$('group_chat_ids').addEventListener('change',renderGroups);
   $('probability-slider').addEventListener('input',()=>{$('group_chat_probability').value=$('probability-slider').value;});
   $('group_chat_probability').addEventListener('input',()=>{$('probability-slider').value=$('group_chat_probability').value;});

@@ -1376,6 +1376,8 @@ def _isolated_provider(provider):
 
 def install_work_runtime(plugin):
     """Wrap existing implementations, preserving signatures and async generators."""
+    from .hook_lifecycle import HookLease
+    lease=HookLease('work_runtime',plugin)
     runtime = getattr(plugin, '_work', None)
     if not isinstance(runtime, WorkRuntime):
         runtime = plugin._work = WorkRuntime(plugin._cfg, plugin._audit)
@@ -1396,12 +1398,18 @@ def install_work_runtime(plugin):
 
     @wraps(previous_execute)
     async def execute(scheduler, event):
+        if not lease.active:return await previous_execute(scheduler,event)
         with runtime.pipeline_work(event):
             return await previous_execute(scheduler, event)
 
     @wraps(previous_process)
     async def process(stage, event, provider_wake_prefix):
         iterator = previous_process(stage, event, provider_wake_prefix)
+        if not lease.active:
+            try:
+                async for item in iterator:yield item
+            finally:await _aclose(iterator)
+            return
         # The original admission and locks stay authoritative. Only events that
         # reached this reply stage count, never every observed group message.
         with runtime.reply_work(event):
@@ -1415,6 +1423,7 @@ def install_work_runtime(plugin):
 
     @wraps(previous_chat)
     async def text_chat(provider, *args, **kwargs):
+        if not lease.active:return await previous_chat(provider,*args,**kwargs)
         args, kwargs, values = _strip_tail_guard(chat_signature, provider, args, kwargs)
         if not runtime.enabled:
             return await previous_chat(provider, *args, **kwargs)
@@ -1435,6 +1444,12 @@ def install_work_runtime(plugin):
 
     @wraps(previous_stream)
     async def text_chat_stream(provider, *args, **kwargs):
+        if not lease.active:
+            iterator=previous_stream(provider,*args,**kwargs)
+            try:
+                async for item in iterator:yield item
+            finally:await _aclose(iterator)
+            return
         args, kwargs, _ = _strip_tail_guard(stream_signature, provider, args, kwargs)
         if not runtime.enabled:
             iterator = previous_stream(provider, *args, **kwargs)
@@ -1470,7 +1485,7 @@ def install_work_runtime(plugin):
 
     @wraps(previous_send)
     async def send(bot, action, **params):
-        if not runtime.enabled:
+        if not lease.active or not runtime.enabled:
             return await previous_send(bot, action, **params)
         platform = plugin._platform()
         if platform is None or getattr(platform, 'bot', None) is not bot:
@@ -1490,6 +1505,7 @@ def install_work_runtime(plugin):
         setattr(cls, name, wrapper)
 
     def restore():
+        lease.close()
         for cls, name, wrapper, previous in reversed(patches):
             if getattr(cls, name) is wrapper:
                 setattr(cls, name, previous)

@@ -47,7 +47,29 @@ class ImageMemory:
         self.stats={'captured':0,'capture_failed':0,'confirmed_images':0,'semantic_ready':0,'semantic_failed':0,'paused':0,'recall_original':0,'remote_pending':0}
 
     async def start(self):
-        await self.store.start();self.task=asyncio.create_task(self._worker(),name='image-semantics-idle')
+        await self.store.start()
+        for key,row in self.store.rows.items():
+            if key.startswith('task:') and row.get('status') in {'pending','running'}:
+                self.pending[key[5:]]=row.get('origin')
+                self.retries[key[5:]]=(row.get('attempts',0),time.monotonic()+max(0,row.get('retry_at',0)-time.time()))
+        self.recover_confirmed()
+        self.task=asyncio.create_task(self._worker(),name='image-semantics-idle')
+
+    def recover_confirmed(self):
+        ledger=getattr(self.plugin,'_delivery',None)
+        if not ledger or not self.enabled():return
+        for row in sorted(ledger.store.rows.values(),key=lambda r:r.get('at',0),reverse=True):
+            if len(self.pending)>=1000:break
+            if row.get('state')=='confirmed':self.confirmed(row,recovery=True)
+
+    def retry_failed(self):
+        count=0
+        for key,row in list(self.store.rows.items()):
+            if key.startswith('task:') and row.get('status')=='failed':
+                self.store.put(key,{**row,'status':'pending','attempts':0,'retry_at':0});count+=1
+                self.retries.pop(key[5:],None)
+                self.pending[key[5:]]=row.get('origin')
+        return count
 
     def enabled(self):return self.plugin._cfg('image_memory_enabled',False) and not self.closed
 
@@ -88,7 +110,7 @@ class ImageMemory:
         data=part.get('data',{});ref=data.get('file') or data.get('url')
         try:captured=await asyncio.to_thread(self._capture,ref)
         except (OSError,ValueError):
-            self.stats['capture_failed']+=1;return {'kind':'image','semantic_status':'unavailable'}
+            self.stats['capture_failed']+=1;return {'kind':'image','semantic_status':'awaiting_platform_original'}
         if captured is None:
             self.stats['remote_pending']+=1;return {'kind':'image','semantic_status':'awaiting_platform_original'}
         digest,path=captured;old=self.store.rows.get(digest,{})
@@ -96,14 +118,20 @@ class ImageMemory:
         self.stats['captured']+=1
         return {'kind':'image','content_hash':digest,'semantic_version':VERSION,'semantic_status':'ready' if old.get('semantic',{}).get('version')==VERSION else 'pending'}
 
-    def confirmed(self,row):
+    def confirmed(self,row,recovery=False):
         if not self.enabled() or row.get('state')!='confirmed':return
+        missing=False
         for attachment in row.get('attachments',[]):
             if attachment.get('kind')!='image':continue
-            self.stats['confirmed_images']+=1
+            if not recovery:self.stats['confirmed_images']+=1
             digest=attachment.get('content_hash')
-            if digest:self.pending[digest]=row.get('origin')
-        if any(a.get('semantic_status')=='awaiting_platform_original' for a in row.get('attachments',[])):
+            asset=self.store.rows.get(digest,{})
+            if not digest or not asset.get('path') or not Path(asset['path']).is_file():
+                missing=True;continue
+            if digest and self.store.rows.get(digest,{}).get('semantic',{}).get('version')!=VERSION:
+                if not recovery or self.store.rows.get('task:'+digest,{}).get('status')!='failed':self.pending[digest]=row.get('origin')
+        if missing:
+            if recovery and self.store.rows.get('task:receipt:'+row['id'],{}).get('status')=='failed':return
             self.pending['receipt:'+row['id']]=row.get('origin')
         while len(self.pending)>1000:self.pending.popitem(last=False)
 
@@ -117,9 +145,10 @@ class ImageMemory:
             parts=response.get('message',[]) if isinstance(response,dict) else []
             originals=[p for p in parts if isinstance(p,dict) and p.get('type')=='image']
             attachments=[dict(x) for x in row.get('attachments',[])];images=[x for x in attachments if x.get('kind')=='image']
-            if len(originals)!=len(images):return
+            if len(originals)!=len(images):raise ValueError('confirmed original not available yet')
             for original,attachment in zip(originals,images):
-                if attachment.get('content_hash'):continue
+                previous_hash=attachment.get('content_hash');asset=self.store.rows.get(previous_hash,{})
+                if asset.get('path') and Path(asset['path']).is_file():continue
                 data=original.get('data',{});ref=data.get('url') or data.get('file')
                 captured=await asyncio.to_thread(self._capture,ref)
                 if captured is None and isinstance(ref,str) and ref.startswith(('https://','http://')):
@@ -132,10 +161,14 @@ class ImageMemory:
                                 if size>MAX_BYTES:raise ValueError('platform image size limit')
                                 chunks.append(chunk)
                     captured=await asyncio.to_thread(self._save_bytes,b''.join(chunks))
+                if captured is None:raise ValueError('confirmed original bytes still unavailable')
                 if captured:
-                    digest,path=captured;self.store.put(digest,{**self.store.rows.get(digest,{}),'hash':digest,'path':path,'last_seen':time.time()})
+                    digest,path=captured
+                    if previous_hash and digest!=previous_hash:raise ValueError('platform original differs from confirmed image')
+                    self.store.put(digest,{**self.store.rows.get(digest,{}),'hash':digest,'path':path,'last_seen':time.time()})
                     attachment.update(content_hash=digest,semantic_version=VERSION,semantic_status='pending');self.pending[digest]=row['origin']
             ledger.store.put(id_,{**row,'attachments':attachments})
+            if any(a.get('kind')=='image' and not a.get('content_hash') for a in attachments):raise ValueError('original still unavailable')
 
     async def _backfill_one(self):
         if time.monotonic()<self.next_backfill:return
@@ -180,21 +213,27 @@ class ImageMemory:
             if time.monotonic()-idle_since<5:continue
             digest=None
             try:
-                if not self.pending:await self._backfill_one()
+                if not self.pending:
+                    self.recover_confirmed()
+                    if not self.pending:await self._backfill_one()
                 if not self.pending:continue
                 ready=next((key for key in self.pending if self.retries.get(key,(0,0))[1]<=time.monotonic()),None)
                 if ready is None:continue
                 digest=ready;origin=self.pending.pop(digest)
+                self.store.put('task:'+digest,{'status':'running','origin':origin,'at':time.time(),'attempts':self.retries.get(digest,(0,0))[0]})
                 if digest.startswith('receipt:'):await self._platform_original(digest[8:])
                 else:await self.learn(digest,origin)
                 self.retries.pop(digest,None)
+                self.store.put('task:'+digest,{'status':'done','origin':origin,'at':time.time()})
             except BackgroundPaused:
                 self.pending[digest]=origin;self.stats['paused']+=1;idle_since=time.monotonic()
             except asyncio.CancelledError:raise
-            except Exception:
+            except Exception as exc:
                 self.stats['semantic_failed']+=1;idle_since=time.monotonic()+25
                 if digest is None:continue
                 attempts=self.retries.get(digest,(0,0))[0]+1
+                self.store.put('task:'+digest,{'status':'failed' if attempts>=3 else 'pending','origin':origin,
+                    'attempts':attempts,'error':type(exc).__name__,'retry_at':time.time()+60*attempts})
                 if attempts<3:
                     self.retries[digest]=(attempts,time.monotonic()+60*attempts)
                     self.pending[digest]=origin
@@ -234,7 +273,9 @@ class ImageMemory:
                 self.stats['recall_original']+=1
         elif need_original:req.system_prompt+='\n该图片原件尚未取回，不能编造图中具体文字'
 
-    def snapshot(self):return {**self.stats,'pending':len(self.pending),'assets':sum('hash' in r for r in self.store.rows.values()),'storage':self.store.snapshot()}
+    def snapshot(self):return {**self.stats,'pending':len(self.pending),'assets':sum('hash' in r for r in self.store.rows.values()),
+        'failed_tasks':[{'id':k[5:],**r} for k,r in self.store.rows.items() if k.startswith('task:') and r.get('status')=='failed'],
+        'storage':self.store.snapshot()}
 
     async def close(self):
         self.closed=True

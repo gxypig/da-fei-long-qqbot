@@ -19,9 +19,9 @@ from .proactive_variety import variety, TooSimilar
 STATE_KEY = "fixed_schedule_v1"
 
 
-def plans(plugin):
+def plans(plugin,include_disabled=False):
     result = {}
-    if plugin._cfg("fixed_messages_enabled", False):
+    if include_disabled or plugin._cfg("fixed_messages_enabled", False):
         interval = max(5, int(plugin._cfg("fixed_message_interval_minutes", 30))) * 60
         if plugin._cfg('fixed_message_random_enabled', False):
             low = max(5, min(10080, int(plugin._cfg('fixed_message_min_minutes', 60))))
@@ -29,10 +29,10 @@ def plans(plugin):
             interval = (low * 60, high * 60)
         for lane, switch, field in [("group", "allow_group", "fixed_group_ids"),
                                      ("private", "allow_private", "fixed_private_ids")]:
-            if plugin._cfg(switch, False):
+            if include_disabled or plugin._cfg(switch, False):
                 for target in sorted(plugin._id_set(plugin._cfg(field, ""))):
                     result[f"{lane}:{target}"] = interval
-    if plugin._cfg("fixed_qzone_enabled", False) and plugin._cfg("allow_qzone", True):
+    if include_disabled or plugin._cfg("fixed_qzone_enabled", False) and plugin._cfg("allow_qzone", True):
         result["qzone:"] = max(5, int(plugin._cfg("fixed_qzone_interval_minutes", 360))) * 60
     return result
 
@@ -69,15 +69,17 @@ class FixedScheduler:
         p, now = self.plugin, self.clock()
         state = await p.get_kv_data(STATE_KEY, {})
         state = state if isinstance(state, dict) else {}
+        original=copy.deepcopy(state)
         current = plans(p)
         # Removing a selection also removes its timer; reselecting starts a full interval.
-        state = {key: value for key, value in state.items() if key in current}
+        configured=plans(p,include_disabled=True)
+        state = {key: value for key, value in state.items() if key in configured}
         for key, plan in current.items():
             entry = state.get(key)
             if not isinstance(entry, dict) or entry.get('plan', entry.get('interval')) != self.signature(plan):
                 interval = self.interval(plan)
                 state[key] = {"interval": interval, 'plan':self.signature(plan), "due": now + interval, "status": "waiting"}
-        await p.put_kv_data(STATE_KEY, copy.deepcopy(state))
+        if state!=original:await p.put_kv_data(STATE_KEY, copy.deepcopy(state))
         if not p._cfg("enable", True) or p._quiet_now():
             return
         semaphore = asyncio.Semaphore(2)
@@ -91,7 +93,29 @@ class FixedScheduler:
                 plan = current[key]
                 if not self.allowed(key, plan):
                     return
+                targets=getattr(p,'_targets',None)
+                lane,target=key.split(':',1)
+                origin='qzone' if lane=='qzone' else f"{p._cfg('platform_id','aiocqhttp')}:{'GroupMessage' if lane=='group' else 'FriendMessage'}:{target}"
+                if targets:
+                    availability=await targets.check(origin)
+                    if not availability['available']:
+                        update={**entry,'status':'unavailable','error':availability['reason'],'resume_at':availability.get('resume_at')}
+                        if update!=entry:entry.update(update);await self.save(state)
+                        return
                 due = entry["due"]
+                life=getattr(p,'_life',None)
+                if life and life.enabled():
+                    required=p._cfg('fixed_qzone_required' if lane=='qzone' else 'fixed_message_required',False)
+                    async def check():
+                        if not self.allowed(key,plan):raise RuntimeError('规则已变更，取消旧主动任务')
+                    result=await life.opportunity(origin,mode='fixed',required=required,check=check)
+                    status=result['decision'];entry.update(status=status,last_check=self.clock(),reason=result['reason'])
+                    if status in {'confirmed','drop','unknown'}:
+                        interval=self.interval(plan)
+                        entry.update(interval=interval,due=self.clock()+interval if isinstance(plan,tuple) else next_slot(due,interval,self.clock()),retry_at=0)
+                        if status=='confirmed':entry.update(last_success=self.clock(),failures=0)
+                    else:entry['retry_at']=result.get('retry_at',self.clock()+60)
+                    await self.save(state);return
                 # Persist before external delivery. After a crash the uncertain slot is
                 # skipped, never blindly replayed; OneBot has no idempotency key.
                 interval = self.interval(plan)
@@ -107,7 +131,7 @@ class FixedScheduler:
                     entry["retry_at"] = self.clock() + min(900, 60 * 2 ** min(entry["failures"] - 1, 4))
                     # Timeout may mean the server accepted a request: do not immediately
                     # retry an ambiguous delivery. Other errors retry independently.
-                    if not isinstance(exc, (TimeoutError, ConnectionError)):
+                    if not isinstance(exc, (TimeoutError, ConnectionError)) and getattr(exc,'state',None)!='unknown':
                         entry["due"] = due
                     await p._record(f"固定定时 {key} 未确认成功（{type(exc).__name__}），其他目标继续")
                 else:

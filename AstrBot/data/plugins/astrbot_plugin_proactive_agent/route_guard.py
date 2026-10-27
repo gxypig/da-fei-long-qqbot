@@ -39,9 +39,12 @@ def canonical(origin):
 
 
 def install_route_guard(plugin):
+    from .hook_lifecycle import HookLease
+    lease=HookLease('route_guard',plugin)
     previous = CQHttp.call_action
 
     async def guarded(bot, action, **params):
+        if not lease.active:return await previous(bot,action,**params)
         platform = plugin._platform()
         scope = _route.get()
         if (scope and platform is not None and getattr(platform, 'bot', None) is bot
@@ -100,6 +103,7 @@ def install_route_guard(plugin):
     CQHttp.call_action = guarded
 
     def restore():
+        lease.close()
         if CQHttp.call_action is guarded:
             CQHttp.call_action = previous
     return restore
