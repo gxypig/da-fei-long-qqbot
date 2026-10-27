@@ -12,6 +12,15 @@ from data.plugins.astrbot_plugin_proactive_agent.session_fence import get_fence
 from aiocqhttp import CQHttp
 
 
+class ProviderInitialization(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_provider_is_reschedulable_and_runtime_error_compatible(self):
+        from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import ModelNotReady
+        plugin=SimpleNamespace(_cfg={}.get,context=SimpleNamespace(get_using_provider_async=AsyncMock(return_value=None)))
+        with self.assertRaises(ModelNotReady) as caught:
+            await Main._generate_json(plugin,'background analysis',{},'qq:GroupMessage:1')
+        self.assertIsInstance(caught.exception,RuntimeError)
+
+
 class PersistenceRecovery(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)

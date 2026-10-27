@@ -48,6 +48,10 @@ class BackgroundPaused(Exception):
     """An uncommitted background model request yielded to foreground work."""
 
 
+class ModelNotReady(BackgroundPaused, RuntimeError):
+    """Startup/configuration has not exposed a usable provider yet."""
+
+
 class HedgePreempted(Exception):
     """Only the duplicate model worker yielded its slot to actual interactive work."""
 
@@ -606,11 +610,11 @@ class ModelScheduler:
             raise
         except Exception:
             # Some adapters translate cancellation/cleanup into an ordinary
-            # exception. A requested hedge preemption must still preserve the
-            # primary's recovery path instead of becoming a backup failure.
-            if job.preempted and not asyncio.current_task().cancelling():
+            # exception. Requested preemption must still preserve the caller's
+            # recovery path instead of becoming a model failure.
+            if (job.preempted or job.paused or self._closed) and not asyncio.current_task().cancelling():
                 reason = self._cancel_reason(job)
-                outcome = 'closed' if isinstance(reason, WorkClosed) else 'preempted'
+                outcome = 'closed' if isinstance(reason, WorkClosed) else 'paused' if isinstance(reason, BackgroundPaused) else 'preempted'
                 raise reason from None
             raise
         finally:
@@ -707,6 +711,10 @@ class ModelScheduler:
             outcome = 'paused'
             raise
         except Exception:
+            if (job.paused or self._closed) and not asyncio.current_task().cancelling():
+                reason = self._cancel_reason(job)
+                outcome = 'closed' if isinstance(reason, WorkClosed) else 'paused'
+                raise reason from None
             outcome = 'failed'
             raise
         finally:

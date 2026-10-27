@@ -282,7 +282,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         provider_id = self._cfg('prediction_provider_id', '') if prediction else ''
         provider = self.context.get_provider_by_id(provider_id) if provider_id else await self.context.get_using_provider_async(umo=None if origin == "qzone" else origin)
         if provider is None:
-            raise RuntimeError("没有可用的审阅/记忆模型")
+            from .work_scheduler import ModelNotReady
+            raise ModelNotReady("模型尚未就绪，等待初始化或配置恢复")
         stage = "review_model" if system.startswith(REVIEW_SYSTEM) else "prediction_model" if prediction else {DETECT_SYSTEM: "detect_model", LEARN_SYSTEM: "learn_model"}.get(system, "aux_model")
         started, ok = time.monotonic(), False
         try:

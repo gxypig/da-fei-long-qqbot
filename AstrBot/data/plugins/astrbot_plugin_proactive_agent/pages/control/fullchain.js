@@ -50,7 +50,7 @@
     profiles=data;profileOffset=data.offset??requested;$('profiles-list').replaceChildren();if(!daysDirty)$('profiles-days').value=profiles.default_days;
     for(const row of profiles.rows){const card=node('article');card.className='card';line(card,'平台账号',row.key);line(card,'状态',labels[row.state]||row.state);
       line(card,'判断对象',({ai:'AI迹象',automation:'普通自动化',mixed:'人机混用',insufficient:'证据不足'}[row.judgement_type]||'证据不足'));
-      line(card,'流程阶段',({observing:'观察中',analysis:'后台分析',analyzing:'正在分析',candidate:'候选',probe:'等待试探机会',awaiting_answer:'等待同会话答复',probe_expired:'试探等待已结束',analysis_retry:'分析等待重试',analysis_failed:'分析失败，可重试',delivery_unknown:'试探投递未知',confirmed:'已确认',insufficient:'证据不足',expired:'到期重看'}[row.stage]||row.stage||'观察中'));line(card,'阻塞或跳过原因',row.skip_reason||'无');
+      line(card,'流程阶段',({observing:'观察中',analysis:'后台分析',analyzing:'正在分析',candidate:'候选',probe:'等待试探机会',awaiting_answer:'等待同会话答复',probe_expired:'试探等待已结束',waiting_model:'等待模型就绪',paused:'为正常回复让路',analysis_retry:'分析等待重试',analysis_failed:'分析失败，可重试',delivery_unknown:'试探投递未知',confirmed:'已确认',insufficient:'证据不足',expired:'到期重看'}[row.stage]||row.stage||'观察中'));line(card,'阻塞或跳过原因',row.skip_reason||'无');
       if(row.source_sync_pending)line(card,'关联学习样本','等待重新核对来源'+(row.source_sync_error?'：'+row.source_sync_error:''));
       line(card,'今日尝试 / 实际发送 / 已答复',`${row.attempted??row.today_probes} / ${row.actually_sent||0} / ${row.answered||0}（最多三次尝试，跨群共享）`);
       line(card,'到期',row.expires_at?new Date(row.expires_at*1000).toLocaleString():'无');

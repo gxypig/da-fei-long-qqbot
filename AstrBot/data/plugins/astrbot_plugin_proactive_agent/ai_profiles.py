@@ -15,7 +15,7 @@ import copy
 from .record_store import AsyncRecordStore
 from .reply_jobs import QueueConflict,error_fingerprint
 from .conversation_review import json_object
-from .work_scheduler import model_work,BackgroundPaused
+from .work_scheduler import model_work,BackgroundPaused,ModelNotReady
 
 CLUE=re.compile(r'<\|(?:im_start|im_end|assistant|analysis)|(?:system_prompt|tool_calls|finish_reason|prompt_tokens|model_id)\s*[\"\':=]|Traceback|APIError|retcode|(?:指令|命令).{0,8}(?:不支持|列表|执行成功)',re.I)
 PROBE_WORDS=re.compile(r'手动|自己打|程序|机器人|自动回复|\bAI\b',re.I)
@@ -262,9 +262,17 @@ class AIProfiles:
                 try:
                     if row.get('source_sync_pending') and self.on_change:await self._sync_source(key)
                     await self.analyze(key,epoch)
-                except BackgroundPaused:self.pending[key]=epoch
+                except BackgroundPaused as exc:
+                    row=copy.deepcopy(self.store.rows.get(key,{}))
+                    if row.get('epoch')!=epoch:continue
+                    row.update(analysis_pending=True,analysis_retry_at=self.clock()+5,
+                        stage='waiting_model' if isinstance(exc,ModelNotReady) else 'paused',
+                        skip_reason='模型尚未就绪，稍后继续' if isinstance(exc,ModelNotReady) else '为正常回复让路，稍后继续')
+                    self._put(key,row);self.pending[key]=epoch
                 except Exception as exc:
-                    row=copy.deepcopy(self.store.rows.get(key,{}));attempt=row.get('analysis_attempts',0)+1
+                    row=copy.deepcopy(self.store.rows.get(key,{}))
+                    if row.get('epoch')!=epoch:continue
+                    attempt=row.get('analysis_attempts',0)+1
                     row.update(analysis_attempts=attempt,analysis_retry_at=self.clock()+min(300,5*2**min(attempt,6)),
                         stage='analysis_retry' if attempt<3 else 'analysis_failed',skip_reason=type(exc).__name__)
                     self._put(key,row)

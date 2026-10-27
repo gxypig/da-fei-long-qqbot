@@ -5,6 +5,42 @@ from test_ai_profiles import ProfileTests
 
 
 class SemanticProfiles(ProfileTests):
+    async def test_revoke_during_failed_analysis_cannot_restore_old_pending_state(self):
+        from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import ModelNotReady
+        for error in (ModelNotReady('initializing'),RuntimeError('temporary network error')):
+            with self.subTest(error=type(error).__name__):
+                entered=asyncio.Event();release=asyncio.Event()
+                async def generate(*args):
+                    entered.set();await release.wait();raise error
+                self.service.generate=generate;self.observe('tool_calls: []');self.now+=6
+                self.service.busy=lambda:False
+                await asyncio.wait_for(entered.wait(),3)
+                self.action('revoke');release.set()
+                await asyncio.sleep(.05)
+                row=self.service.store.rows[self.key]
+                self.assertEqual(row['state'],'revoked');self.assertEqual(row['stage'],'revoked')
+                self.assertNotIn(self.key,self.service.pending)
+                self.assertEqual(row.get('analysis_attempts',0),0)
+
+    async def test_model_initialization_wait_preserves_retry_budget_and_recovers(self):
+        from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import ModelNotReady
+        self.service.generate=AsyncMock(side_effect=ModelNotReady('initializing'))
+        self.observe('tool_calls: []');self.now+=6;self.service.busy=lambda:False
+        async with asyncio.timeout(3):
+            while self.service.store.rows[self.key].get('stage')!='waiting_model':await asyncio.sleep(.01)
+        row=self.service.store.rows[self.key]
+        self.assertEqual(row.get('analysis_attempts',0),0)
+        self.assertIn(self.key,self.service.pending)
+        self.assertEqual(self.service.generate.await_count,1)
+        self.service.generate.side_effect=None
+        self.service.generate.return_value=json.dumps({'judgement_type':'insufficient','evidence':[],'counterevidence':[]})
+        self.now+=6
+        async with asyncio.timeout(3):
+            while not self.service.store.rows[self.key].get('analyzed_at'):await asyncio.sleep(.01)
+        self.assertFalse(self.service.store.rows[self.key]['analysis_pending'])
+        self.assertEqual(self.service.store.rows[self.key]['analysis_attempts'],0)
+        self.assertEqual(self.service.generate.await_count,2)
+
     async def test_restart_recovers_confirmed_probe_from_exact_delivery_without_extending_ttl(self):
         from types import SimpleNamespace
         from data.plugins.astrbot_plugin_proactive_agent.ai_profiles import AIProfiles

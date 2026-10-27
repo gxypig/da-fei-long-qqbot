@@ -284,6 +284,43 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertEqual(records, ['sent-once'])
 
+    async def test_adapter_translated_cancellation_is_still_background_pause(self):
+        self.clock.advance(5)
+        started = asyncio.Event()
+        async def adapter():
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                raise RuntimeError('adapter translated cancellation') from None
+        task = asyncio.create_task(self.scheduler.run(provider(), adapter, kind='background'))
+        await asyncio.wait_for(started.wait(), 1)
+        with self.scheduler.foreground():
+            with self.assertRaises(BackgroundPaused):
+                await asyncio.wait_for(task, 1)
+        self.assertEqual(self.scheduler.status()['running'], 0)
+        self.assertEqual(self.rows[-1][1]['status'], 'paused')
+
+    async def test_stream_translated_cancellation_is_still_background_pause(self):
+        self.clock.advance(5)
+        started = asyncio.Event()
+        async def adapter():
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                raise RuntimeError('adapter translated cancellation') from None
+            yield 'never delivered'
+        async def consume():
+            return [item async for item in self.scheduler.stream(provider(), adapter, kind='background')]
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(started.wait(), 1)
+        with self.scheduler.foreground():
+            with self.assertRaises(BackgroundPaused):
+                await asyncio.wait_for(task, 1)
+        self.assertEqual(self.scheduler.status()['running'], 0)
+        self.assertEqual(self.rows[-1][1]['status'], 'paused')
+
     async def test_cancellation_suppression_cannot_commit_preempted_model_result(self):
         self.clock.advance(5)
         started = asyncio.Event()
