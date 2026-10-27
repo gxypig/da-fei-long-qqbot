@@ -134,6 +134,31 @@ class DeliveryLedger:
         return '\n'.join(self.store.rows[x]['text'] for x in job.sends if x in self.store.rows
                          and self.store.rows[x].get('state')=='confirmed' and self.store.rows[x].get('text'))
 
+    def voice_history(self,job):
+        rows=[self.store.rows[x] for x in job.sends if x in self.store.rows
+              and self.store.rows[x].get('state')=='confirmed']
+        if not any(a.get('kind')=='record' for row in rows for a in row.get('attachments',[])):return None
+        parts=[]
+        for row in rows:
+            voice=any(a.get('kind')=='record' for a in row.get('attachments',[]))
+            text=row.get('text','')
+            if voice:parts.append('[发送形式：语音] '+(text or '[内容未记录]'))
+            elif text:parts.append(text)
+        return '\n'.join(parts)
+
+    def voice_context(self,origin,cid):
+        rows=[row for row in self.store.rows.values() if row.get('state')=='confirmed'
+              and row.get('origin')==origin and row.get('cid')==cid
+              and any(a.get('kind')=='record' for a in row.get('attachments',[]))]
+        rows=sorted(rows,key=lambda row:row.get('at',0))[-2:]
+        if not rows:return ''
+        # Receipt-backed facts, not an assistant's self-authored label. Keep
+        # these retrievable even after the general last-eight window moves on.
+        return '\n系统依据平台成功回执确认的本会话语音记录（确实以语音发出，不是文字假扮；早先模型说不会发语音不能推翻回执事实）：'+json.dumps([
+            {'时间':row['at'],'发送形式':'语音','原文':[a['transcript'] for a in row.get('attachments',[]) if a.get('kind')=='record' and a.get('transcript')],
+             '未知内容不猜':not any(a.get('transcript') for a in row.get('attachments',[]) if a.get('kind')=='record')}
+            for row in rows],ensure_ascii=False)
+
     def history_saved(self,job):
         for x in job.sends:
             row=self.store.rows.get(x,{})
@@ -320,17 +345,23 @@ def install_delivery_history(plugin):
         ledger=plugin._delivery;draft=getattr(response,'completion_text','') or ''
         if draft:ledger.draft(job,draft)
         confirmed=ledger.confirmed_text(job)
+        voice_history=ledger.voice_history(job) if draft else None
         copies=list(messages)
-        if draft and (not confirmed or digest(confirmed)!=digest(draft)):
+        if draft and (voice_history or not confirmed or digest(confirmed)!=digest(draft)):
             # Leave all actual tool actions and user messages in raw history.
             for i in range(len(copies)-1,-1,-1):
                 message=copies[i]
                 if message.role=='user':break
                 if message.role=='assistant' and not getattr(message,'tool_calls',None):
                     message=copy.copy(message);message._no_save=True;copies[i]=message
+        if voice_history:
+            # Persist modality with the archive, not only the last-eight receipt
+            # note. Never alter the live output or reinsert unconfirmed drafts.
+            from astrbot.core.agent.message import Message as AgentMessage,TextPart
+            copies.append(AgentMessage(role='assistant',content=[TextPart(text=voice_history)]))
         result=await previous(stage,event,req,response,copies,stats,user_aborted)
         metric_add('history_save_ms',(time.monotonic()-started)*1000)
-        if lease.active and draft and confirmed and digest(confirmed)==digest(draft) and req and req.conversation:
+        if lease.active and draft and req and req.conversation and (voice_history or confirmed and digest(confirmed)==digest(draft)):
             ledger.history_saved(job)
         return result
     InternalAgentSubStage._save_to_history=save

@@ -81,6 +81,9 @@ def fast_path_issues(text, user_text, *, mode='chat', media=0, state=None, used_
     if prediction and prediction.get('risk') == 'high': reasons.append('predicted_risk')
     reasons.extend(output_issues(text, mode, [user_text]))
     reasons.extend(speech_issues(text, state, mode))
+    if mode=='chat':
+        from .voice_memory import voice_issues
+        reasons.extend(voice_issues(text,state))
     return list(dict.fromkeys(reasons))
 
 

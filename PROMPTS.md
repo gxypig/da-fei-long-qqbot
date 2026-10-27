@@ -116,3 +116,11 @@ OpenAI兼容、Gemini、Anthropic等provider适配器通常负责传递或转换
 - `astrbot_plugin_proactive_agent/life_state.py`：`EXTRACT_SYSTEM`从同会话原话抽取/结束事项；`COMPOSE_SYSTEM`根据来源、联系动机和时机生成主动候选。`role_context`合并既有人格、说话策略和有范围的生活资料。
 - `astrbot_plugin_proactive_agent/ai_profiles.py`：`ANALYZE_SYSTEM`用于空闲批量语义证据、反证、判断类型及最终试探/答复关联。
 - 这些后台任务使用现有模型通道；正常聊天只读取已保存资料，不增加前置分析模型调用。源码公开模板与维护者本机私人提示词可能不同，私人定制不随仓库上传。
+
+## 1.18新增资料标记
+
+1.18.1语音能力与事实说明在 `voice_memory.py` 的 `voice_note()`：主回复生成和 `conversation_review.py` 的审阅共同使用，`main.py` 从当前会话配置与已确认发送账本填充状态。`voice_issues()`阻止语音已启用时继续声称只能打字。历史音频证据来自 `delivery_ledger.py` 的 `voice_context()`，只读同会话真实回执；这些动态事实与AstrBot的人格提示是不同来源。
+
+- `memewiki_engine.py`提供公共词典的含义、用法与来源，复用`meme_memory.py`现有的理解/使用规则，不新增前台模型提示调用。
+- `delivery_ledger.py`的`note`与`voice_history`记录确认发送的语音原文和发送形式；后者把形式保留到聊天档案，标记只用于记忆，不随QQ消息发送。
+- `voice_memory.py`的明确语音请求判断是本地规则，平时概率仍由AstrBot原有TTS设置控制；不是一份覆盖人格的隐藏提示词。

@@ -73,6 +73,35 @@ class VoiceMemory(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({r['origin']:r['text'] for r in self.rows()},
                          {'p:FriendMessage:1':'甲的语音','p:GroupMessage:2':'乙的语音'})
 
+    async def test_native_history_keeps_voice_form_beyond_recent_receipt_window(self):
+        from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
+        from astrbot.core.agent.message import Message,TextPart
+        from astrbot.core.provider.entities import LLMResponse
+        from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import install_delivery_history
+        job=ReplyJob('p:FriendMessage:1','a','m','question');job.cid='c'
+        token=current_job.set(job)
+        try:await self.send([self.audio('本龙刚刚用声音说的话')])
+        finally:current_job.reset(token)
+        e=event(origin=job.origin);e.set_extra('qqbot_reply_job',job)
+        original=Message(role='assistant',content=[TextPart(text='本龙刚刚用声音说的话')])
+        messages=[Message(role='user',content='说句话'),original]
+        stage=object.__new__(InternalAgentSubStage)
+        stage.conv_manager=SimpleNamespace(update_conversation=AsyncMock())
+        restore=install_delivery_history(self.plugin);self.addCleanup(restore)
+        req=SimpleNamespace(conversation=SimpleNamespace(cid='c',token_usage=0),tool_calls_result=[])
+        await stage._save_to_history(e,req,LLMResponse(role='assistant',completion_text='本龙刚刚用声音说的话'),messages,None)
+        saved=stage.conv_manager.update_conversation.call_args.kwargs['history']
+        self.assertEqual(saved[-1]['content'][0]['text'],'[发送形式：语音] 本龙刚刚用声音说的话')
+        self.assertEqual(original.content[0].text,'本龙刚刚用声音说的话')
+        self.assertFalse(original._no_save)
+        for i in range(10):
+            key=self.ledger.begin(job.origin,'c',str(i),[],None);self.ledger.result(key,'confirmed',message_id=str(10+i))
+        self.assertNotIn('本龙刚刚用声音说的话',self.ledger.note(job.origin,'c'))
+        self.assertIn('发送形式：语音',saved[-1]['content'][0]['text'])
+        self.assertIn('本龙刚刚用声音说的话',self.ledger.voice_context(job.origin,'c'))
+        self.assertEqual(self.ledger.voice_context('p:FriendMessage:2','c'),'')
+        self.assertEqual(self.ledger.voice_context(job.origin,'reset-session'),'')
+
     async def test_failure_unknown_and_audio_without_text_never_become_spoken_facts(self):
         for response in ({'retcode':100,'status':'failed'},{}):
             self.transport.return_value=response

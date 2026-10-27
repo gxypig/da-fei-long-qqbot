@@ -162,7 +162,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.18.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.18.1 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -187,7 +187,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         life=getattr(self,'_life',None)
         checks['proactive_life']=not self._cfg('proactive_life_enabled',True) or bool(life and life.task and not life.task.done() and life.store.snapshot()['worker_running'])
         checks['live_journal'] = bool(self._live_journal.task and not self._live_journal.task.done())
-        return jsonify({"status": "ok", "data": {"version": "1.18.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.18.1", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -196,7 +196,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             'delivery':self._delivery.health(),'targets':self._targets.snapshot()}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.18.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.18.1", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -908,6 +908,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if images:await images.enrich(event,req)
         text = str(req.prompt or "")
         state = self.character_context(event)
+        from .voice_memory import prepare_voice_state,voice_note
+        await prepare_voice_state(self,event,state)
+        if ledger and state.get('voice_capability'):
+            state['voice_receipts']=ledger.voice_context(event.unified_msg_origin,getattr(getattr(req,'conversation',None),'cid',None))
         optimized = self._cfg('latency_optimization_enabled', False)
         if optimized:
             self.prepare_reply_prediction(event)
@@ -949,6 +953,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             # Only exact duplicate rule blocks are shared; retain private persona and all tools.
             event.set_extra('qqbot_policy_version', self.review_policy_version())
         if not self._cfg("meme_context_enabled", True):
+            req.system_prompt+=voice_note(state)
             event.set_extra('qqbot_model_started', time.monotonic())
             if optimized and getattr(self, '_work', None): self._work.mark(event, 'model_start')
             return
@@ -967,6 +972,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             self._audit('meme_wait', {'elapsed_ms': int((time.monotonic() - waiting) * 1000)})
             if notes:
                 req.system_prompt += MEME_RULE + "\n梗记忆候选：\n" + json.dumps([{ 'status':n.get('status'), 'entry':{k:v for k,v in n.get('entry',{}).items() if k in {'phrase','meaning','usage','examples','provenance','intent','avoid','adaptations'}}} for n in notes[:3]], ensure_ascii=False, separators=(',',':'))
+        req.system_prompt+=voice_note(state)
         event.set_extra('qqbot_model_started', time.monotonic())
         if optimized and getattr(self, '_work', None): self._work.mark(event, 'model_start')
 

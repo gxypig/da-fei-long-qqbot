@@ -15,6 +15,7 @@ from .chat_style_policy import CHAT_STYLE_POLICY, output_issues
 from .local_recall import BRIEF_RULE
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
 from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address, apology_repetition_issues
+from .voice_memory import voice_note,voice_issues
 
 
 REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句话是否像正在 QQ 中随口聊天”，不只是正确、简短或礼貌。
@@ -150,12 +151,14 @@ class ReplyReviewer:
                         issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
                         if mode == 'chat':
                             issues += apology_repetition_issues(candidate, state, prior_replies)
+                            issues += voice_issues(candidate,state)
                         video_links = re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', text)
                         if video_links and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', candidate) != video_links:
                             issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))
                         self.stats["model_calls"] += 1
                         data = json_object(await self.generate(
                             REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + BRIEF_RULE + (character_note(state) if state else "")
+                            + (voice_note(state) if mode=='chat' else '')
                             + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
                             {"mode": mode, "同一会话近期消息": list(recent)[-6:],
                              "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
