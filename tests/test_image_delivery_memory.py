@@ -43,7 +43,7 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.images.stats['confirmed_images'],1);self.assertIn('content_hash',self.ledger.note(self.origin,self.cid))
         self.assertEqual(self.ledger.note(self.origin,'reset-cid'),'')
 
-    async def test_ocr_uncertainty_uses_only_actual_confirmed_original(self):
+    async def test_ocr_uncertainty_reuses_first_result_unless_recheck_is_explicit(self):
         attachment=await self.capture();await self.send(attachment)
         self.plugin._work.busy=lambda:False
         await self.images.learn(attachment['content_hash'],self.origin)
@@ -51,6 +51,9 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('无语',note);self.assertNotIn('看不清的猜测',note)
         e=event(text='你刚发的那张图上写了什么字')
         req=SimpleNamespace(conversation=SimpleNamespace(cid=self.cid),system_prompt='',image_urls=[])
+        await self.images.enrich(e,req)
+        self.assertEqual(req.image_urls,[]);self.assertIn('不猜缺字',req.system_prompt)
+        e.get_message_str=lambda:'重新识别刚才那张图上的文字'
         await self.images.enrich(e,req)
         self.assertEqual(len(req.image_urls),1);self.assertTrue(Path(req.image_urls[0]).is_file())
         req.conversation.cid='reset-cid';req.image_urls=[];await self.images.enrich(e,req)

@@ -39,6 +39,7 @@ FIELDS = {
     "context_window_enabled": False, "context_recent_turns": 12, "context_recent_tokens": 6000,
 }
 LEGACY_FIELDS=set(FIELDS)
+FIELDS['reply_review_enabled']=False
 FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
@@ -198,8 +199,21 @@ class PanelMixin:
             ("learning_action", self.learning_action_api, ["POST"]),
             ('learning_content', self.learning_content_api, ['GET']),
             ('meme_repository', self.meme_repository_api, ['GET','POST']),
+            ('panel_review_metrics',self.panel_review_metrics_api,['GET']),
+            ('meme_wiki',self.meme_wiki_api,['GET','POST']),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
+
+    async def meme_wiki_api(self):
+        from .wiki_panel import wiki_api
+        return await wiki_api(self)
+
+    async def panel_review_metrics_api(self):
+        from .review_metrics import review_metrics
+        data=await asyncio.to_thread(review_metrics,self._data_dir)
+        data['enabled']=self._cfg('reply_review_enabled',True)
+        data['policy']=self._cfg('review_policy','all')
+        return jsonify(status='ok',data=data)
 
     async def learning_content_api(self):
         learning = getattr(self, '_learning', None)

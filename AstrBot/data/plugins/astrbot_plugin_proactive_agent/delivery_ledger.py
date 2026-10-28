@@ -176,10 +176,19 @@ class DeliveryLedger:
         rows=self.recent(origin,cid)
         if not rows:return ''
         voice='；语音 transcript 是合成时的原文，无 transcript 的语音内容未知，不能拿生成稿补猜' if any(a.get('kind')=='record' for r in rows for a in r.get('attachments',[])) else ''
-        return '\n当前会话平台已确认发送的记录（仅表示发送成功，不表示对方已读；图片用途推断不是图片原文'+voice+'）：\n'+json.dumps([
+        assets={}
+        def compact(attachment):
+            info=self.image_details(attachment)
+            if info.get('kind')=='image' and info.get('content_hash'):
+                key=info['content_hash'];assets[key]=info
+                return {'kind':'image','content_hash':key}
+            return info
+        messages=[
             {'消息编号':r['message_id'],'时间':r['at'],'文字':r['text'] if not r.get('history_saved') else '',
              **({'发送形式':'语音'} if any(a.get('kind')=='record' for a in r.get('attachments',[])) else {}),
-             '附件':[self.image_details(a) for a in r.get('attachments',[])]} for r in rows],ensure_ascii=False)
+             '附件':[compact(a) for a in r.get('attachments',[])]} for r in rows]
+        return ('\n当前会话平台已确认发送的记录（仅表示发送成功，不表示对方已读；图片用途推断不是图片原文'+voice+'）：\n'
+                +json.dumps(messages,ensure_ascii=False)+ ('\n图片编号对应的首次识别资料（同图复用，不是再次识别）：'+json.dumps(assets,ensure_ascii=False) if assets else ''))
 
     def blocked_hashes(self,origin,cid):
         return {r.get('text_hash') for r in self.store.rows.values()

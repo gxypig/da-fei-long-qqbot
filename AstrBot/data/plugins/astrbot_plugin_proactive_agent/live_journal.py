@@ -77,11 +77,11 @@ class LiveJournal:
             self.error = type(exc).__name__
         self.task = asyncio.create_task(self._write(), name='qqbot-live-journal')
 
-    def add(self, origin, text, role, sender='', message_id=''):
+    def add(self, origin, text, role, sender='', message_id='', sender_id=''):
         if not text:
             return
         row = {'origin': ':'.join(canonical(origin)), 'text': text, 'role': role, 'sender': str(sender)[:100], 'time': time.time(),
-               'entry_id':uuid.uuid4().hex,'message_id':str(message_id),'delivery':'confirmed' if role=='assistant' else 'received'}
+               'entry_id':uuid.uuid4().hex,'message_id':str(message_id),'sender_id':str(sender_id),'delivery':'confirmed' if role=='assistant' else 'received'}
         self._remember(row)
         try:
             self.queue.put_nowait(row)
@@ -95,7 +95,7 @@ class LiveJournal:
         event.set_extra('qqbot_live_recorded', True)
         sender = str(event.get_sender_name() or event.get_sender_id())
         self.add(event.unified_msg_origin, text_parts(event.get_messages()) or event.get_message_str(), 'user', sender,
-                 getattr(getattr(event,'message_obj',None),'message_id',''))
+                 getattr(getattr(event,'message_obj',None),'message_id',''),event.get_sender_id())
 
     def history(self, origin):
         rows = self.rows.get(':'.join(canonical(origin)), ())

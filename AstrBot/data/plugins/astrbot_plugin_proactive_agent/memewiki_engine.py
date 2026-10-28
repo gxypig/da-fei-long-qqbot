@@ -152,3 +152,14 @@ class MemeWikiEngine:
     def status(self):
         return {**self.stats,'entries':len(self.titles),'upstream':UPSTREAM,'revision':REVISION,
                 'mode':'local_dictionary_and_idle_learning'}
+
+    def detail(self,phrase):
+        if not self.refresh():return None
+        title=self.titles.get(folded(phrase))
+        if not title:return None
+        try:
+            with closing(sqlite3.connect(self.path.as_uri()+'?mode=ro',uri=True)) as db:
+                db.row_factory=sqlite3.Row
+                row=db.execute('SELECT * FROM memes WHERE title=?',(title,)).fetchone()
+        except (OSError,sqlite3.Error):return None
+        return {k:plain_html(row[k])[:20000] for k in ('title','summary','origin','usage','other') if k in row.keys() and row[k]} if row else None

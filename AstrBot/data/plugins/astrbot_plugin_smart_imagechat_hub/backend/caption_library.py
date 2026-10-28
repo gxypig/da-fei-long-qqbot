@@ -193,6 +193,8 @@ class CaptionLibraryMixin:
 
                 if needs_caption and caption_mode == "blocking":
                     auto_tags = await self._caption_image(abs_path)
+                    semantic=getattr(auto_tags,'semantic',None)
+                    if semantic and semantic.get('content_hash')==digest:item['caption_semantic']=semantic
                     if not auto_tags:
                         auto_tags = self._normalize_caption_tags([], abs_path.name)
                     item["captioned_at"] = int(time.time())
@@ -1392,6 +1394,7 @@ class CaptionLibraryMixin:
                             auto_tags = await self._caption_image(abs_path)
                     else:
                         auto_tags = await self._caption_image(abs_path)
+                    caption_semantic=getattr(auto_tags,'semantic',None)
                     if not auto_tags:
                         auto_tags = self._normalize_caption_tags([], abs_path.name)
                     images = self._index.get("images", {})
@@ -1499,6 +1502,8 @@ class CaptionLibraryMixin:
                     )
                     if auto_tags and not generation_failed:
                         item["auto_tags"] = auto_tags
+                        if caption_semantic and caption_semantic.get('content_hash')==item.get('sha256'):
+                            item['caption_semantic']=caption_semantic
                         item["caption_status"] = "done"
                         item["captioned_at"] = int(time.time())
                         item["caption_prompt_version"] = CAPTION_PROMPT_VERSION

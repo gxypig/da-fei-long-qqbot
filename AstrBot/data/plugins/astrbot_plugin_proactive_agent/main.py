@@ -98,7 +98,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3',buffered=True)
         self._live_journal = LiveJournal(self._data_dir / 'live-messages.sqlite3')
         self._restore_live = self._restore_chat_lane = self._restore_context_window = None
-        self._reviewer = ReplyReviewer(self._generate_json, self._audit)
+        self._reviewer = ReplyReviewer(self._generate_json, self._audit, enabled=lambda:self._cfg('reply_review_enabled',True))
         from .memewiki_engine import MemeWikiEngine
         self._memory = MemeMemory(self._data_dir / "meme_memory.json", self._generate_json, self._search_meme, self._audit,
                                   wiki=MemeWikiEngine(self._data_dir/'memewiki'/'memes.db'))
@@ -147,8 +147,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             self._restore_images = install_image_compat()
         self._restore_context_window = install_context_window(self)
         self._restore_chat_lane = install_chat_lane(self._cfg, self._audit)
-        if self._cfg("reply_review_enabled", True):
-            self._restore_review = install_outbound_guard(self, self._reviewer)
+        self._restore_review = install_outbound_guard(self, self._reviewer)
         self._restore_route = install_route_guard(self)
         self._restore_group_wake = install_group_wake(self)
         self._restore_group_flow = install_group_flow(self._group_flow)
@@ -162,7 +161,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.18.1 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.19.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -187,7 +186,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         life=getattr(self,'_life',None)
         checks['proactive_life']=not self._cfg('proactive_life_enabled',True) or bool(life and life.task and not life.task.done() and life.store.snapshot()['worker_running'])
         checks['live_journal'] = bool(self._live_journal.task and not self._live_journal.task.done())
-        return jsonify({"status": "ok", "data": {"version": "1.18.1", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.19.0", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -196,7 +195,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             'delivery':self._delivery.health(),'targets':self._targets.snapshot()}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.18.1", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.19.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._cfg("reply_review_enabled", True) and self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -357,7 +356,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         scope = request_scope(origin)
         if scope:
             return scope["recent"]
-        return [x["text"] for x in self._recent_messages.get(origin, []) if time.time() - x["time"] < 7200][-6:]
+        from .speaker_context import recent_speakers
+        return recent_speakers([x for x in self._recent_messages.get(origin, []) if time.time()-x['time']<7200][-6:],':GroupMessage:' in origin)
 
     def review_mode(self, origin):
         scope = request_scope(origin)
@@ -835,11 +835,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                           for handler in (event.get_extra("activated_handlers") or [])
                           for f in handler.event_filters)
             rows.append({"time": time.time(), "text": text[:300], "management": command,
-                         "sender": str(event.get_sender_id()), "role": "user"})
+                         "sender": str(event.get_sender_id()), "name":str(getattr(event,'get_sender_name',lambda:'')() or '')[:64], "role": "user"})
             life=getattr(self,'_life',None)
             if life and not command:
                 life.observe(umo,str(getattr(event.message_obj,'message_id','')),text,str(event.get_sender_id()))
-            bind_request(umo, [r["text"] for r in rows if time.time() - r["time"] < 7200][-6:], rows[-1]["management"])
+            from .speaker_context import recent_speakers
+            bind_request(umo, recent_speakers([r for r in rows if time.time()-r['time']<7200][-6:],bool(getattr(event,'get_group_id',lambda:'')())),rows[-1]['management'])
             snapshot = [dict(r) for r in rows if time.time() - r["time"] < 7200]
             event.set_extra("qqbot_meme_recent", snapshot)
             if (not command and getattr(event, "is_at_or_wake_command", False)
@@ -932,6 +933,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if batch:
             req.prompt = ('同一发言人连续的几条话，请结合起来简短回复一次：\n'
                           + json.dumps(batch, ensure_ascii=False) + '\n当前最后一条：' + str(req.prompt or ''))
+        from .speaker_context import attribute_request
+        attribute_request(event,req,state)
         if hasattr(self, '_group_flow'):
             req.system_prompt = (req.system_prompt or '') + self._group_flow.note(event)
         req.system_prompt = (req.system_prompt or "") + "\n" + STYLE + "\n" + PUNCTUATION_RULE + character_note(state) + generation_note(state["visual_intent"])

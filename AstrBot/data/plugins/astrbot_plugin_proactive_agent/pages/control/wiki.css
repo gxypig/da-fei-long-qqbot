@@ -1,0 +1,16 @@
+/* Palette and panel treatment adapted from memewiki's MIT slang page. */
+.wiki-page{--wiki-border:#e5e7eb;--wiki-accent:#2563eb;--wiki-panel:#fff;--wiki-muted:#6b7280;--wiki-text:#1f2937;color:var(--wiki-text)}
+.wiki-summary{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;margin:12px 0}
+.wiki-toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.wiki-toolbar label:first-child{flex:1;min-width:180px}.wiki-toolbar label{margin:0}
+.wiki-page input:not([type=checkbox]),.wiki-page select,.wiki-page textarea{font:inherit;width:100%;background:var(--wiki-panel);color:var(--wiki-text);border:1px solid var(--wiki-border);border-radius:8px;padding:9px 11px}
+.wiki-page button{font:inherit;border:1px solid var(--wiki-border);background:var(--wiki-panel);color:var(--wiki-text);border-radius:8px;padding:8px 14px;cursor:pointer}
+.wiki-page button:hover{border-color:var(--wiki-accent)}.wiki-page button:disabled{opacity:.5;cursor:default}.wiki-page button.danger{color:#dc2626}
+#wiki-search,#wiki-save{background:var(--wiki-accent);border-color:var(--wiki-accent);color:#fff}
+.wiki-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.wiki-entry,#wiki-editor{border:1px solid var(--wiki-border);border-radius:10px;padding:16px;background:var(--wiki-panel);overflow-wrap:anywhere}
+.wiki-title{display:flex;align-items:center;justify-content:space-between;gap:10px}.wiki-title h3{font-size:18px;margin:0}.wiki-title span{font-size:12px;color:var(--wiki-muted);white-space:nowrap}.wiki-entry p{font-size:14px;line-height:1.65;white-space:pre-wrap}
+.wiki-actions,.wiki-pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.wiki-pager{justify-content:center;margin:20px 0}#wiki-editor label{display:block;margin:12px 0}#wiki-editor summary{font-weight:600;cursor:pointer}
+.wiki-credit{font-size:12px;color:var(--wiki-muted)}#wiki-detail{width:min(780px,94vw);max-height:85vh;border:1px solid var(--wiki-border);border-radius:12px;background:var(--wiki-panel);color:var(--wiki-text);padding:20px}#wiki-detail::backdrop{background:#0008}.wiki-detail-head{display:flex;justify-content:space-between;gap:15px;align-items:center}#wiki-detail-body{white-space:pre-wrap;overflow-wrap:anywhere}#wiki-detail-body a{display:block;color:var(--wiki-accent)}
+@media(max-width:650px){.wiki-list{grid-template-columns:1fr}.wiki-toolbar>*{flex:1 1 40%}.wiki-page button{min-height:40px}}
+@media(prefers-color-scheme:dark){.wiki-page{--wiki-border:#2a3446;--wiki-accent:#60a5fa;--wiki-panel:#171d2b;--wiki-muted:#9ca3af;--wiki-text:#e5e7eb}.wiki-summary{background:#17253e;border-color:#304a72}}
+
+.wiki-page .card{overflow-wrap:anywhere;min-width:0}.wiki-page input[type=file]{max-width:100%}

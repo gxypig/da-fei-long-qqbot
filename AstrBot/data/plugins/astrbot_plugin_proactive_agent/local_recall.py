@@ -1,11 +1,14 @@
 """Bounded text-only retrieval from the current conversation's original history."""
 import re
+import json
 import unicodedata
 
 STOP = re.compile(r'还记得|记不记得|能不能|之前|以前|上次|先前|昨天|前天|什么|怎么|多少|那个|这个|说过|说的|提过|告诉|remember|earlier|previous|yesterday', re.I)
 
 
 def terms(text):
+    text=re.sub(r'^\[群聊发言身份\] [^\n]*\n','',str(text))
+    text=re.sub(r'<system_reminder>.*?</system_reminder>','',text,flags=re.S)
     text = STOP.sub(' ', unicodedata.normalize('NFKC', str(text)).casefold())
     result = set(re.findall(r'[a-z0-9_]{2,}', text))
     for segment in re.findall(r'[\u4e00-\u9fff]+', text):
@@ -16,10 +19,18 @@ def terms(text):
 def retrieve(rounds, query, text_content, budget=2400):
     """No model, network, disk or cross-session state; chronological attributed extracts."""
     needles = terms(query[:800])
+    def speaker(body):
+        if not body.startswith('[群聊发言身份] '):return None
+        try:return json.loads(body.splitlines()[0].split(' ',1)[1]).get('QQ')
+        except (ValueError,AttributeError):return None
+    actor=speaker(query)
+    personal=actor and re.search(r'我(?:之前|以前|曾|说|提|养|的|喜欢|讨厌)|记得我',query)
     ranked = []
     for n, rnd in enumerate(rounds):
         # Do not copy base64/images/tool payloads into a text search index.
         bodies = [(m.get('role'), text_content(m)) for m in rnd if m.get('role') in {'user', 'assistant'}]
+        owner=next((speaker(body) for role,body in bodies if role=='user'),None)
+        if personal and owner and owner!=actor:continue
         score = sum(len(needles & terms(body)) for _, body in bodies)
         if score >= (1 if len(needles) <= 2 else 2):
             ranked.append((score, n, bodies))

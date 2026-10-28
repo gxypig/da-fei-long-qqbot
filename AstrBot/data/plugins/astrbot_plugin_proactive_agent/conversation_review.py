@@ -16,6 +16,7 @@ from .local_recall import BRIEF_RULE
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
 from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address, apology_repetition_issues
 from .voice_memory import voice_note,voice_issues
+from .speaker_context import speaker_note
 
 
 REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句话是否像正在 QQ 中随口聊天”，不只是正确、简短或礼貌。
@@ -131,12 +132,14 @@ class ReviewUnavailable(RuntimeError):
 
 
 class ReplyReviewer:
-    def __init__(self, generate, audit, timeout=55):
+    def __init__(self, generate, audit, timeout=55, enabled=lambda:True):
         self.generate, self.audit, self.timeout = generate, audit, timeout
+        self.enabled=enabled
         self.stats = {"checked": 0, "rewritten": 0, "failed": 0, "model_calls": 0, "guard_rejections": 0}
         self._slots = asyncio.Semaphore(3)
 
     async def review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None):
+        if not self.enabled():return text
         if not text.strip():
             return text
         started = time.monotonic()
@@ -146,6 +149,7 @@ class ReplyReviewer:
                 async with self._slots:
                     state = character if character is not None else (request_scope(origin) or {}).get("character", {})
                     candidate = casual_punctuation(limit_father_address(limit_emoji(text, state, mode), state, mode), mode)
+                    formatted=candidate
                     feedback = []
                     for attempt in range(3):
                         issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
@@ -159,6 +163,7 @@ class ReplyReviewer:
                         data = json_object(await self.generate(
                             REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + BRIEF_RULE + (character_note(state) if state else "")
                             + (voice_note(state) if mode=='chat' else '')
+                            + (speaker_note(state) if mode=='chat' else '')
                             + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
                             {"mode": mode, "同一会话近期消息": list(recent)[-6:],
                              "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
@@ -173,6 +178,7 @@ class ReplyReviewer:
                             self.stats["rewritten"] += int(candidate != text)
                             self.audit("review", {"status": "rewritten" if candidate != text else "passed",
                                 "rounds": attempt + 1, "mode": mode,
+                                "model_rewritten":candidate!=formatted,"format_changed":formatted!=text,
                                 "elapsed_ms": int((time.monotonic() - started) * 1000)})
                             return candidate
                         if issues:
@@ -199,7 +205,7 @@ class ReplyReviewer:
                     raise ValueError("Review did not converge")
         except Exception as exc:
             self.stats["failed"] += 1
-            self.audit("review", {"status": "blocked", "mode": mode, "error": type(exc).__name__})
+            self.audit("review", {"status": "blocked", "mode": mode, "error": type(exc).__name__,"elapsed_ms":int((time.monotonic()-started)*1000)})
             raise ReviewUnavailable("发送前审阅暂不可用，原稿未发送") from exc
 
 
@@ -230,6 +236,7 @@ class OutboundGuard:
         self.plugin, self.reviewer = plugin, reviewer
 
     async def prepare(self, action, params):
+        if not self.plugin._cfg('reply_review_enabled',True):return params
         base_action = action.removesuffix("_async")
         if base_action not in {"send_msg", "send_private_msg", "send_group_msg", "send_group_forward_msg",
                                "send_private_forward_msg", "send_forward_msg", "send_qzone_msg"}:

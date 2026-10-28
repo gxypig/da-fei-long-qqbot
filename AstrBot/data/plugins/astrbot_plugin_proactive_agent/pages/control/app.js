@@ -8,7 +8,7 @@
   const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
-  booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required');
+  booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
   numbers.push('learning_record_limit','learning_record_days','proactive_unanswered_limit','proactive_min_gap_minutes','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes');
   strings.push('group_ids','private_ids');
   const fieldValue=k=>booleans.includes(k)?$(k).checked:numbers.includes(k)?Number($(k).value):$(k).value;
@@ -312,7 +312,7 @@
   }));
   let memeOffset=0, memeTotal=0, memeLoading=false;
   function contentLine(parent,title,body){const d=document.createElement('p');const b=document.createElement('strong');b.textContent=title+'：';d.append(b,document.createTextNode(String(body??'—')));parent.append(d);}
-  async function loadMemes(){const serial=++memeRequest,requested=memeOffset;memeLoading=true;try{
+  async function loadMemes(){if(window.QQBotWiki)return window.QQBotWiki.refresh();const serial=++memeRequest,requested=memeOffset;memeLoading=true;try{
     const d=await api('meme_repository',undefined,{q:$('meme-search').value,offset:requested});if(serial!==memeRequest)return;memeOffset=d.offset??requested;memeTotal=d.total;$('meme-list').replaceChildren();
     for(const r of d.rows){const card=document.createElement('article');card.className='card';const h=document.createElement('h3');h.textContent=r.phrase;card.append(h);
       contentLine(card,'来源',r.provenance==='custom'?'管理员自定义，未联网核实':r.provenance==='memewiki'?'memewiki 主词库 · cnmeme.wiki 公开词条':r.fresh?'联网核实':'联网核实记录已过期，等待重新查证');
