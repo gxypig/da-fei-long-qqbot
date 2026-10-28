@@ -39,13 +39,14 @@ FIELDS = {
     "context_window_enabled": False, "context_recent_turns": 12, "context_recent_tokens": 6000,
 }
 LEGACY_FIELDS=set(FIELDS)
+FIELDS['counterattack_apology_enabled']=False
 FIELDS['reply_review_enabled']=False
 FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
 SECTIONS={
     'groups':{'group_flow_enabled','group_passive_max_age','chat_low_latency','group_chat_ids','group_chat_probability','group_wake_words','group_wake_anywhere','auto_quote_enabled'},
-    'character':{'father_qq','father_nickname','emoji_probability','father_address_probability','meme_separate_probability'},
+    'character':{'counterattack_apology_enabled','father_qq','father_nickname','emoji_probability','father_address_probability','meme_separate_probability'},
     'learning':{'idle_learning_enabled','style_learning_enabled','history_recall_enabled','meme_understanding_enabled','learning_record_limit','learning_record_days'},
     'proactive':{'enable','allow_group','allow_private','allow_qzone','interval_minutes','quiet_hours','discretionary_enabled',
         'fixed_messages_enabled','fixed_group_ids','fixed_private_ids','fixed_message_interval_minutes','fixed_message_random_enabled',

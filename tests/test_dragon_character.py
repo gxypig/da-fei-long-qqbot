@@ -46,9 +46,10 @@ class CharacterTests(unittest.TestCase):
 
     def test_counterattack_apology_then_rebound_is_per_sender(self):
         state = CharacterState()
-        self.assertEqual(state.for_message("g", "1", "你再嘴欠试试，揍你", {}.get)["mood"], "timid")
-        self.assertEqual(state.for_message("g", "2", "今天吃啥", {}.get)["mood"], "cheeky")
-        self.assertEqual(state.for_message("g", "1", "算你识相", {}.get)["mood"], "rebound")
+        cfg = {'counterattack_apology_enabled':True}.get
+        self.assertEqual(state.for_message("g", "1", "你再嘴欠试试，揍你", cfg)["mood"], "timid")
+        self.assertEqual(state.for_message("g", "2", "今天吃啥", cfg)["mood"], "cheeky")
+        self.assertEqual(state.for_message("g", "1", "算你识相", cfg)["mood"], "rebound")
         self.assertEqual(state.for_message("g", "1", "今天吃啥", {}.get)["mood"], "cheeky")
         self.assertEqual(state.for_message("g", "1", "不要再损我了", {}.get)["mood"], "stop")
         self.assertEqual(state.for_message("g", "1", "今天吃啥", {}.get)["mood"], "stop")

@@ -8,7 +8,7 @@
   const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
-  booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
+  booleans.push('counterattack_apology_enabled','proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
   numbers.push('learning_record_limit','learning_record_days','proactive_unanswered_limit','proactive_min_gap_minutes','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes');
   strings.push('group_ids','private_ids');
   const fieldValue=k=>booleans.includes(k)?$(k).checked:numbers.includes(k)?Number($(k).value):$(k).value;

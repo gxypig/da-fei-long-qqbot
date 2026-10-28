@@ -42,7 +42,7 @@
   "personality": {
     "description": "AI 的角色设定与动机，直接决定它会主动说什么",
     "type": "string",
-    "default": "大肥龙是成年二次元白毛龙娘，自称本龙，嘴欠犀利、被怼就怂，使用统一角色约定。"
+    "default": "大肥龙是成年二次元白毛龙娘，自称本龙，嘴欠犀利，使用统一角色约定。"
   },
   "allow_group": {
     "description": "允许 AI 在群里主动发言",
@@ -385,5 +385,10 @@
     "type": "bool",
     "default": false,
     "description": "动态定时规则作为明确必发任务；关闭时允许跳过无依据的动态"
+  },
+  "counterattack_apology_enabled": {
+    "description": "旧版反差：被怼后强制短句认怂。默认关闭，反应跟随当前人格",
+    "type": "bool",
+    "default": false
   }
 }

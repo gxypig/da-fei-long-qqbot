@@ -161,7 +161,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self.context.register_web_api("/astrbot_plugin_proactive_agent/review_preview", self.review_preview_api, ["POST"], "只预览发送前审阅，不发送")
         self._task = asyncio.create_task(self._loop(), name="proactive-agent")
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
-        self.logger.info("主动插件 v1.19.0 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v1.19.1 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
         checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
@@ -186,7 +186,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         life=getattr(self,'_life',None)
         checks['proactive_life']=not self._cfg('proactive_life_enabled',True) or bool(life and life.task and not life.task.done() and life.store.snapshot()['worker_running'])
         checks['live_journal'] = bool(self._live_journal.task and not self._live_journal.task.done())
-        return jsonify({"status": "ok", "data": {"version": "1.19.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": "1.19.1", "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -195,7 +195,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             'delivery':self._delivery.health(),'targets':self._targets.snapshot()}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.19.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._cfg("reply_review_enabled", True) and self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": "1.19.1", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._cfg("reply_review_enabled", True) and self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -935,10 +935,12 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                           + json.dumps(batch, ensure_ascii=False) + '\n当前最后一条：' + str(req.prompt or ''))
         from .speaker_context import attribute_request
         attribute_request(event,req,state)
+        from .persona_authority import bind_persona,PRIORITY
+        await bind_persona(self,event,req,state)
         if hasattr(self, '_group_flow'):
             req.system_prompt = (req.system_prompt or '') + self._group_flow.note(event)
         req.system_prompt = (req.system_prompt or "") + "\n" + STYLE + "\n" + PUNCTUATION_RULE + character_note(state) + generation_note(state["visual_intent"])
-        req.system_prompt += BRIEF_RULE
+        req.system_prompt += BRIEF_RULE + PRIORITY
         life=getattr(self,'_life',None)
         if life:req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())
         req.system_prompt += ('\n当前这一轮只回复真实发送者，群里其他成员的话是背景，不要把其他人的问题当成当前人的问题。'
