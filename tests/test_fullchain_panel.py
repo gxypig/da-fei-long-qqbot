@@ -45,6 +45,16 @@ class PanelContracts(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.post('/panel_fullchain_settings',json=body)).status_code,500)
         self.assertTrue(self.config['image_memory_enabled'])
 
+    async def test_partial_feature_updates_do_not_overwrite_other_editors(self):
+        before=await self.get('panel_fullchain_settings')
+        body={'values':{'ai_probe_enabled':True},'field_revisions':before['field_revisions']}
+        other={'values':{'image_memory_enabled':True},'field_revisions':before['field_revisions']}
+        self.assertEqual((await self.client.post('/panel_fullchain_settings',json=body)).status_code,200)
+        self.assertEqual((await self.client.post('/panel_fullchain_settings',json=other)).status_code,200)
+        self.assertTrue(self.config['ai_probe_enabled']);self.assertTrue(self.config['image_memory_enabled'])
+        self.assertEqual((await self.client.post('/panel_fullchain_settings',json=body)).status_code,409)
+        self.assertFalse(self.config['ai_profiles_enabled'])
+
     async def test_queue_conflicts_missing_body_unchanged_and_real_move(self):
         jobs=[self.queue.create(event(origin='p:GroupMessage:'+str(i),id_=str(i))) for i in range(3)]
         for job in jobs:self.queue.submit(job)

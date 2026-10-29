@@ -1,5 +1,6 @@
 """Authenticated projections of the one active scheduler; preview never mutates it."""
 import time
+import json
 from quart import jsonify,request
 from .fixed_schedule import plans,STATE_KEY
 
@@ -33,9 +34,8 @@ async def proactive_status(p):
             'next_at':max(entry.get('due',0),entry.get('retry_at',0)) or None,'time_label':'计划发送' if required else '下次检查',
             'status':entry.get('status','waiting') if available['available'] else 'unavailable',
             'reason':available['reason'] or entry.get('reason',''),'availability':available})
-    delivery=p._delivery.health();queue=p._reply_queue
-    delivery['reply_backlog']=len(queue.pending)
-    delivery['oldest_reply_wait_seconds']=max((queue.clock()-queue.jobs[id_].received for id_ in queue.pending),default=0)
+    from .health_projection import runtime_health
+    delivery=runtime_health(p)
     return {'enabled':p._cfg('enable',True),'quiet_now':p._quiet_now(),'scope':scopes,'rules':rules,
         'life':p._life.activity(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
         'pending_replies':len(p._reply_queue.pending),'delivery':delivery,
@@ -68,9 +68,16 @@ def register_round2_panel(plugin):
     async def summary():
         return jsonify(status='ok',data={'pending':len(plugin._reply_queue.pending),'running':len(plugin._reply_queue.active)})
     async def deliveries():
-        try:offset=max(0,int(request.args.get('offset',0)))
+        try:
+            offset=max(0,int(request.args.get('offset',0)))
+            before=json.loads(request.args['before']) if request.args.get('before') else None
+            if before is not None and (not isinstance(before,list) or len(before)!=2 or type(before[0]) not in (int,float) or not isinstance(before[1],str)):raise ValueError()
         except ValueError:return jsonify(status='error',message='页码错误'),400
-        rows=sorted((r for r in plugin._delivery.store.rows.values() if r.get('state') in {'confirmed','failed','unknown','sending'}),key=lambda r:r.get('at',0),reverse=True)
-        return jsonify(status='ok',data={'rows':rows[offset:offset+50],'total':len(rows),'offset':offset,'health':plugin._delivery.health()})
+        store=plugin._delivery.store
+        allkeys=store.select_ids(states={'confirmed','failed','unknown','sending','preparing','submitting'},reverse=True)
+        keys=[k for k in allkeys if before is None or (store.index[k].get('at') or 0,k)<tuple(before)]
+        page=keys[offset:offset+50];rows=await store.fetch(page)
+        cursor=[store.index[page[-1]].get('at') or 0,page[-1]] if len(keys)>offset+50 and page else None
+        return jsonify(status='ok',data={'rows':rows,'total':len(allkeys),'offset':offset,'next_cursor':cursor,'health':plugin._delivery.health()})
     for name,handler,methods in [('panel_proactive',status,['GET']),('panel_proactive_preview',preview,['POST']),('panel_image_memory',images,['GET','POST']),('panel_reply_summary',summary,['GET']),('panel_delivery',deliveries,['GET'])]:
         plugin.context.register_web_api('/astrbot_plugin_proactive_agent/'+name,handler,methods,'第二轮控制面板')

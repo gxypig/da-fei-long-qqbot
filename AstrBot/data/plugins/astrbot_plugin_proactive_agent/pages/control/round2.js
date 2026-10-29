@@ -3,7 +3,7 @@
   'use strict';
   const $=id=>document.getElementById(id),el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
   const nav=document.querySelector('nav');
-  const labels={groups:'群聊',proactive:'主动消息',character:'龙娘设定',learning:'学习与记忆','ai-profiles':'AI 识别',performance:'运行',health:'健康报告'};
+  const labels={groups:'会话管理',proactive:'主动消息',character:'龙娘设定',learning:'学习与记忆','ai-profiles':'AI 识别',performance:'运行',health:'健康报告'};
   for(const button of [...nav.children]){if(!labels[button.dataset.tab])button.remove();else button.textContent=labels[button.dataset.tab];}
   for(const id of Object.keys(labels))nav.append(nav.querySelector(`[data-tab="${id}"]`));
   const controls=el('div');controls.className='top-tools';
@@ -27,7 +27,11 @@
   const queuePager=el('div');queuePager.className='pager';for(const id of ['queue-prev','queue-page','queue-next'])queuePager.append($(id));$('queue-pending').before(queuePager);
   const delivery=el('div');delivery.id='delivery-view';delivery.append(el('h2','投递记录'),el('p','确认成功、明确失败和结果未知分别统计；后台存活不代表消息送达'));
   button(delivery,'delivery-refresh','刷新投递记录',()=>loadDelivery());const deliveryList=el('div');deliveryList.id='delivery-list';delivery.append(deliveryList);$('performance').append(delivery);
-  const showRun=subviews($('performance'),'speed',[['speed','速度与审查',speed],['queue','回复队列',queue],['delivery','投递记录',delivery]]);
+  const deliveryPager=el('div');deliveryPager.className='pager';deliveryList.before(deliveryPager);
+  const deliveryPrev=button(deliveryPager,'delivery-prev','上一页',()=>{if(deliveryCursors.length>1)loadDelivery(deliveryCursors.slice(0,-1));});
+  const deliveryPage=el('span');deliveryPager.append(deliveryPage);
+  const deliveryNext=button(deliveryPager,'delivery-next','下一页',()=>{if(deliveryNextCursor)loadDelivery([...deliveryCursors,deliveryNextCursor]);});
+  const showRun=subviews($('performance'),'queue',[['queue','回复队列',queue],['speed','速度与审查',speed],['delivery','投递记录',delivery]]);
   pending.onclick=()=>{nav.querySelector('[data-tab="performance"]').click();showRun('queue');};
   const idle=el('div');while($('learning').firstChild)idle.append($('learning').firstChild);$('learning').append(idle);
   const memes=$('memes');memes.classList.remove('tab-panel');$('learning').append(memes);
@@ -79,8 +83,8 @@
   for(const id of ['performance-database-pool','performance-delivery-storage','performance-audit-storage','performance-timing-window']){
     const n=$(id);if(n){const card=n.closest('article');if(card){const d=el('details');d.append(el('summary',card.querySelector('h2,h3')?.textContent||'底层诊断'));card.before(d);d.append(card);}}}
   function openEditor(mode){free.hidden=mode!=='free';fixed.hidden=mode==='free';if(!editor.open)editor.showModal();}
-  let bridge,state,serial=0,timer,ready=false;
-  const visible=id=>!document.hidden&&!$(id).closest('[hidden]');
+  let bridge,state,serial=0,timer,ready=false,deliverySerial=0,deliveryCursors=[null],deliveryNextCursor=null;
+  const visible=id=>(!document.hidden&&!window.QQBotSubviewActive)&&!$(id).closest('[hidden]');
   async function api(name,body,params){const result=await(body===undefined?bridge.apiGet(name,params):bridge.apiPost(name,body));if(result.status==='error')throw new Error(result.message);return result.data??result;}
   function line(parent,label,value){const p=el('p'),b=el('strong',label+'：');p.append(b,document.createTextNode(String(value??'—')));parent.append(p);}
   function health(d){healthDelivery.replaceChildren(el('h2','最近24小时的真实投递'));
@@ -88,6 +92,9 @@
     line(healthDelivery,'当前连续失败目标',d.current_faults.length);line(healthDelivery,'最老发送中记录',d.oldest_pending_at?new Date(d.oldest_pending_at*1000).toLocaleString():'无');
     for(const t of d.current_faults)line(healthDelivery,t.origin,`连续失败${t.consecutive_failures}次；恢复检查 ${new Date(t.pause_until*1000).toLocaleString()}`);
     line(healthDelivery,'历史失败记录',d.historical_failures+'（不等于当前故障）');
+    if(d.necessary_counts)line(healthDelivery,'必要回复成功 / 失败 / 未知',`${d.necessary_counts.confirmed} / ${d.necessary_counts.failed} / ${d.necessary_counts.unknown}`);
+    for(const r of d.unresolved_necessary||[])line(healthDelivery,'尚待解决',`${r.origin} · ${r.state==='unknown'?'回执未知，不自动重发':'必要回复失败'} · ${new Date((r.result_at||r.at)*1000).toLocaleString()}`);
+    if(d.backup)line(healthDelivery,'数据备份',`${d.backup.enabled?'开启':'关闭'} · ${{waiting:'等待首次空闲',running:'备份中',ready:'最近备份成功',deferred:'为聊天延期',failed:'备份失败',not_started:'尚未启动'}[d.backup.status]||d.backup.status}${d.backup.last_success?' · '+new Date(d.backup.last_success*1000).toLocaleString():''}${d.backup.error?' · '+d.backup.error:''}`);
     if(d.reply_backlog!==undefined)line(healthDelivery,'待回复 / 最老等待',`${d.reply_backlog} 条 / ${Math.round(d.oldest_reply_wait_seconds||0)} 秒`);
     line(healthDelivery,'等待落盘',d.persistence?.pending??0);line(healthDelivery,'最近持久化恢复',d.persistence?.recovered_at?new Date(d.persistence.recovered_at*1000).toLocaleString():'没有历史恢复记录');}
   async function loadProactive(){if(!ready)return;const request=++serial;try{const d=await api('panel_proactive');if(request!==serial)return;state=d;
@@ -114,13 +121,16 @@
     for(const r of d.failed_tasks||[])line(imageList,'失败，可重试',r.error+' · '+r.id);
     for(const r of d.rows||[]){const a=el('article');a.className='card';line(a,'图片内容',r.semantic?.description||'尚未识别，保持未知');line(a,'原文',JSON.stringify(r.semantic?.ocr||[]));line(a,'情绪',r.semantic?.emotion?.join('、'));line(a,'推测用途',r.semantic?.inferred_usage?.join('、'));imageList.append(a);}
   }catch(e){imageList.textContent=e.message;}}
-  async function loadDelivery(){try{const d=await api('panel_delivery');deliveryList.replaceChildren();health(d.health);for(const r of d.rows){const a=el('article');a.className='compact-row';line(a,r.origin,`${r.state} · ${new Date(r.at*1000).toLocaleString()}`);line(a,'实际正文',r.text||'附件');if(r.reason)line(a,'原因',r.reason);deliveryList.append(a);}}catch(e){deliveryList.textContent=e.message;}}
+  async function loadDelivery(cursors=[null]){const request=++deliverySerial;deliveryPrev.disabled=deliveryNext.disabled=true;try{const before=cursors.at(-1),d=await api('panel_delivery',undefined,before?{before:JSON.stringify(before)}:{});if(request!==deliverySerial)return;
+    deliveryCursors=cursors;deliveryNextCursor=d.next_cursor;deliveryPage.textContent=`第 ${cursors.length} 页 · 共 ${d.total||0} 条持久记录`;
+    deliveryList.replaceChildren();health(d.health);for(const r of d.rows){const a=el('article');a.className='compact-row';line(a,r.origin,`${({confirmed:'确认成功',failed:'明确失败',unknown:'结果未知',sending:'等待回执',preparing:'发送准备',submitting:'准备提交'}[r.state]||r.state)} · ${new Date(r.at*1000).toLocaleString()}`);line(a,'实际正文',r.text||'附件');if(r.reason)line(a,'原因',r.reason);deliveryList.append(a);}
+  }catch(e){if(request===deliverySerial)deliveryPage.textContent='读取失败，仍保留原页：'+e.message;}finally{if(request===deliverySerial){deliveryPrev.disabled=deliveryCursors.length===1;deliveryNext.disabled=!deliveryNextCursor;}}}
   document.addEventListener('qqbot:view',e=>{if(e.detail==='images')loadImages();if(e.detail==='delivery')loadDelivery();});
   nav.addEventListener('click',e=>{if(['proactive','health'].includes(e.target.dataset.tab))loadProactive();queueMicrotask(()=>{
     if(['learning','performance'].includes(e.target.dataset.tab)){const root=$(e.target.dataset.tab),view=[...root.querySelectorAll('[data-subview]')].find(n=>!n.hidden);if(view)$('save-bar').hidden=!['idle','speed'].includes(view.dataset.subview);}
   });});
-  async function poll(){clearTimeout(timer);if(ready&&!document.hidden){try{const d=await api('panel_reply_summary');pending.textContent=`待回复 ${d.pending} 条`;}catch{pending.textContent='队列状态待连接';}}if(!document.hidden)timer=setTimeout(poll,10000);}
-  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);if(!document.hidden)poll();});
+  async function poll(){clearTimeout(timer);if(ready&&(!document.hidden&&!window.QQBotSubviewActive)){try{const d=await api('panel_reply_summary');pending.textContent=`待回复 ${d.pending} 条`;}catch{pending.textContent='队列状态待连接';}}if((!document.hidden&&!window.QQBotSubviewActive))timer=setTimeout(poll,10000);}
+  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);if((!document.hidden&&!window.QQBotSubviewActive))poll();});
   bridge=window.AstrBotPluginView||window.AstrBotPluginPage;
   if(bridge)bridge.ready().then(()=>{ready=true;poll();if(visible('proactive'))loadProactive();});
 })();

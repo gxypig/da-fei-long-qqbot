@@ -85,16 +85,6 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             target_id, target_name = min(targets, key=priority)
             umo = f"{platform}:{kind}:{target_id}"
             recent = [x for x in plugin._recent_messages.get(umo, []) if now - x["time"] < 7200][-8:]
-        cfg = plugin.context.get_config(umo=umo or None)
-        persona_id = cfg.get("agent_runner", {}).get("config", {}).get("persona", {}).get("persona_id")
-        persona_text = ""
-        try:
-            persona = plugin.context.persona_manager.get_persona_v3_by_id(persona_id)
-            persona_text = getattr(persona, "prompt", "") or getattr(persona, "system_prompt", "")
-            if isinstance(persona, dict):
-                persona_text = persona.get("prompt", persona.get("system_prompt", ""))
-        except (AttributeError, TypeError):
-            pass
         system = (
             "你负责决定 QQ 机器人的一次主动互动。你可以选择行动或 none，但不必等紧急事件："
             "自然的问候、接近期话题、分享一个游戏/动漫/科技小观察，都是合理理由。"
@@ -106,12 +96,14 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             "动态只能写原创的公开小感想，不得引用、暗示或搬运任何人的私聊、群聊内容。"
             "只输出 JSON：{\"action\":\"none或指定渠道\",\"target_id\":\"指定目标或空\","
             "\"content\":\"简短正文\",\"images\":[],\"reason\":\"理由\"}。\n"
-            + (persona_text or plugin._cfg("personality", "")) + "\n" + STYLE
+
         )
         # Only show action summaries for this lane/target; never transplant private text.
         recent_actions = await plugin.get_kv_data("proactive_recent_content", {})
         recent_actions = recent_actions if isinstance(recent_actions, dict) else {}
         scope = umo or "qzone"
+        mutes=getattr(plugin,'_mutes',None)
+        mute_epoch=mutes.capture(scope) if mutes and scope!='qzone' else None
         topic_index = int(state.get("topic_cursor", 0)) % len(TOPICS)
         payload = {
             "现在": datetime.now().strftime("%Y-%m-%d %H:%M"), "触发": trigger,
@@ -122,9 +114,9 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             "本目标近期主动正文（语义也不能重复，换几个字不算）": variety(plugin).history(scope),
             "提示": "这是主动开启话题，不是在回复一条新消息。旧消息只作兴趣参考；超过10分钟的旧话题需要自然交代缘由，不能突然像刚被对方提问一样接话。不要捏造对方刚说了什么。动态一两句，私聊别像调查问卷。",
         }
-        from .dragon_character import proactive_note
-        system += proactive_note(scope, plugin._cfg, [x["text"][:200] for x in recent])
         cid = None if lane == 'qzone' else await conversation_id(plugin, scope)
+        from .life_state import role_context
+        system += await role_context(plugin,scope,[x['text'][:200] for x in recent],cid)
         provider = await plugin.context.get_using_provider_async(umo=umo or None)
         if provider is None:
             return "没有可用的对话模型。"
@@ -160,6 +152,7 @@ async def decide(plugin, trigger: str, force: bool = False, dry_run: bool = Fals
             if allowed and target_id not in allowed:
                 return "生成期间目标已被移出白名单，取消发送。"
         async def final_delivery_check():
+            if mutes and scope!='qzone':mutes.check(scope,mute_epoch)
             if not force and (not plugin._cfg("enable", True) or plugin._quiet_now()):
                 raise RuntimeError("审阅期间已关闭主动行为或进入免打扰，未发送")
             if not plugin._cfg({"group": "allow_group", "private": "allow_private", "qzone": "allow_qzone"}[lane], False):

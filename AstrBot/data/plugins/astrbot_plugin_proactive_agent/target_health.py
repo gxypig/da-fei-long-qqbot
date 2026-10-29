@@ -40,6 +40,9 @@ class TargetHealth:
 
     def status(self,origin):
         if origin=='qzone':return {'available':True,'reason':'','checked_at':self.checked}
+        mutes=getattr(self.plugin,'_mutes',None)
+        if mutes and mutes.status(origin)['muted']:
+            return {'available':False,'reason':'会话静默，等待恢复；不补发期间任务','origin':origin,'resume_at':mutes.status(origin).get('until')}
         try:_,kind,uid=origin.split(':',2)
         except ValueError:return {'available':False,'reason':'无效目标地址'}
         circuit=self.circuit(origin);pause=circuit.get('pause_until',0)

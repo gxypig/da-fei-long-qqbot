@@ -25,12 +25,29 @@ def install_fullchain(plugin):
     from astrbot.core.pipeline.process_stage.stage import ProcessStage
     from astrbot.core.pipeline.process_stage.method.agent_request import AgentRequestSubStage
     from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
+    from astrbot.core.utils.session_waiter import SessionWaiter
+    from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
     from .chain_metrics import operation,stage as metric_stage,add as metric_add
     queue=plugin._reply_queue;ledger=plugin._delivery
     old_convert=AiocqhttpAdapter.convert_message;old_execute=PipelineScheduler.execute
     old_process=ProcessStage.process;old_action=CQHttp.call_action
     old_agent=AgentRequestSubStage.process
     old_tool=FunctionToolExecutor.execute;tool_descriptor=FunctionToolExecutor.__dict__['execute']
+    old_wait=SessionWaiter.register_wait;old_error=InternalAgentSubStage._send_llm_error_message
+
+    async def register_wait(waiter,handler,timeout=30):
+        job=current_job.get()
+        if lease.active and job and getattr(job,'admission',None)=='empty_mention_reply':
+            queue.finish(job,ledger.state(job),'awaiting_new_input_without_execution_slot')
+        return await old_wait(waiter,handler,timeout)
+
+    async def error_message(stage,event,message):
+        if not lease.active:return await old_error(stage,event,message)
+        from .delivery_ledger import delivery_purpose
+        job=current_job.get()
+        if lease.active and job:job.execution_result='failed';job.reply_purpose='error_notification'
+        with delivery_purpose('error_notification'):
+            return await old_error(stage,event,message)
 
     async def tool_execute(cls,tool,run_context,**arguments):
         if not lease.active:
@@ -38,7 +55,12 @@ def install_fullchain(plugin):
             return
         metric_stage('tool');started=time.monotonic();iterator=old_tool(tool,run_context,**arguments)
         try:
-            async for result in iterator:yield result
+            while True:
+                try:
+                    async with queue.parked(current_job.get(),'等待工具返回'):
+                        result=await anext(iterator)
+                except StopAsyncIteration:break
+                yield result
         finally:
             try:await iterator.aclose()
             finally:metric_add('tool_ms',(time.monotonic()-started)*1000)
@@ -52,6 +74,8 @@ def install_fullchain(plugin):
         group=event.get('group_id');sender=str(event.get('user_id',''))
         origin=f"{platform}:{'GroupMessage' if group else 'FriendMessage'}:{group or sender}"
         job=ReplyJob(origin,sender,str(event.get('message_id','')),str(event.get('raw_message','')))
+        mutes=getattr(plugin,'_mutes',None)
+        if mutes:job.mute_epoch=mutes.epoch(origin)
         queue.jobs[job.id]=job;job.queue=queue;token=_conversion.set(job);started=time.monotonic()
         try:
             message=await old_convert(adapter,event)
@@ -83,20 +107,29 @@ def install_fullchain(plugin):
         if event.get_platform_id()!=plugin._cfg('platform_id','aiocqhttp'):
             return await old_execute(scheduler,event)
         job=getattr(getattr(event,'message_obj',None),'_qqbot_ingress_job',None)
-        if job is None:job=queue.create(event)
+        if job is None or job.state in TERMINAL or job.event is not None and job.event is not event:
+            job=queue.create(event,received=job.received if job else None)
         else:
             job.event=event;job.origin=event.unified_msg_origin;job.text=event.get_message_str() or ''
             job.sources[0]['text']=job.text;event.set_extra('qqbot_reply_job',job)
         job.owner=asyncio.current_task()
         event.set_extra('qqbot_received_at',job.received)
         token=current_job.set(job)
+        from .persona_authority import begin_task,end_task
+        persona_token=begin_task()
         try:return await old_execute(scheduler,event)
         except asyncio.CancelledError:
+            job.execution_result='cancelled'
             queue.finish(job,ledger.state(job) if job.sends else 'cancelled','execution_cancelled');raise
         except Exception as exc:
+            job.execution_result='failed'
             queue.finish(job,ledger.state(job) if job.sends else 'failed',type(exc).__name__);raise
         finally:
             if job.state not in TERMINAL:queue.finish(job,ledger.state(job),'pipeline_completed' if job.sends else 'filtered_or_no_reply')
+            usage=getattr(plugin,'_meme_usage',None)
+            if usage:
+                try:usage.finished(event,job.state)
+                except Exception as exc:plugin.logger.warning('梗使用过程记录未完成：%s',type(exc).__name__)
             profiles=getattr(plugin,'_ai_profiles',None)
             if profiles:profiles.end_turn(event.get_extra('qqbot_ai_probe'))
             learning=getattr(plugin,'_learning',None)
@@ -105,12 +138,19 @@ def install_fullchain(plugin):
                 except Exception as exc:plugin._audit('learning_ingress',{'status':'failed','error':type(exc).__name__})
             plugin._audit('reply_job_end',{'job_id':job.id,'state':job.state,'reason':job.reason,
                 'admission':getattr(job,'admission',None),
+                'execution_result':job.execution_result,'delivery_result':job.delivery_result,'reply_purpose':job.reply_purpose,
                 'elapsed_ms':round((time.monotonic()-job.received)*1000),
                 'stages_ms':{k:round(v,2) for k,v in job.timings.items() if k.endswith('_ms')}})
             current_job.reset(token)
+            end_task(persona_token)
 
     @asynccontextmanager
     async def admit(event,job,reason):
+        mutes=getattr(plugin,'_mutes',None)
+        if mutes:
+            try:mutes.check(job.origin,job.mute_epoch)
+            except ReplyCancelled:
+                queue.finish(job,'cancelled','会话静默，未进入执行队列');event.stop_event();yield False;return
         command=is_command(event)
         work=getattr(plugin,'_work',None)
         with work.reply_work(event) if work else nullcontext():
@@ -130,6 +170,7 @@ def install_fullchain(plugin):
                     queue.finish(job,'cancelled','service_shutdown');event.stop_event();yield False;return
                 job.state='running';job.stage='preparing';job.timings['started']=time.monotonic()
                 queue.active[job.id]=job
+                queue.inflight[job.id]=job
             job.timings['reply_queue_ms']=(time.monotonic()-entered)*1000
             manager=getattr(plugin.context,'conversation_manager',None)
             async with asyncio.timeout(5):
@@ -149,6 +190,17 @@ def install_fullchain(plugin):
         profiles=getattr(plugin,'_ai_profiles',None)
         if job and profiles and str(event.get_sender_id())!=str(event.get_self_id()):
             profiles.observe(event.get_platform_id(),str(event.get_sender_id()),job.text,job.origin,job.source_id)
+        mutes=getattr(plugin,'_mutes',None)
+        if job and mutes:
+            try:mutes.check(job.origin,job.mute_epoch)
+            except ReplyCancelled:
+                # Preserve known read/learning observers without running command
+                # handlers or generating a response merely to suppress it later.
+                await plugin.track_session(event)
+                learning=getattr(plugin,'_learning',None)
+                if learning and not is_command(event):
+                    learning.enqueue_meme(job.text,[r.get('text','') for r in (event.get_extra('qqbot_meme_recent') or [])],job.origin)
+                queue.finish(job,'cancelled','会话静默：已记录输入，无回复任务');event.stop_event();return
         reason=initial_admission(stage,event)
         if not job or not reason:
             # Preserve journal, group context, learning and plugin callbacks.
@@ -171,6 +223,7 @@ def install_fullchain(plugin):
 
     patches=[(AiocqhttpAdapter,'convert_message',convert,old_convert),(PipelineScheduler,'execute',execute,old_execute),
              (ProcessStage,'process',process,old_process),(AgentRequestSubStage,'process',agent,old_agent),
+             (SessionWaiter,'register_wait',register_wait,old_wait),(InternalAgentSubStage,'_send_llm_error_message',error_message,old_error),
              (CQHttp,'call_action',action,old_action)]
     wrapped_tool=classmethod(tool_execute);FunctionToolExecutor.execute=wrapped_tool
     for cls,name,wrapper,_ in patches:setattr(cls,name,wrapper)

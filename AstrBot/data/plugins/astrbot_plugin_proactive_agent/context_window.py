@@ -157,6 +157,8 @@ class ContextWindow:
     def __init__(self, path, cfg, busy=lambda: False, audit=lambda *_: None):
         self.path, self.cfg, self.busy, self.audit = Path(path), cfg, busy, audit
         self.cache, self.jobs, self.task = {}, {}, None
+        from .context_prepare import ContextPrepare
+        self.preparation=ContextPrepare()
         self.closed = False
         self._io = None
         self.stats = {'projected': 0, 'recall_full': 0, 'summary_used': 0,
@@ -176,16 +178,28 @@ class ContextWindow:
     def enabled(self):
         return not self.closed and self.cfg('context_window_enabled', False)
 
-    def project(self, provider, payload, conversation_id):
+    async def prepare(self,provider,payload,conversation_id):
+        if not self.enabled() or not conversation_id:return payload
+        from .reply_jobs import current_job
+        from .persona_authority import current_binding
+        job=current_job.get();binding=current_binding() or {}
+        policy=tuple(self.cfg(k,d) for k,d in [('context_recent_turns',20),('context_recent_tokens',10000),
+            ('adaptive_context_enabled',False),('history_recall_enabled',True)])
+        summary=self.cache.get(hashlib.sha256(str(conversation_id).encode()).hexdigest(),{})
+        scope=(str(conversation_id),getattr(job,'origin',None),getattr(job,'session_epoch',None),
+               repr(policy),binding.get('persona_id'),binding.get('persona_version'),summary.get('updated'),summary.get('fingerprint'))
+        return await self.preparation.prepare(payload,scope,lambda prepared:self.project(provider,payload,conversation_id,prepared))
+
+    def project(self, provider, payload, conversation_id,prepared=None):
         if not self.enabled() or not conversation_id:
             return payload
         messages = payload.get('messages')
         if not isinstance(messages, list) or not all(isinstance(m,dict) for m in messages):
             return payload
         try:
-            split = split_rounds(messages)
+            split = prepared[0] if prepared is not None else split_rounds(messages)
             # Unknown provider objects and cyclic values must not break foreground requests.
-            json.dumps(messages, ensure_ascii=False, allow_nan=False)
+            if prepared is None:json.dumps(messages, ensure_ascii=False, allow_nan=False)
         except (TypeError, ValueError, RecursionError):
             return payload
         if split is None:
@@ -203,14 +217,13 @@ class ContextWindow:
             self.stats['recall_full'] += 1
             return payload
         try:
-            keep = max(4, min(40, int(self.cfg('context_recent_turns', 12))))
-            budget = max(2000, min(16000, int(self.cfg('context_recent_tokens', 6000))))
-            if adaptive and casual_view(rounds,recall_query):keep=min(keep,12);budget=min(budget,6000)
+            keep = max(4, min(40, int(self.cfg('context_recent_turns', 20))))
+            budget = max(2000, min(16000, int(self.cfg('context_recent_tokens', 10000))))
         except (TypeError, ValueError, OverflowError):
             return payload
         cut, used = len(rounds), 0
-        for rnd in reversed(rounds):
-            cost = estimate(rnd)
+        for index in range(len(rounds)-1,-1,-1):
+            rnd=rounds[index];cost=prepared[1][index] if prepared is not None else estimate(rnd)
             kept = len(rounds) - cut
             if kept >= 4 and (kept >= keep or used + cost > budget):
                 break
@@ -337,6 +350,7 @@ class ContextWindow:
 
     def deactivate(self):
         self.closed = True
+        self.preparation.clear()
         if self.task and not self.task.done():
             self.task.cancel()
         self.jobs.clear()
@@ -357,11 +371,11 @@ def install_context_window(plugin):
     previous, previous_stream = ProviderOpenAIOfficial._query, ProviderOpenAIOfficial._query_stream
 
     async def query(provider, payloads, tools, **kwargs):
-        projected = window.project(provider, payloads, kwargs.get('conversation_id'))
+        projected = await window.prepare(provider, payloads, kwargs.get('conversation_id'))
         return await previous(provider, projected, tools, **kwargs)
 
     async def query_stream(provider, payloads, tools, **kwargs):
-        projected = window.project(provider, payloads, kwargs.get('conversation_id'))
+        projected = await window.prepare(provider, payloads, kwargs.get('conversation_id'))
         async for response in previous_stream(provider, projected, tools, **kwargs):
             yield response
 

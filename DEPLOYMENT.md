@@ -205,17 +205,22 @@ docker compose logs --tail=100 astrbot
 docker compose exec astrbot python manage.py deep
 ```
 
-镜像以 Python 3.12 构建，从 PyPI 安装固定 AstrBot 版本，不包含 QQ/SnowLuma 或模型反代。第一次启动根据设置生成配置，两插件随镜像装入持久卷。后续启动不会重置运行配置。更新镜像时会更新仓库自带的插件源码，因此改过插件的人应先备份并保存自己的补丁。
+镜像以 Python 3.12 构建，从 PyPI 安装固定 AstrBot 版本，不包含 QQ/SnowLuma 或模型反代。第一次启动根据设置生成配置，三个插件随镜像装入持久卷。后续启动不会重置运行配置。更新镜像时会更新仓库自带的插件源码，因此改过插件的人应先备份并保存自己的补丁。
 
 Compose 仅把 6185、6199 映射到宿主机回环地址；容器内部监听 0.0.0.0 是为了端口映射，不等于把端口开放到公网。QQ 端在同一宿主机时连接宿主 `127.0.0.1:6199/ws`；QQ 在另一台电脑时使用上一节隧道。
 
 **容器里的 `127.0.0.1` 是容器本身。** 若 API 在宿主机本地，不能直接填宿主回环地址；需要选择容器可访问的私网地址及受限防火墙规则，或 Docker 提供的宿主网关机制。远程 HTTPS API 不受此问题影响。
 
+停止或重建前先确认排空与持久化成功：
+
 ```bash
+docker compose exec astrbot python manage.py drain
+# 仅在上一条成功且 drained、durable 均为 true 时继续
 docker compose stop
 docker compose start
-docker compose down
 ```
+
+需要移除容器时同样先成功排空，再执行`docker compose down`。排空超时或失败就中止停止操作，检查积压与回执；不要靠Docker的强制结束期限代替落盘确认。
 
 `down` 不加 `-v` 保留命名卷。**不要运行 `down -v`，它会删除聊天记录、配置和图库所在的数据卷。** 用 Docker 的 stop/start 管服务，避免在停止后又在容器内运行 start 产生多个守护。
 

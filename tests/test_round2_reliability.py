@@ -156,11 +156,16 @@ class TransportBoundary(unittest.IsolatedAsyncioTestCase):
             finally:restore()
         transport.assert_not_awaited()
 
-    async def test_inflight_unload_does_not_touch_closed_store_after_response(self):
+    async def test_inflight_unload_requires_receipt_before_closing_store(self):
         entered=asyncio.Event();release=asyncio.Event()
         async def transport(*a,**k):entered.set();await release.wait();return {'message_id':1}
         with patch.object(CQHttp,'call_action',transport):
             restore=install_delivery_transport(self.plugin)
             sending=asyncio.create_task(CQHttp.call_action(self.bot,'send_private_msg',user_id=1,message='already submitted'))
-            await entered.wait();restore();await self.ledger.close();release.set()
+            await entered.wait();restore()
+            with self.assertRaises(RuntimeError):await self.ledger.close(timeout=.01)
+            self.assertFalse(self.ledger.store.closed)
+            release.set()
             self.assertEqual(await sending,{'message_id':1})
+            await self.ledger.close()
+            self.assertTrue(self.ledger.store.closed)

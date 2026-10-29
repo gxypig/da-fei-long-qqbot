@@ -1,8 +1,8 @@
 # 大肥龙提示词位置索引
 
-AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天还会叠加插件规则、角色状态、记忆和工具说明；发送前审阅、表情选择、标签、主动消息及空闲学习有各自的提示词。双击根目录“一键打开性格提示词.bat”可打开人格、插件配置、学习/审阅面板及相关源码；新找到的数据库保存人设也在“人格”入口。使用方法见“性格提示词修改指南.md”。1.19.1起生成和审阅共用当前会话人格，插件默认补充不覆盖管理员的人格修改；旧版被怼强制认怂默认关闭，在龙娘设定中显式启用。
+AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天还会叠加插件规则、角色状态、记忆和工具说明；发送前审阅、表情选择、标签、主动消息及空闲学习有各自的提示词。双击根目录“一键打开性格提示词.bat”可打开人格、插件配置、学习/审阅面板及相关源码；新找到的数据库保存人设也在“人格”入口。使用方法见“性格提示词修改指南.md”。1.20起在“龙娘设定 → 打开人格编辑器”集中整理、编辑并同步。生效版本包含总设定及各用途补充；普通聊天不调用模型重新编译人格。被反击强制认怂功能已完整移除。
 
-适用范围：主动插件1.19.1、图库插件v2.8.6的本仓库扩展、B站插件1.2.2，以及AstrBot4.29.1。索引列出本项目可见的提示来源和组装入口，不包含云端模型服务自行添加、无法从本地读取的系统指令。私人部署的人格和审阅文案可与公开模板不同。
+适用范围：主动插件1.20.0、图库插件v2.8.6的本仓库扩展、B站插件1.2.2，以及AstrBot4.29.1。索引列出本项目可见的提示来源和组装入口，不包含云端模型服务自行添加、无法从本地读取的系统指令。私人部署的人格和审阅文案可与公开模板不同。
 
 ## 面板和运行配置
 
@@ -10,6 +10,7 @@ AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天
 | --- | --- |
 | AstrBot 控制台 → 人格 | `AstrBot/data/data_v4.db` 的 `personas` 表：`system_prompt`、`begin_dialogs`、`custom_error_message`，另有工具和技能选择。当前会话选中的人格才生效。通过面板编辑，不要直接修改运行中的数据库 |
 | `AstrBot/data/cmd_config.json` | `provider_settings.prompt_prefix`、`image_caption_prompt`；`agent_runner.config.persona`选择人格，`agent_runner.config.compression.instruction`是框架压缩指令；`subagent_orchestrator.router_system_prompt`及各子代理instructions。内置群主动回复的prompt如启用也在配置中。建议通过对应面板修改 |
+| 人格编辑器与版本 | `AstrBot/data/plugin_data/astrbot_plugin_proactive_agent/personas.json` 保存人物独立草稿、来源指纹、已发布用途版本与恢复记录；通过编辑器修改，不手改运行中的文件。`persona_registry.py`负责整理/适配/独立校验，`persona_sources.py`收集来源，`persona_authority.py`选取本轮版本 |
 | 大肥龙插件配置 | `AstrBot/data/config/astrbot_plugin_proactive_agent_config.json` 的 `personality`供主动行为使用；角色/Emoji/父亲/审阅开关等数值也会影响动态指令。配置路径和人格是两个入口 |
 | 智能图片对话配置 | `AstrBot/data/config/astrbot_plugin_smart_imagechat_hub_config.json` 的标签类别、自定义类别会被转成标签提示；模型选择只决定谁来生成，不等于提示词本体 |
 | B站插件配置 | `AstrBot/data/config/astrbot_plugin_bili_scroll_config.json` 的玩法开关决定分享文案增加哪些规则；具体自然语言模板在插件main.py |
@@ -22,7 +23,7 @@ AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天
 
 | 用途 | 源码位置 | 负责什么 |
 | --- | --- | --- |
-| 角色与反差 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/dragon_character.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/dragon_character.py#L12) | 白毛龙娘、自称、被怼认怂、父亲称呼、Emoji和虚拟摄影；`character_note()`附本轮状态，`speech_issues()`与`apology_repetition_issues()`是检查规则 |
+| 角色与表达 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/dragon_character.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/dragon_character.py#L12) | 自称、父亲称呼、Emoji和虚拟摄影；`character_note()`附本轮状态，`speech_issues()`检查表达；停止玩笑与严肃状态保留，无认怂或反弹状态 |
 | 具体说话方式 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/cheeky_tone.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/cheeky_tone.py#L3) | 生成和审查共用：锋芒、就事论事、按原因道歉、少用牵强比喻；本次主要修改入口 |
 | 闲聊回应策略 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/chat_style_policy.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/chat_style_policy.py#L6) | 处理身份、解题、代码等请求时的表达约定；`output_issues()`是本地输出检查，影响能否通过审阅 |
 | 聊天总补充 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/conversation_style.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/conversation_style.py#L9) | 普通接话、接梗、联网/生图行为；拼入CHAT_STYLE_POLICY和角色约定，`context_note()`附同会话近期消息与标签 |
@@ -49,7 +50,7 @@ AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天
 | B站账号回复 | [AstrBot/data/plugins/astrbot_plugin_bili_scroll/main.py](AstrBot/data/plugins/astrbot_plugin_bili_scroll/main.py#L145) | make_account_reply内的system控制账号评论的回复；make_caption内的system及后续条件追加控制分享文案、赤石/搬屎及可选诱饵玩法 |
 | B站工具说明 | [AstrBot/data/plugins/astrbot_plugin_bili_scroll/main.py](AstrBot/data/plugins/astrbot_plugin_bili_scroll/main.py#L330) | share_bilibili_video的函数文档与参数是查找/分享工具说明；账号评论等操作另由actions.py处理，不是所有账号动作都会成为LLM工具 |
 
-`main.py`的enrich_conversation是理解聊天请求的入口：框架先选人格/历史，插件再加口吻、本轮角色、记忆与梗卡。审阅另起一次请求，并复用口吻/角色规则。1.19.1起审阅同步读取当前会话人格，默认示例仅作补充；明确启用旧版反差时仍按开关要求认怂。并行预判、图片打标签和梗理解也各用独立请求。
+`main.py`的enrich_conversation是理解聊天请求的入口：框架先选人格/历史，插件再加口吻、本轮角色、记忆与梗卡。审阅另起一次请求，并复用口吻/角色规则。1.20起生成、审阅和附件固定使用同一已发布人格版本；草稿不直接用于回复。原生人格被外部改动时需重新整理并同步，来源指纹冲突不会被覆盖。并行预判、图片打标签和梗理解也各用独立请求。
 
 ## 动态记忆和工具说明
 

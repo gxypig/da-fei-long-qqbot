@@ -59,7 +59,7 @@ class AIProfiles:
             if 'account' not in row:continue
             probe=row.get('outstanding')
             if ledger and probe:
-                for receipt in sorted(ledger.store.rows.values(),key=lambda r:r.get('at',0)):
+                async for receipt in ledger.store.iterate(origin=probe['origin'],states={'confirmed','failed','unknown'},predicate=lambda r:r.get('source_id')==probe['trigger_id']):
                     if (receipt.get('state') in {'confirmed','failed','unknown'} and receipt.get('source_id')==probe['trigger_id']
                             and receipt.get('origin')==probe['origin'] and receipt.get('sender')==row['account']
                             and receipt.get('at',0)>=probe['at']):
@@ -199,6 +199,7 @@ class AIProfiles:
         kind=data.get('judgement_type')
         if kind not in {'ai','automation','mixed','insufficient'}:raise ValueError('invalid account analysis')
         known={x['id']:x for x in observations}
+        linked=set()
         # A semantic match uses the final confirmed text; never its discarded draft.
         for link in data.get('probe_links',[])[:6] if isinstance(data.get('probe_links',[]),list) else []:
             if not isinstance(link,dict):continue
@@ -206,10 +207,11 @@ class AIProfiles:
             if not probe or not isinstance(quote,str) or len(quote)<4 or not any(quote in text for text in probe.get('final_parts',[])):continue
             confirmed=[r for r in probe.get('receipts',[]) if r['state']=='confirmed']
             if not confirmed:continue
+            linked.add(probe['id'])
             sent_at=probe.get('sent_at',probe.get('delivery_at',probe['at']))
             answers=[known[i] for i in link.get('answer_message_ids',[]) if i in known and known[i]['origin']==probe['origin']
                 and sent_at<=known[i]['at']<=sent_at+600 and known[i]['source_id']!=probe['trigger_id']]
-            probe.update(sent=True,sent_at=sent_at,result='confirmed',status='answered' if answers else 'awaiting_answer',expires_at=sent_at+600)
+            probe.update(sent=True,sent_at=sent_at,result='confirmed',status='answered' if answers else 'awaiting_answer',outcome='asked',expires_at=sent_at+600)
             if answers:
                 probe.update(answered_at=answers[-1]['at'],answer_ids=[o['source_id'] for o in answers])
                 for obs in answers:obs['probe']=probe['id']
@@ -230,6 +232,10 @@ class AIProfiles:
                     'summary':str(item.get('summary',''))[:400],'strength':'strong' if item.get('strength')=='strong' else 'weak'})
             return result
         evidence=accepted(data.get('evidence'));counters=accepted(data.get('counterevidence'),True)
+        pending_probe=current.get('outstanding')
+        if pending_probe and pending_probe.get('result')=='semantic_pending' and pending_probe['id'] not in linked:
+            current=copy.deepcopy(current);settled={**pending_probe,'status':'not_asked','result':'confirmed_without_question','outcome':'not_asked'}
+            current.setdefault('probe_history',{})[settled['id']]=settled;current['outstanding']=None
         # Explicit role-play context remains a hard counter, even if omitted by analysis.
         for obs in observations:
             if UNRELIABLE.search(obs['text']) and (AUTO.search(obs['text']) or CLUE.search(obs['text'])):
@@ -240,11 +246,11 @@ class AIProfiles:
         row=copy.deepcopy(current)
         row.update(evidence=evidence,counterevidence=counters,judgement_type=kind,analyzed_at=self.clock(),analysis_attempts=0,
             analysis_pending=current['observations'][-1]['id']!=latest,
-            skip_reason=str(data.get('reason',''))[:400],probe_eligible=bool(evidence),stage='candidate' if evidence else 'observing')
+            skip_reason=str(data.get('reason',''))[:400],probe_eligible=any(e['kind'] not in {'style','speed'} for e in evidence),stage='candidate' if any(e['kind'] not in {'style','speed'} for e in evidence) else 'observing')
         if kind=='ai' and len(rounds)>=3 and len(types)>=2 and not any(c['strength']=='strong' for c in counters):
             row.update(state='auto_confirmed',stage='confirmed',source='semantic_multi_round',expires_at=self.clock()+self.default_days*86400)
         else:
-            row['state']='suspected' if evidence else 'observing'
+            row['state']='suspected' if row['probe_eligible'] else 'observing'
             if len(rounds)<3 or len(types)<2:row['skip_reason']='独立强证据不足：'+str(len(rounds))+'轮 / '+str(len(types))+'类；'+row['skip_reason']
             if (row.get('outstanding') or {}).get('sent'):row['stage']='awaiting_answer'
         self._put(key,row)
@@ -320,10 +326,10 @@ class AIProfiles:
             combined='\n'.join(out['final_parts'])
             # Match the final, possibly rewritten question, not the original literal.
             if PROBE_WORDS.search(combined) and re.search(r'[?？]|确认|还是|是不是|问一句|哪种',combined):
-                out.update(sent=True,sent_at=out.get('sent_at',at),result='confirmed',status='awaiting_answer',expires_at=at+600)
+                out.update(sent=True,sent_at=out.get('sent_at',at),result='confirmed',status='awaiting_answer',outcome='asked',expires_at=at+600)
                 row['stage']='awaiting_answer'
         elif state=='unknown' and not out.get('sent'):
-            out.update(result='unknown',status='delivery_unknown');row['stage']='delivery_unknown'
+            out.update(result='unknown',status='delivery_unknown',outcome='uncertain');row['stage']='delivery_unknown'
         elif state=='failed' and not out.get('sent'):out.update(result='failed',status='not_sent')
         history=row.setdefault('probe_history',{});history[probe['id']]=copy.deepcopy(out)
         row['probe_history']=dict(list(history.items())[-24:])
@@ -334,7 +340,7 @@ class AIProfiles:
         row=self.store.rows.get(probe['key'])
         outstanding=row.get('outstanding') if row else None
         if outstanding and outstanding['id']==probe['id'] and not outstanding.get('sent') and outstanding.get('result') not in {'unknown','semantic_pending'}:
-            row=copy.deepcopy(row);outstanding={**outstanding,'status':'not_sent'}
+            row=copy.deepcopy(row);outstanding={**outstanding,'status':'not_sent','outcome':'not_asked'}
             row.setdefault('probe_history',{})[probe['id']]=outstanding
             self._put(probe['key'],{**row,'outstanding':None,'skip_reason':'最终正文未实际带出试探问题；本次生成尝试计数保留'})
 
@@ -348,8 +354,11 @@ class AIProfiles:
         row=self.store.rows.get(identity(platform,account),{})
         state=self.effective(row)
         if state in {'revoked','expired'}:return 'unverified'
+        if state in {'auto_confirmed','manual_confirmed'}:return 'automatic_confirmed'
+        meaningful=any(e.get('kind') in STRONG_KINDS|{'machine_error','command_response'} and e.get('strength')=='strong' for e in row.get('evidence',[]))
+        if not meaningful:return 'unverified'
         if row.get('judgement_type') in {'automation','mixed'}:return row['judgement_type']
-        return 'automatic_confirmed' if state in {'auto_confirmed','manual_confirmed'} else 'automatic_suspected' if state=='suspected' else 'unverified'
+        return 'automatic_suspected' if state=='suspected' else 'unverified'
 
     def snapshot(self,query='',state='',offset=0):
         rows=[]

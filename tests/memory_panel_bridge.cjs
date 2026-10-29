@@ -8,6 +8,8 @@ class Element {
   set value(v){this._value=String(v);} get value(){return this._value;}
   get childNodes(){return this.children;}
   append(...nodes){this.children.push(...nodes);}
+  before(...siblings){this.previousSiblings=siblings;}
+  after(...siblings){this.nextSiblings=siblings;}
   replaceChildren(){this.children=[];this._text='';}
   addEventListener(n,f){this.handlers[n]=f;}setAttribute(){}
 }

@@ -9,6 +9,8 @@ import unittest
 import os
 import tempfile
 import atexit
+from temp_cleanup import install as install_test_temp_cleanup
+install_test_temp_cleanup()
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -202,9 +204,11 @@ class ConversationContext(unittest.IsolatedAsyncioTestCase):
     async def test_disabling_meme_context_keeps_persona_and_character(self):
         plugin=object.__new__(Main);plugin.config={'meme_context_enabled':False}
         req=SimpleNamespace(prompt='你好',system_prompt='原有角色设定')
-        await plugin.enrich_conversation(self.event('你好'),req)
+        event=self.event('你好')
+        await plugin.enrich_conversation(event,req)
         self.assertTrue(req.system_prompt.startswith('原有角色设定'))
-        self.assertIn('本龙',req.system_prompt)
+        self.assertIn('原有角色设定',req.system_prompt)
+        self.assertEqual(event.get_extra('qqbot_character')['persona_status'],'error')
         self.assertNotIn('图库中相关梗的候选标签',req.system_prompt)
 
 

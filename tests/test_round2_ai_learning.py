@@ -51,13 +51,18 @@ class SemanticProfiles(ProfileTests):
             'other':{'id':'other','state':'confirmed','origin':'qq:GroupMessage:2','source_id':'trigger','sender':'123',
             'at':sent_at,'confirmed_at':sent_at,'message_id':'qq-2','text':'不属于这次试探'}}
         self.service=AIProfiles(path,cfg,clock=lambda:self.now,busy=lambda:True)
-        await self.service.start(SimpleNamespace(store=SimpleNamespace(rows=rows)))
+        from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import DeliveryLedger
+        ledger=DeliveryLedger(path.with_name('delivery.db'));await ledger.start()
+        self.addAsyncCleanup(ledger.close)
+        for key,row in rows.items():ledger.store.put(key,row)
+        await self.service.start(ledger)
         outstanding=self.service.store.rows[self.key]['outstanding']
         self.assertTrue(outstanding['sent']);self.assertEqual(outstanding['expires_at'],sent_at+600)
         self.assertEqual(len(outstanding['receipts']),1);self.assertEqual(self.service.store.rows[self.key]['probes'][self.service.day()],1)
         self.now=sent_at+601
         self.assertEqual(self.service.snapshot()['rows'][0]['stage'],'probe_expired')
         self.assertFalse(self.service.snapshot()['rows'][0]['outstanding'])
+        await ledger.close()
 
     async def test_final_rewrite_attachment_cross_group_and_ttl(self):
         await self.seed_suspect();p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')

@@ -33,6 +33,16 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         await self.life.start();self.addAsyncCleanup(self.life.close)
         self.origin='aiocqhttp:FriendMessage:1'
 
+    async def asyncTearDown(self):
+        # Complete all disk-producing coroutines before Windows temp cleanup,
+        # and assert the lifecycle rather than hiding a directory race.
+        await self.life.close();await self.ledger.close()
+        for store in (self.life.store,self.ledger.store):
+            self.assertTrue(store.closed)
+            self.assertFalse(store.pending)
+            self.assertTrue(store.task is None or store.task.done())
+            self.assertTrue(store._io is None or store._io.done())
+
     async def test_preview_is_read_only_and_private_event_does_not_cross_scope(self):
         self.life.event('chat_confirmed','只有这个会话知道的测试事项',visibility=self.origin,source_ids=['msg1'])
         before=copy.deepcopy(self.life.store.rows);pending=copy.deepcopy(self.life.store.pending)
@@ -74,8 +84,8 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['decision'],'unknown')
         before=self.plugin._generate_json.await_count
         result=await self.life.opportunity(self.origin)
-        self.assertEqual(result['decision'],'drop');self.assertEqual(self.plugin._generate_json.await_count,before)
-        self.assertNotIn('contact:'+self.origin,self.life.store.rows)
+        self.assertEqual(result['decision'],'defer');self.assertEqual(self.plugin._generate_json.await_count,before)
+        self.assertFalse(self.life.store.rows.get('contact:'+self.origin,{}).get('last_confirmed_at'))
 
     async def test_unanswered_pauses_and_new_inbound_resets_pause(self):
         self.life.store.put('contact:'+self.origin,{'unanswered':2})
@@ -89,7 +99,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.life.event('chat_confirmed','无须联系的普通话题',visibility=self.origin,source_ids=['drop'])
         self.plugin._generate_json.return_value=json.dumps({'decision':'drop','reason':'没有联系动机'})
         self.assertEqual((await self.life.opportunity(self.origin))['decision'],'drop')
-        self.assertEqual((await self.life.opportunity(self.origin))['decision'],'drop')
+        self.assertEqual((await self.life.opportunity(self.origin))['decision'],'defer')
         self.assertEqual(self.plugin._generate_json.await_count,1)
 
     async def test_confirmed_send_memory_failure_cannot_reopen_delivery(self):

@@ -25,6 +25,7 @@ class DatabasePressure:
         self.plugin=plugin;self.db=getattr(plugin.context,'_db',None)
         self.active={};self.recent=deque(maxlen=100);self.flights={};self.slots=asyncio.Semaphore(4)
         self.stats={'read_joined':0,'read_started':0,'session_errors':0,'checkouts':0,'checkins':0}
+        self.stats.update(connection_wait_ms=0.,execution_ms=0.,commit_ms=0.,executions=0,commits=0)
         self.restores=[]
 
     def snapshot(self):
@@ -38,6 +39,37 @@ class DatabasePressure:
         from astrbot.core.db import BaseDatabase
         from astrbot.core.utils.shared_preferences import SharedPreferences
         engine=self.db.engine.sync_engine
+        from .chain_metrics import add
+        def measured(field,started):
+            elapsed=(time.monotonic()-started)*1000;self.stats[field]+=elapsed;add('db_'+field,elapsed)
+        pool=engine.pool;pool_connect=pool.connect
+        def connect(*args,**kwargs):
+            started=time.monotonic()
+            try:return pool_connect(*args,**kwargs)
+            finally:measured('connection_wait_ms',started)
+        pool.connect=connect
+        def restore_connect():
+            if pool.connect is connect:pool.connect=pool_connect
+        self.restores.append(restore_connect)
+        def before_cursor(conn,cursor,statement,parameters,context,executemany):context._qqbot_sql_started=time.monotonic()
+        def after_cursor(conn,cursor,statement,parameters,context,executemany):
+            started=getattr(context,'_qqbot_sql_started',None)
+            if started is not None:
+                context._qqbot_sql_started=None;self.stats['executions']+=1;measured('execution_ms',started)
+        def sql_error(context):
+            execution=getattr(context,'execution_context',None);started=getattr(execution,'_qqbot_sql_started',None)
+            if started is not None:execution._qqbot_sql_started=None;measured('execution_ms',started)
+        for name,handler in [('before_cursor_execute',before_cursor),('after_cursor_execute',after_cursor),('handle_error',sql_error)]:
+            event.listen(engine,name,handler);self.restores.append(lambda name=name,handler=handler:event.remove(engine,name,handler))
+        dialect=engine.dialect;do_commit=dialect.do_commit
+        def commit(connection):
+            started=time.monotonic()
+            try:return do_commit(connection)
+            finally:self.stats['commits']+=1;measured('commit_ms',started)
+        dialect.do_commit=commit
+        def restore_commit():
+            if dialect.do_commit is commit:dialect.do_commit=do_commit
+        self.restores.append(restore_commit)
         def checkout(connection,record,proxy):
             owner=session_owner.get()
             if owner=='unknown':owner=caller_owner()

@@ -70,6 +70,9 @@ class SQLiteSnapshot:
         # its to_thread write and racing a newer final checkpoint.
         if self.task:
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)
-        try:await asyncio.wait_for(self.flush(),5)
-        except TimeoutError:self.stats.update(last_error='checkpoint timeout',unsaved=True)
+        try:ok=await asyncio.wait_for(self.flush(),5)
+        except TimeoutError:
+            self.stats.update(last_error='checkpoint timeout',unsaved=True)
+            raise RuntimeError('检查点尚未完成，停止中止以保留内存数据')
+        if not ok or self.stats.get('unsaved'):raise RuntimeError('检查点保存失败，停止中止以保留内存数据')
         self.closed=True

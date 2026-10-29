@@ -1371,6 +1371,8 @@ class RetrievalMixin(LatencyEmojiMixin):
         return random.choice(pool) if pool else None
 
     def _render_custom_reply(self, item: dict[str, Any], decision: dict[str, Any]) -> str:
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import current_binding,fallback_text
+        if current_binding():return fallback_text('gallery_found')
         template = self._cfg_str("custom_reply")
         values = {
             "filename": item.get("filename", ""),
@@ -1389,7 +1391,8 @@ class RetrievalMixin(LatencyEmojiMixin):
         item: dict[str, Any],
         decision: dict[str, Any],
     ) -> str:
-        return (
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import role_text
+        return (role_text('gallery')+'\n'+
             "用户刚刚请求机器人发送一张图片。"
             "你已经从本地图片库中找到了匹配图片，并且系统会在你的回复之后发送该图片。"
             "请用符合你当前人格的自然语气，简短告诉用户已经找到了对应图片。"
@@ -1401,7 +1404,8 @@ class RetrievalMixin(LatencyEmojiMixin):
         )
 
     def _not_found_prompt(self, message: str, candidates: list[dict[str, Any]]) -> str:
-        return (
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import role_text
+        return (role_text('gallery')+'\n'+
             "用户请求机器人发送图片，但本地图片库中没有找到足够符合要求的图片。"
             "请用符合你当前人格的自然语气，简短告诉用户目前没有找到合适图片。"
             "不要编造已经发送图片。\n\n"

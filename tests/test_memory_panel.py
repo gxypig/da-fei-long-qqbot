@@ -65,7 +65,9 @@ class MemoryPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.memory.contextual('今天睡过头了')[0]['phrase'],ROW['phrase'])
         self.assertEqual(self.memory.contextual('今天吃什么'),[])
         self.assertEqual(self.memory.contextual('睡过头了，认真说别开玩笑'),[])
-        self.assertEqual(self.memory.contextual('今天睡过头了',[ROW['phrase']]),[])
+        # Mentioning a meme in incoming context is not a confirmed bot use.
+        # Repetition limits are now applied by the receipt-driven usage policy.
+        self.assertEqual(self.memory.contextual('今天睡过头了',[ROW['phrase']])[0]['phrase'],ROW['phrase'])
         self.memory.generate.assert_not_awaited();self.memory.search.assert_not_awaited()
 
     async def test_repository_search_page_and_invalid_payload(self):

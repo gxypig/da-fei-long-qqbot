@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'AstrBot'))
 from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import (
     BackgroundPaused, InvalidModelResponse, ModelScheduler, WorkClosed, WorkRuntime, _isolated_provider,
-    TAIL_GUARD_MARKER, _valid_model_response, install_work_runtime, model_work, provider_key,
+    TAIL_GUARD_MARKER, _valid_model_response, install_work_runtime, model_work, provider_key, review_verdict_observer,
 )
 
 
@@ -178,7 +178,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         gates['review'].set()
         await asyncio.gather(a, b, c, d)
 
-    async def test_scheduled_promotes_at_sixty_seconds_even_with_interactive_waiters(self):
+    async def test_aged_scheduled_does_not_jump_without_nine_interactive_admissions(self):
         self.scheduler.cfg = {'model_concurrency': 1}
         p, gate, entered = provider(), asyncio.Event(), []
         async def first():
@@ -194,7 +194,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         await until(lambda: self.scheduler.status()['waiting'] == 5)
         gate.set()
         await asyncio.gather(blocker, scheduled, *replies)
-        self.assertEqual(entered, ['timer', 'reply', 'reply', 'reply', 'reply'])
+        self.assertEqual(entered, ['reply', 'reply', 'reply', 'reply', 'timer'])
 
     async def test_unaged_scheduled_waits_after_interactive_before_auxiliary(self):
         self.scheduler.cfg = {'model_concurrency': 1}
@@ -1186,6 +1186,78 @@ class HedgeTests(unittest.IsolatedAsyncioTestCase):
 
     def stats(self):
         return self.runtime.status()['hedge']
+
+    async def test_review_backup_preserves_full_negative_verdict_and_review_lane(self):
+        verdict=FakeResponse('{"pass":false,"natural":false,"chat_fit":false,"replacement":"完整改写"}')
+        async def operation(index,*args):
+            if index==0:await asyncio.Future()
+            return verdict
+        self.operation=operation
+        with model_work('review'):task=self.start(prompt='exact draft and evidence')
+        await self.trigger();self.assertIs(await task,verdict)
+        self.assertEqual(self.calls[0][1],self.calls[1][1])
+        self.assertEqual({r['kind'] for name,r in self.rows if name=='model_work'},{'review','auxiliary'})
+        self.assertEqual(self.stats()['hedged'],1);self.assertFalse(self.runtime._hedge_tasks)
+
+    async def test_first_review_verdict_wins_even_if_its_admission_cleanup_is_slower(self):
+        negative=FakeResponse('{"pass":false,"natural":false,"chat_fit":false}')
+        later=FakeResponse('{"pass":true,"natural":true,"chat_fit":true}')
+        primary_release=asyncio.Event();primary_returned=asyncio.Event()
+        async def operation(index,*args):
+            if index==0:await primary_release.wait();return negative
+            await primary_returned.wait();return later
+        self.operation=operation
+        original=self.runtime.model_call
+        async def delayed_cleanup(*args,**kwargs):
+            result=await original(*args,**kwargs)
+            if kwargs.get('kind')=='review':
+                primary_returned.set();await asyncio.Future()
+            return result
+        self.runtime.model_call=delayed_cleanup
+        notices=[]
+        with model_work('review'),review_verdict_observer(lambda:notices.append('raw')):
+            task=self.start()
+        await self.trigger();await until(lambda:len(self.calls)==2);primary_release.set()
+        self.assertIs(await task,negative)
+        self.assertEqual(notices,['raw'])
+        self.assertEqual(self.stats()['won'],0);self.assertFalse(self.runtime._hedge_tasks)
+
+    async def test_review_does_not_prefer_parseable_pass_over_first_malformed_result(self):
+        malformed=FakeResponse('not JSON')
+        release=asyncio.Event();backup_entered=asyncio.Event()
+        async def operation(index,*args):
+            if index==0:await release.wait();return malformed
+            backup_entered.set()
+            try:await asyncio.Future()
+            except asyncio.CancelledError:return FakeResponse('{"pass":true,"natural":true,"chat_fit":true}')
+        self.operation=operation
+        with model_work('review'):task=self.start()
+        await self.trigger();await backup_entered.wait();release.set()
+        self.assertIs(await task,malformed);self.assertFalse(self.runtime._hedge_tasks)
+
+    async def test_review_and_generation_share_one_turn_backup_budget(self):
+        review_entered=asyncio.Event();release=asyncio.Event()
+        async def operation(index,*args):
+            if index==0:await asyncio.Future()
+            if index==2:review_entered.set();await release.wait()
+            return FakeResponse('{"pass":true,"natural":true,"chat_fit":true}')
+        self.operation=operation
+        async def turn():
+            with self.runtime.reply_work(Event()):
+                await self.provider.text_chat(system_prompt=TAIL_GUARD_MARKER)
+                with model_work('review'):
+                    return await self.provider.text_chat(system_prompt=TAIL_GUARD_MARKER)
+        task=asyncio.create_task(turn());self.parents.append(task)
+        await self.trigger();await review_entered.wait()
+        self.assertEqual(len(self.timers),1);release.set();await task
+        self.assertEqual(len(self.calls),3);self.assertEqual(self.stats()['hedged'],1)
+
+    async def test_review_without_trusted_marker_or_with_tools_is_not_hedged(self):
+        raw=object();self.operation=lambda *args:asyncio.sleep(0,result=raw)
+        with model_work('review'):
+            self.assertIs(await self.start(system_prompt='ordinary unmarked review'),raw)
+            self.assertIs(await self.start(func_tool=object()),raw)
+        self.assertFalse(self.timers);self.assertEqual(self.stats()['hedged'],0)
 
     async def test_fast_primary_strips_marker_and_preserves_signature_and_response(self):
         response = FakeResponse('a full response', usage={'tokens': 77}, raw_completion=object())

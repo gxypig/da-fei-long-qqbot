@@ -10,7 +10,9 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 AGENT = 'AstrBot/data/plugins/astrbot_plugin_proactive_agent/'
 SOURCES = {
-    'dragon_character.py': '角色补充、本轮反应与表达检查',
+    'dragon_character.py': '可信关系、停止玩笑与表达检查',
+    'persona_registry.py': '人格整理、场景适配与独立校验协议',
+    'persona_sources.py': '人格来源清单与来源优先级',
     'cheeky_tone.py': '毒舌程度、具体口吻与示例',
     'persona_authority.py': '当前人格与插件补充的优先关系',
     'chat_style_policy.py': '闲聊、身份与知识请求的回应方式',
@@ -130,6 +132,7 @@ def build_plan(root=ROOT, framework=None):
             warnings.append('未能读取控制台端口，暂用6185')
     base = f'http://127.0.0.1:{port}/#'
     pages = [
+        {'label': '集中人格编辑器：编辑总设定、保存并同步各用途、查看来源及回退', 'url': base+'/plugin-view/astrbot_plugin_proactive_agent/persona'},
         {'label': '已保存的人格：包括数据库中那份旧设定，选择当前会话使用的人格', 'url': base+'/persona'},
         {'label': '插件配置：主动人格personality等保存值', 'url': base+'/extension/plugins/astrbot_plugin_proactive_agent'},
         {'label': '大肥龙面板：龙娘设定、学习与记忆、审阅开关', 'url': base+'/plugin-view/astrbot_plugin_proactive_agent/control'},

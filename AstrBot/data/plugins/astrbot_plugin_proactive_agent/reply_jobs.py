@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict, deque
 from contextvars import ContextVar
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -50,6 +51,7 @@ class ReplyJob:
     cid: str | None = None
     generation: str = ''
     session_epoch: int | None = None
+    mute_epoch: object = None
     force_quote: bool = False
     manually_adjusted: bool = False
     sources: list = field(default_factory=list)
@@ -58,6 +60,16 @@ class ReplyJob:
     gate: object = field(default=None,repr=False)
     owner: object = field(default=None,repr=False)
     passive: bool = False
+    execution_result: str = 'pending'
+    delivery_result: str = 'not_sent'
+    reply_purpose: str = 'answer'
+    first_conversation_created: bool = False
+
+    @property
+    def object_key(self):
+        from .route_guard import canonical
+        try:return canonical(self.origin)
+        except (ValueError,AttributeError):return self.origin
 
     def __post_init__(self):
         if not self.sources:
@@ -67,6 +79,7 @@ class ReplyJob:
         return {'id':self.id,'origin':self.origin,'sender':self.sender,'message_id':self.source_id,
                 'summary':self.text[:300],'source_count':len(self.sources),'state':self.state,
                 'stage':self.stage,'reason':self.reason,'force_quote':self.force_quote,
+                'execution_result':self.execution_result,'delivery_result':self.delivery_result,'reply_purpose':self.reply_purpose,
                 'admission':getattr(self,'admission',None),
                 'adjusted':self.manually_adjusted,'wait_ms':round(1000*max(0,self.timings.get('started',now)-self.received)),
                 'elapsed_ms':round(1000*max(0,self.timings.get('ended',now)-self.received)),
@@ -78,6 +91,7 @@ class ReplyQueue:
         self.cfg,self.audit,self.clock=cfg,audit,clock
         self.instance=uuid.uuid4().hex;self.version=0;self.closed=False
         self.jobs={};self.pending=[];self.active={};self.ended=deque(maxlen=200)
+        self.inflight={};self.suspended={};self.last_object=None;self.manual_order=False
         self.actions=OrderedDict();self.echoes=OrderedDict()
         self.started=time.time();self.on_change=lambda:None
 
@@ -90,11 +104,23 @@ class ReplyQueue:
 
     def create(self, event, received=None):
         existing=event.get_extra('qqbot_reply_job')
-        if existing and existing.id in self.jobs:return existing
+        if (existing and existing.id in self.jobs and existing.state not in TERMINAL
+                and existing.event is event):return existing
+        # A framework session waiter shallow-copies the new event and its extra
+        # map. Give the new execution an independent map and job identity.
+        if existing and hasattr(event,'_extras'):
+            event._extras=dict(event._extras)
+            for key in ('qqbot_reply_job','_qqbot_work_state','qqbot_character','qqbot_native_persona','qqbot_unified_admitted','qqbot_flow_started','qqbot_model_started'):
+                event._extras.pop(key,None)
         job=ReplyJob(str(event.unified_msg_origin),str(event.get_sender_id()),
             str(getattr(getattr(event,'message_obj',None),'message_id','') or ''),event.get_message_str() or '',event,
             received=received if received is not None else self.clock())
         self.jobs[job.id]=job;event.set_extra('qqbot_reply_job',job)
+        from .session_mute import get_mutes
+        mutes=get_mutes()
+        if mutes:
+            try:job.mute_epoch=mutes.epoch(job.origin)
+            except ValueError:pass
         job.queue=self
         return job
 
@@ -134,24 +160,52 @@ class ReplyQueue:
 
     def pump(self):
         if self.closed:return
-        limit=max(1,min(8,int(self.cfg('reply_queue_concurrency',2))))
-        occupied={j.origin for j in self.active.values()}
-        for id_ in list(self.pending):
+        limit=max(1,min(8,int(self.cfg('reply_queue_concurrency',4))))
+        inflight_limit=max(limit,min(64,int(self.cfg('reply_inflight_limit',8))))
+        occupied={j.object_key:j.id for j in self.inflight.values()}
+        candidates=list(self.pending)
+        if not self.manual_order and self.last_object is not None:
+            candidates.sort(key=lambda id_:self.jobs[id_].object_key==self.last_object)
+        for id_ in candidates:
             job=self.jobs[id_]
             # Only obsolete probabilistic small-talk may yield to a newer
             # candidate. Explicit requests and manually adjusted jobs survive.
             newer=any(self.jobs[x].origin==job.origin and self.jobs[x].passive for x in self.pending[self.pending.index(id_)+1:])
             stale=(self.clock()-job.received>=int(self.cfg('group_passive_max_age',25)))
-            if (job.passive and not job.manually_adjusted and newer and self.cfg('group_flow_enabled',True)
+            if (job.id not in self.inflight and job.passive and not job.manually_adjusted and newer and self.cfg('group_flow_enabled',True)
                     and (stale or self.cfg('latency_optimization_enabled',False))):
                 self.finish(job,'cancelled','过时概率接话，由较新候选接话',pump=False);continue
             if len(self.active)>=limit:job.reason='等待前台执行名额';continue
-            if job.origin in occupied:job.reason='同一会话上一条仍在执行';continue
-            self.pending.remove(id_);self.active[id_]=job;occupied.add(job.origin)
+            if job.object_key in occupied and occupied[job.object_key]!=job.id:job.reason='同一会话上一条仍在执行';continue
+            if job.id not in self.inflight and len(self.inflight)>=inflight_limit:job.reason='等待在途任务名额';continue
+            self.pending.remove(id_);self.active[id_]=job;self.inflight[id_]=job;occupied[job.object_key]=job.id
+            self.suspended.pop(id_,None);self.last_object=job.object_key
             job.state='running';job.stage='preparing';job.reason=''
-            job.timings['started']=self.clock()
+            job.execution_result='running';job.timings.setdefault('started',self.clock())
             if job.gate and not job.gate.done():job.gate.set_result(True)
             self.changed('started',job)
+        if not self.pending:self.manual_order=False
+
+    @asynccontextmanager
+    async def parked(self,job,reason):
+        """Release execution capacity during I/O, retain physical conversation order."""
+        if not job or job.id not in self.active or job.state in TERMINAL:
+            yield;return
+        self.active.pop(job.id);self.suspended[job.id]=job
+        job.state='suspended';job.stage='waiting';job.reason=reason
+        started=self.clock();self.changed('suspended',job);self.pump()
+        try:yield
+        except asyncio.CancelledError:
+            self.finish(job,'cancelled','cancelled_while_suspended')
+            raise
+        finally:
+            job.timings['suspended_ms']=job.timings.get('suspended_ms',0)+(self.clock()-started)*1000
+            if job.state not in TERMINAL:
+                if self.closed:self.finish(job,'cancelled','service_shutdown')
+                else:
+                    job.gate=asyncio.get_running_loop().create_future();job.state='pending';self.pending.append(job.id)
+                    self.changed('resume_wait',job);self.pump()
+                    await self.wait(job)
 
     async def wait(self,job):
         if job.state in TERMINAL:raise ReplyCancelled(job.reason)
@@ -164,9 +218,12 @@ class ReplyQueue:
         if job.state in TERMINAL:return
         assert state in TERMINAL
         passive_only=(state=='ignored' and job.state=='received' and not job.sends)
-        occupied=job.id in self.active or job.id in self.pending
+        occupied=job.id in self.active or job.id in self.pending or job.id in self.inflight
         if job.id in self.pending:self.pending.remove(job.id)
         self.active.pop(job.id,None)
+        self.inflight.pop(job.id,None);self.suspended.pop(job.id,None)
+        if job.execution_result not in {'failed','cancelled'}:
+            job.execution_result='completed' if state in {'confirmed','partial'} else state
         job.state=state;job.stage='ended';job.reason=reason;job.timings['ended']=self.clock()
         if passive_only:
             # The journal/audit retain incoming traffic. It must not invalidate
@@ -207,6 +264,7 @@ class ReplyQueue:
         else:
             self.pending.remove(job.id)
             self.pending.insert(self.pending.index(anchor) if anchor else len(self.pending),job.id)
+            self.manual_order=True
             self.changed('manual_move',job)
         self.actions[request_id]=digest
         while len(self.actions)>512:self.actions.popitem(last=False)
@@ -223,6 +281,8 @@ class ReplyQueue:
                         'after_next_id':self.pending[i+2] if i+2<len(self.pending) else None}
                        for i,x in enumerate(self.pending[offset:offset+limit],offset)],
             'running':[j.public(now) for j in self.active.values()],
+            'suspended':[j.public(now) for j in self.suspended.values()],
+            'inflight':len(self.inflight),'execution_limit':int(self.cfg('reply_queue_concurrency',4)),
             'recent':[self.jobs[x].public(now) for x in list(reversed(self.ended))[:limit]]}
 
     def close(self):
@@ -232,7 +292,7 @@ class ReplyQueue:
 
     async def drain(self,timeout=8):
         self.close()
-        owners={j.owner for j in self.active.values() if j.owner and j.owner is not asyncio.current_task()}
+        owners={j.owner for j in self.inflight.values() if j.owner and j.owner is not asyncio.current_task()}
         if not owners:return
         _,pending=await asyncio.wait(owners,timeout=timeout)
         for task in pending:task.cancel()

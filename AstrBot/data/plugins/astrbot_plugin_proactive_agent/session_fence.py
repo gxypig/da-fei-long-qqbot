@@ -39,8 +39,21 @@ class SessionFence:
                         history=kwargs.get('history',args[1] if len(args)>1 else None)
                         if history!=[]:return await previous(origin,*args,**kwargs)
                     async with self.boundary(origin):
-                        self.epochs[origin]=self.epoch(origin)+1
-                        return await previous(origin,*args,**kwargs)
+                        before=self.epoch(origin)
+                        self.epochs[origin]=before+1
+                        result=await previous(origin,*args,**kwargs)
+                        if name=='new_conversation':
+                            # Only the executing task may adopt its own first
+                            # conversation. An unrelated reset never refreshes
+                            # a waiting/generated reply's fence token.
+                            from .reply_jobs import current_job,TERMINAL
+                            job=current_job.get()
+                            if (job and job.origin==origin and job.cid is None
+                                    and job.session_epoch==before and job.state not in TERMINAL
+                                    and job.owner is asyncio.current_task()):
+                                job.cid=result;job.session_epoch=self.epoch(origin)
+                                job.generation='';job.first_conversation_created=True
+                        return result
                 return change
             wrapper=make(previous,name);setattr(self.manager,name,wrapper);self.patches.append((name,wrapper,previous))
 

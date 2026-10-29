@@ -12,6 +12,7 @@ services:
       - ./local:/app/local:ro
       - bot_data:/app/AstrBot/data
       - ./logs:/app/logs
-    stop_grace_period: 30s
+      - ./backups:/app/backups
+    stop_grace_period: 120s
 volumes:
   bot_data:

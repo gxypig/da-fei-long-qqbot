@@ -310,6 +310,8 @@ class Element {
  set innerHTML(v){throw new Error('Untrusted HTML');}
  set value(v){this._value=String(v);} get value(){return this._value;}
  append(...children){this.children.push(...children);}
+ before(...siblings){this.previousSiblings=siblings;}
+ after(...siblings){this.nextSiblings=siblings;}
  replaceChildren(){this.children=[];this._text='';}
  addEventListener(name,handler){this.handlers[name]=handler;} setAttribute(){}
 }

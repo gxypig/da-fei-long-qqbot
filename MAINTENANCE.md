@@ -3,7 +3,7 @@
 ## 更新前
 
 1. 记下 `git rev-parse HEAD`；保存自己对插件源码的改动。
-2. 停止本项目：Windows 双击一键结束，Linux用`.venv/bin/python manage.py stop`，Docker用`docker compose stop`。
+2. 停止本项目：Windows 双击一键结束，Linux用`.venv/bin/python manage.py stop`，Docker先执行`docker compose exec astrbot python manage.py drain`，仅在命令成功且返回`drained:true`、`durable:true`后执行`docker compose stop`。排空失败时保留服务，查看健康报告，不继续停止。
 3. 备份整个 `AstrBot/data` 和 `local`。这里有密钥、数据库、图库、梗记忆和定时状态，不能放进公开 GitHub。等待服务确实停止再复制SQLite文件，避免不一致备份。
 4. Docker用数据卷备份方式备份 `bot_data`；不要执行 `down -v`。用 `docker volume ls` 找到实际卷名，再按Docker官方方式导出到本地备份目录。
 
@@ -54,3 +54,19 @@ Windows将解释器替换为`.venv\Scripts\python.exe`。Docker执行`docker com
 ## 1.17升级补充
 
 连续生活与主动决策、合并面板、学习记录重试、AI证据流程、图片恢复和B站事实记录见[第二轮升级说明](SECOND_ROUND.md)。升级保留现有配置、目标、已抽取的到期时间、冷却和历史；源码回退默认保留运行账本，不重放已确认或结果未知的投递。
+
+## 1.20的一致性数据备份
+
+默认每小时在空闲时检查一次一致性备份机会，保留最近24小时及7份每日快照。前台到来或数据库/文件变化会延期重试，健康页显示最近成功时间；不把“线程还在运行”算作备份成功。位置为`backups/data-hourly`，Docker已挂载到宿主`./backups`。
+
+快照包含AstrBot运行数据和插件数据库；不包含插件源码、日志、临时文件，也不包含项目外部QQ客户端或模型服务。`local/settings.json`需另外离线备份。素材以共享内容块保存，**必须保留整个data-hourly目录，不能只拷贝单个snapshots子目录**。
+
+验证并恢复到一个尚不存在的新目录：
+
+```bash
+.venv/bin/python tools/restore_data_snapshot.py backups/data-hourly/snapshots/快照编号/manifest.json restored-data
+```
+
+工具先校验全部文件哈希，再复制并检查SQLite，拒绝覆盖既有目录，不启动服务、不重放消息。先在新目录核对内容；要切换运行数据仍需停止服务、另存当前数据，并保留升级后新增的确认/未知投递事实，避免回退重发。不要将备份提交GitHub。
+
+停机命令必须取得排空、回执及落盘确认才结束自有进程，失败明确报错且保留服务。源码回退、人格版本回退和数据灾难恢复是不同操作，具体见[1.20说明](ROUND6.md)。

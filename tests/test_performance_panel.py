@@ -33,8 +33,8 @@ DEFAULTS = {
     "model_concurrency": 2,
     "reply_hedge_after_seconds": 15,
     "context_window_enabled": False,
-    "context_recent_turns": 12,
-    "context_recent_tokens": 6000,
+    "context_recent_turns": 20,
+    "context_recent_tokens": 10000,
 }
 RANGES = {
     "reply_audit_sample_percent": (0, 100),
@@ -154,6 +154,7 @@ class PerformancePanelAPITests(unittest.IsolatedAsyncioTestCase):
             PREFIX + "meme_repository": ["GET", "POST"],
             PREFIX + "meme_wiki": ["GET", "POST"],
             PREFIX + "panel_review_metrics": ["GET"],
+            PREFIX + "panel_capabilities": ["GET"],
         })
         self.assertEqual(len(registered), self.plugin.context.register_web_api.call_count)
 
@@ -331,6 +332,8 @@ class Element {
   set value(v){this._value=String(v);}
   get value(){return this._value;}
   append(...children){this.children.push(...children);if(this.tag==='select'&&!this._value)this._value=this.children[0]?.value||'';}
+  before(...siblings){this.previousSiblings=siblings;}
+  after(...siblings){this.nextSiblings=siblings;}
   replaceChildren(){this.children=[];this._text='';if(this.tag==='select')this._value='';}
   addEventListener(name,handler){this.handlers[name]=handler;}
   setAttribute(){}

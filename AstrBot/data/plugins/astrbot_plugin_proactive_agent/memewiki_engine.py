@@ -9,6 +9,7 @@ import asyncio
 from collections import OrderedDict
 from contextlib import closing
 import html
+import json
 from pathlib import Path
 import re
 import sqlite3
@@ -35,6 +36,7 @@ def plain_html(value):
 class MemeWikiEngine:
     def __init__(self,path):
         self.path=Path(path);self.titles={};self.cache=OrderedDict();self.signature=None
+        self.local_entries={};self.index=None
         self.stats={'local_hits':0,'remote_hits':0,'snapshot_ready':False}
 
     async def start(self):
@@ -46,17 +48,25 @@ class MemeWikiEngine:
             stat=self.path.stat();signature=(stat.st_mtime_ns,stat.st_size)
         except OSError as exc:
             self.titles={};self.cache.clear();self.signature=None
+            self.local_entries={};self.index=None
             self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
             return False
         if signature==self.signature:return self.stats['snapshot_ready']
         try:
             with closing(sqlite3.connect(self.path.as_uri()+'?mode=ro',uri=True)) as db:
-                titles={folded(row[0]):row[0] for row in db.execute('SELECT title FROM memes')}
+                db.row_factory=sqlite3.Row
+                data=[dict(row) for row in db.execute('SELECT * FROM memes')]
+                titles={folded(row['title']):row['title'] for row in data}
+                entries={folded(entry['phrase']):entry for row in data if (entry:=self.entry(row))}
+                from .meme_index import MemeIndex
+                index=MemeIndex(entries.values())
         except (OSError,sqlite3.Error) as exc:
             self.titles={};self.cache.clear();self.signature=signature
+            self.local_entries={};self.index=None
             self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
             return False
         self.titles=dict(sorted(titles.items(),key=lambda item:-len(item[0])))
+        self.local_entries=entries;self.index=index
         self.cache.clear();self.signature=signature;self.stats['snapshot_ready']=True
         return True
 
@@ -67,11 +77,20 @@ class MemeWikiEngine:
         usage=str(data.get('usage') or '')
         if not title or not meaning.strip():return None
         url='https://cnmeme.wiki/词条/'+quote(str(data.get('slug') or title),safe='')
-        return {'phrase':title,'meaning':plain_html(meaning)[:300],'usage':plain_html(usage)[:240],
+        result={'phrase':title,'meaning':plain_html(meaning)[:300],'usage':plain_html(usage)[:240],
                 'examples':[],'sources':[{'title':title+' · cnmeme.wiki','url':url}],
                 'provenance':'memewiki','verified_at':time.time(),'wiki_slug':data.get('slug','')}
+        for key in ('aliases','tags'):
+            value=data.get(key,[])
+            if isinstance(value,str):
+                try:value=json.loads(value)
+                except ValueError:value=re.split(r'[,，;；|]',value)
+            if isinstance(value,list):result[key]=[plain_html(v)[:40] for v in value[:16] if isinstance(v,str) and v.strip()]
+        return result
 
     def _read(self,title):
+        if not self.refresh():return None
+        if folded(title) in self.local_entries:return dict(self.local_entries[folded(title)])
         if title in self.cache:
             self.cache.move_to_end(title);return dict(self.cache[title])
         try:
@@ -89,15 +108,7 @@ class MemeWikiEngine:
 
     def match(self,text,limit=3):
         if not self.refresh():return []
-        query=folded(text);names=[]
-        if query in self.titles:names.append(self.titles[query])
-        for key,title in self.titles.items():
-            if len(names)>=limit:break
-            if len(key)>=2 and key in query and title not in names:
-                # Latin titles remain whole tokens ("ai" must not match "train").
-                if key.isascii() and key.isalnum() and not re.search(r'(?<![A-Za-z0-9_])'+re.escape(key)+r'(?![A-Za-z0-9_])',query):continue
-                names.append(title)
-        result=[row for title in names if (row:=self._read(title))]
+        result=self.index.search(text,limit=limit,direct_only=True) if self.index else []
         self.stats['local_hits']+=bool(result)
         return result
 

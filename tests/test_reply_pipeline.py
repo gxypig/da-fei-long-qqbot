@@ -38,13 +38,14 @@ class Classifying(unittest.TestCase):
     def test_draft_is_checked_even_after_low_risk_prediction(self):
         for text in ['```python\nprint(1)\n```', '下面是答案：∫x dx', '作为一个AI，我可以帮你', '已经帮你删除文件']:
             self.assertTrue(fast_path_issues(text, '聊聊呗', prediction={'risk': 'low'}))
-        self.assertFalse(fast_path_issues('你这班上的，工资还没到手先交给奶茶店了', '下班买杯奶茶'))
+        self.assertFalse(fast_path_issues('你这班上的，工资还没到手先交给奶茶店了', '下班买杯奶茶',prediction={'risk':'low'}))
+        self.assertIn('prediction_unavailable',fast_path_issues('下班了', '下班买杯奶茶'))
 
     def test_explicit_risks_tools_and_state_changes_are_never_fast_passed(self):
         for prompt in ['帮我写个Python脚本', '证明这道题', '你到底是什么模型']:
             self.assertTrue(fast_path_issues('这题看得本龙头大', prompt))
         for kwargs in [{'used_tools': True}, {'media': 1}, {'mode': 'management'},
-                       {'state': {'mood': 'timid'}}, {'state': {'proactive': True}}]:
+                       {'state': {'mood': 'stop'}}, {'state': {'proactive': True}}]:
             self.assertTrue(fast_path_issues('本龙来了', '你好', **kwargs))
 
     def test_old_tool_history_does_not_force_every_future_chat_through_review(self):
@@ -83,18 +84,50 @@ def plugin():
 
 
 class Pipeline(unittest.IsolatedAsyncioTestCase):
+    async def test_review_rule_update_invalidates_existing_approval(self):
+        from unittest.mock import patch
+        from data.plugins.astrbot_plugin_proactive_agent import persona_authority
+        p=plugin();bind_request('a',['同一条输入'],False)
+        before=p.review_policy_version();approve_once('a','同一段正文',policy_version=before)
+        with patch.object(persona_authority,'REVIEW_FUNCTIONAL',persona_authority.REVIEW_FUNCTIONAL+'\n新的事实校验规则'):
+            after=p.review_policy_version()
+            self.assertNotEqual(before,after)
+            self.assertFalse(consume_approval('a','同一段正文',policy_version=after))
+
+    async def test_prediction_uses_pinned_role_once_before_and_after_enrichment(self):
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import _bound
+        binding={'persona_id':'engineer','persona_version':'version-one','persona_status':'selected',
+            'persona_prompt':'MASTER','persona_variants':{'chat':'ONE CHAT ROLE','review':'UNUSED REVIEW'*100,'bili':'UNUSED BILI'*100},
+            'persona_fallbacks':{'gallery_empty':'UNUSED FALLBACK'}}
+        token=_bound.set(binding)
+        try:
+            for enriched in (False,True):
+                p=plugin();p._generate_json=AsyncMock(return_value=json.dumps({'risk':'low','image_ids':[]}))
+                e=event('今天不错');e.set_extra('qqbot_character',{'mood':'cheeky','visual_intent':'none',**(binding if enriched else {})})
+                await p.prepare_reply_prediction(e)
+                payload=p._generate_json.call_args.args[1]
+                state=payload['state'];self.assertEqual(state['persona_version'],'version-one')
+                self.assertEqual(state['persona_prompt'],'ONE CHAT ROLE');self.assertNotIn('persona_variants',state)
+                self.assertNotIn('UNUSED',json.dumps(payload));self.assertIsNotNone(p.reply_prediction(e))
+                changed=_bound.set({**binding,'persona_version':'version-two'})
+                try:self.assertIsNone(p.reply_prediction(e))
+                finally:_bound.reset(changed)
+                await p._close_reply_pipeline()
+        finally:_bound.reset(token)
+
     async def test_optional_review_off_does_not_add_risk_only_model_call(self):
         p = plugin(); p.config['reply_review_enabled'] = False
         p._generate_json = AsyncMock()
         self.assertIsNone(p.prepare_reply_prediction(event('下班啦')))
         p._generate_json.assert_not_awaited()
 
-    async def test_slow_prediction_never_delays_safe_final_text_and_history_matches(self):
+    async def test_missing_prediction_uses_full_review_without_awaiting_prediction(self):
         p = plugin(); e = event('下班买杯奶茶')
         gate = asyncio.Event()
         task = asyncio.create_task(gate.wait())
         e.set_extra('qqbot_reply_prediction', task)
         draft = '你这工资还没到手，先交给奶茶店了'
+        p._reviewer.review.return_value=draft
         response = SimpleNamespace(completion_text=draft, result_chain=MessageChain([Plain(draft)]))
         history = SimpleNamespace(messages=[Message(role='user', content='下班买杯奶茶'),
                                             Message(role='assistant', content=[TextPart(text=draft)])])
@@ -103,11 +136,11 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(p.review_agent_reply(e, history, response), .2)
             self.assertEqual(response.completion_text, draft)
             self.assertEqual(history.messages[-1].content[-1].text, draft)
-            p._reviewer.review.assert_not_awaited()
+            p._reviewer.review.assert_awaited_once()
             guard = OutboundGuard(p, p._reviewer)
             actual = await guard.prepare('send_group_msg', {'group_id': '100', 'message': draft})
             self.assertEqual(actual['message'][0]['data']['text'], draft)
-            p._reviewer.review.assert_not_awaited()
+            p._reviewer.review.assert_awaited_once()
         finally:
             task.cancel(); await asyncio.gather(task, return_exceptions=True)
 

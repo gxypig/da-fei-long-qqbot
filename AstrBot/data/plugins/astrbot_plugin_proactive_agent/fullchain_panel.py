@@ -5,15 +5,15 @@ import json
 from quart import jsonify, request
 from .reply_jobs import QueueConflict
 
-FEATURES={'reply_queue_enabled':False,'reply_queue_concurrency':2,
+FEATURES={'reply_queue_enabled':False,'reply_queue_concurrency':4,
           'adaptive_context_enabled':False,'image_memory_enabled':False,
-          'ai_profiles_enabled':False,'ai_probe_enabled':False}
+          'ai_profiles_enabled':False,'ai_probe_enabled':False,'hourly_data_backup_enabled':True}
 
 
 def feature_settings(plugin):
     values={k:plugin._cfg(k,v) for k,v in FEATURES.items()}
     revision=hashlib.sha256(json.dumps(values,sort_keys=True).encode()).hexdigest()
-    return {'values':values,'revision':revision}
+    return {'values':values,'revision':revision,'field_revisions':{k:hashlib.sha256(json.dumps([k,v]).encode()).hexdigest() for k,v in values.items()}}
 
 
 def register_fullchain_panel(plugin):
@@ -45,14 +45,16 @@ def register_fullchain_panel(plugin):
         if not isinstance(body,dict) or not isinstance(body.get('values'),dict):
             return jsonify(status='error',message='设置格式不完整'),400
         values=body['values']
-        if set(values)!=set(FEATURES) or any(type(values[k]) is not type(v) for k,v in FEATURES.items()):
-            return jsonify(status='error',message='设置字段或类型不完整'),400
-        if not 1<=values['reply_queue_concurrency']<=8:
+        if not values or not set(values)<=set(FEATURES) or any(type(v) is not type(FEATURES[k]) for k,v in values.items()):
+            return jsonify(status='error',message='设置字段或类型不正确'),400
+        if 'reply_queue_concurrency' in values and not 1<=values['reply_queue_concurrency']<=8:
             return jsonify(status='error',message='回复并发须为1至8'),400
         async with lock:
-            if body.get('revision')!=feature_settings(plugin)['revision']:
+            current=feature_settings(plugin);revisions=body.get('field_revisions')
+            valid=(isinstance(revisions,dict) and all(revisions.get(k)==current['field_revisions'][k] for k in values)) if set(values)!=set(FEATURES) and revisions is not None else body.get('revision')==current['revision']
+            if not valid:
                 return jsonify(status='error',message='设置已变化，请刷新'),409
-            previous={k:plugin.config.get(k) for k in FEATURES};missing=set(FEATURES)-set(plugin.config)
+            previous={k:plugin.config.get(k) for k in values};missing=set(values)-set(plugin.config)
             try:
                 plugin.config.update(values)
                 if plugin.config.save_config() is False:raise OSError('save rejected')
@@ -98,43 +100,9 @@ def register_fullchain_panel(plugin):
         except (TimeoutError,OSError):return jsonify(status='error',message='设置已进入保存队列，请刷新确认，勿换请求ID重复操作'),503
 
     async def drain():
-        # Stop producers before draining their already admitted replies. The
-        # durable pre-send reservation still covers cancellation during I/O.
-        companions=[plugin]
-        getter=getattr(plugin.context,'get_registered_star',None)
-        meta=getter('astrbot_plugin_bili_scroll') if getter else None
-        if meta and meta.activated:companions.append(meta.star_cls)
-        tasks=[]
-        for owner in companions:
-            for name in ('_task','_fixed_task','_account_task'):
-                task=getattr(owner,name,None)
-                if task and not task.done():task.cancel();tasks.append(task)
-            task=getattr(getattr(owner,'actions',None),'_task',None)
-            if task and not task.done():task.cancel();tasks.append(task)
-        if tasks:await asyncio.wait(tasks,timeout=.5)
-        await plugin._reply_queue.drain(8)
-        stores=[];waiters=[]
-        for owner in companions:
-            for name in ('_delivery','_image_memory','_ai_profiles','_life'):
-                store=getattr(getattr(owner,name,None),'store',None)
-                if store:stores.append(store)
-            store=getattr(owner,'_share_store',None)
-            if store:stores.append(store)
-            for name in ('_learning','_sent_memory'):
-                persistence=getattr(getattr(owner,name,None),'_persistence',None)
-                if persistence:waiters.append(persistence.flush())
-        async def saved(store):
-            while store.pending:await store.flush(next(iter(store.pending)))
-        waiters.extend(saved(store) for store in stores)
-        for name in ('_live_journal','_audit_writer'):
-            queue=getattr(getattr(plugin,name,None),'queue',None)
-            if queue:waiters.append(queue.join())
-        if waiters:
-            try:
-                async with asyncio.timeout(3):await asyncio.gather(*waiters,return_exceptions=True)
-            except TimeoutError:pass
-        return jsonify(status='ok',data={'drained':not plugin._reply_queue.active,'replay':False,
-            'pending_persistence':sum(len(store.pending) for store in stores)})
+        from .safe_drain import drain_project
+        result=await drain_project(plugin)
+        return jsonify(status="ok" if result["drained"] else "error",data=result,message="; ".join(result["errors"])),200 if result["drained"] else 503
 
     async def model_probe():
         from .work_scheduler import model_work

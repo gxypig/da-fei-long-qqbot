@@ -16,6 +16,7 @@ from .delivery_ledger import delivery_scope,DeliveryUnconfirmed
 from .session_fence import get_fence,for_session
 from .sent_memory import conversation_id,remember_sent
 from .proactive_variety import variety,TooSimilar
+from .session_mute import recipient_task
 
 HK=timezone(timedelta(hours=8))
 EVENT_TYPES={'tool','chat_confirmed','virtual','plan'}
@@ -32,25 +33,14 @@ COMPOSE_SYSTEM='''为大肥龙的一次主动联系评估时机并写正文。�
 保持嘴欠、傲娇、亲近而自然的龙娘风格；不使用固定轮换题库，不重复近期发送的意思。只在本会话使用私密事项。'''
 
 
-async def role_context(plugin,origin,recent=(),cid=None):
-    from .conversation_style import STYLE
+async def role_context(plugin,origin,recent=(),cid=None,purpose='proactive'):
     from .dragon_character import proactive_note
-    from .persona_authority import PRIORITY
-    persona=''
-    try:
-        cfg=plugin.context.get_config(umo=None if origin=='qzone' else origin)
-        manager=plugin.context.persona_manager
-        if origin=='qzone':value=await manager.get_default_persona_v3()
-        else:
-            conversation=await plugin.context.conversation_manager.get_conversation(origin,cid) if cid else None
-            _,value,_,_=await manager.resolve_selected_persona(umo=origin,
-                conversation_persona_id=getattr(conversation,'persona_id',None),
-                platform_name=origin.split(':',1)[0],provider_settings=cfg.get('provider_settings',{}))
-        persona=(value.get('prompt',value.get('system_prompt','')) if isinstance(value,dict)
-            else getattr(value,'prompt','') or getattr(value,'system_prompt',''))
-    except (AttributeError,TypeError,KeyError):pass
+    from .persona_authority import PRIORITY,FUNCTIONAL_STYLE,bind_origin,role_text
+    state=await bind_origin(plugin,origin,cid,purpose)
     life=getattr(plugin,'_life',None)
-    return (persona or plugin._cfg('personality',''))+'\n'+STYLE+proactive_note(origin,plugin._cfg,recent,persona or plugin._cfg('personality',''))+(life.context(origin) if life else '')+PRIORITY
+    return (role_text('qzone' if origin=='qzone' else purpose,state)+'\n'+FUNCTIONAL_STYLE
+        +proactive_note(origin,plugin._cfg,recent,state.get('persona_prompt',''),state)
+        +(life.context(origin) if life else '')+PRIORITY)
 
 
 class ProactiveLife:
@@ -209,13 +199,18 @@ class ProactiveLife:
         used=set(contact.get('consumed_events',[]));events=[r for r in self.events(origin) if r['id'] not in used and not r.get('resolved_at')]
         # Private follow-up beats public fictional activity. A future promise is not yet due.
         events=[r for r in events if not r.get('due_at') or r['due_at']<=now]
+        def available(event):
+            id_=hashlib.sha256((origin+':'+event['id']).encode()).hexdigest()[:24]
+            previous=self.store.rows.get('candidate:'+id_,{})
+            return previous.get('status') not in {'confirmed','unknown','drop','submitting'} and (previous.get('retry_at') or 0)<=now
+        events=[r for r in events if available(r)]
         events.sort(key=lambda r:(r['visibility']==origin,r['source']=='plan',r['at']),reverse=True)
         event=events[0] if events else None
         if event is None and not required:return None
         return {'id':hashlib.sha256((origin+':'+(event['id'] if event else 'required:'+str(int(now//60)))).encode()).hexdigest()[:24],
             'origin':origin,'mode':mode,'required':required,'event_ids':[event['id']] if event else [],
             'basis':event or {'source':'plan','summary':'用户设置的明确必发任务','completed':False,'visibility':origin},
-            'motive':'跟进对方在本会话确认的事项' if event and event['visibility']==origin else '分享当前龙娘日常或实际活动' if event else '执行明确必发计划',
+            'motive':'跟进对方在本会话确认的事项' if event and event['visibility']==origin else '分享当前角色日常或实际活动' if event else '执行明确必发计划',
             'expires_at':min(event['expires_at'],now+3600) if event else now+3600,'created_at':now}
 
     def decide(self,candidate,committing=False):
@@ -236,6 +231,7 @@ class ProactiveLife:
                 status=targets.status(origin)
                 if not status['available']:return {'decision':'defer','reason':status['reason'],'retry_at':status.get('resume_at') or now+300}
         if not required:
+            if contact.get('next_candidate_after',0)>now:return {'decision':'defer','reason':'上次候选已结束，等待下次检查机会','retry_at':contact['next_candidate_after']}
             if p._work.busy():return {'decision':'defer','reason':'先处理正常回复','retry_at':now+30}
             if contact.get('unanswered',0)>=max(1,int(p._cfg('proactive_unanswered_limit',2))):
                 return {'decision':'defer','reason':'连续主动消息尚未得到回应','retry_at':now+1800}
@@ -248,9 +244,12 @@ class ProactiveLife:
 
     def record_decision(self,candidate,decision):
         if candidate:
+            if decision['decision'] in {'drop','unknown'}:
+                contact=self.store.rows.get('contact:'+candidate['origin'],{})
+                self.store.put('contact:'+candidate['origin'],{**contact,'next_candidate_after':self.clock()+(1800 if decision['decision']=='unknown' else 300)})
             old=self.store.rows.get('candidate:'+candidate['id'],{})
             # A later preview/check cannot erase a terminal receipt or reopen an unknown send.
-            terminal=old.get('status') in {'confirmed','unknown'}
+            terminal=old.get('status') in {'confirmed','unknown','drop'}
             self.store.put('candidate:'+candidate['id'],{**old,**candidate,'status':old['status'] if terminal else decision['decision'],
                 'reason':old.get('reason',decision['reason']) if terminal else decision['reason'],'retry_at':decision.get('retry_at'),
                 'delivery_id':decision.get('delivery_id',old.get('delivery_id'))})
@@ -263,6 +262,7 @@ class ProactiveLife:
                 'origin':candidate.get('origin') if candidate else None,'candidate':candidate,'decision':decision})
         except RuntimeError:pass
 
+    @recipient_task(lambda self,origin,*a,**kw:origin)
     async def opportunity(self,origin,mode='free',required=False,dry_run=False,check=None):
         if dry_run:
             candidate=self.candidate(origin,mode,required)
@@ -277,7 +277,7 @@ class ProactiveLife:
             epoch=fence.epoch(origin) if fence else 0
             recent=[] if origin=='qzone' else list(p._recent_messages.get(origin,[]))[-8:]
             payload={'candidate':candidate,'recent_messages':recent,'already_confirmed':variety(p).history(origin)}
-            system=COMPOSE_SYSTEM+'\n'+await role_context(p,origin,[r['text'] for r in recent],cid)
+            system=COMPOSE_SYSTEM.replace('为大肥龙的一次主动联系','为当前角色的一次主动联系').replace('虚拟龙娘日常','角色的虚拟日常').replace('保持嘴欠、傲娇、亲近而自然的龙娘风格','按当前人格的用途版本表达')+'\n'+await role_context(p,origin,[r['text'] for r in recent],cid,'schedule' if mode=='fixed' else 'proactive')
             attempt={'state':'preparing'};token=delivery_scope.set(attempt)
             async def permitted():
                 if check:await check()

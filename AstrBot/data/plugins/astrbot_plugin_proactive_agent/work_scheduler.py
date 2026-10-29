@@ -24,20 +24,21 @@ import re
 import time
 import uuid
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager,asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
 from urllib.parse import urlsplit, urlunsplit
 
 
-KINDS = ('interactive', 'scheduled', 'auxiliary', 'background')
+KINDS = ('interactive', 'review', 'scheduled', 'auxiliary', 'background')
 TAIL_GUARD_MARKER = '[QQBOT_CASUAL_TAIL_GUARD_V1]'
 _kind = ContextVar('qqbot_model_work_kind', default=None)
 _lease = ContextVar('qqbot_model_work_lease', default=None)
 _reply = ContextVar('qqbot_reply_work', default=None)
 _prediction_turn = ContextVar('qqbot_prediction_admission', default=None)
 _provider_observation = ContextVar('qqbot_provider_observation', default=None)
+_review_verdict_observer = ContextVar('qqbot_review_verdict_observer', default=None)
 _DONE = object()
 _HEDGE_SKIPPED = object()
 _STATE_KEY = '_qqbot_work_state'
@@ -73,6 +74,20 @@ def model_work(kind):
         yield
     finally:
         _kind.reset(token)
+
+
+@contextmanager
+def review_verdict_observer(callback):
+    """Notify once per review attempt as soon as raw model output arrives."""
+    seen=False
+    def arrived():
+        nonlocal seen
+        if not seen:
+            seen=True
+            if callback is not None:callback()
+    token=_review_verdict_observer.set(arrived)
+    try:yield arrived
+    finally:_review_verdict_observer.reset(token)
 
 
 def _config_get(cfg, name, default):
@@ -370,6 +385,9 @@ class _Job:
     released: bool = False
     hedge: _HedgeControl | None = None
     preempted: bool = False
+    status_code:int|None=None
+    timed_out:bool=False
+    rate_limit_reported:bool=False
 
 
 class ModelScheduler:
@@ -392,13 +410,17 @@ class ModelScheduler:
         self._timer = None
         self._closed = False
         self._sources = set()
+        self._last_lane={};self._since_scheduled={}
+        from .adaptive_limits import AdaptiveLimits
+        self.adaptive=AdaptiveLimits(clock)
 
     def _limit(self, key):
         value = _config_get(self.cfg, 'model_concurrency', 2)
         if isinstance(value, dict):
             value = value.get(key, value.get('default', 2))
         try:
-            return max(1, int(value)) if not isinstance(value, bool) else 2
+            initial=max(1,min(3,int(value))) if not isinstance(value,bool) else 2
+            return self.adaptive.limit(key,initial) if _config_get(self.cfg,'model_adaptive_concurrency',True) else initial
         except (TypeError, ValueError, OverflowError):
             return 2
 
@@ -420,8 +442,12 @@ class ModelScheduler:
             self._pump()
 
     def _priority(self, job, now):
-        aged = job.kind == 'scheduled' and now - job.queued >= self.promotion_seconds
-        return (-1 if aged else KINDS.index(job.kind), job.sequence)
+        aged=job.kind=='scheduled' and now-job.queued>=self.promotion_seconds
+        allowed=aged and self._since_scheduled.get(job.key,0)>=9
+        if allowed:return (-1,job.sequence)
+        if job.kind in {'interactive','review'}:
+            return (0 if job.kind!=self._last_lane.get(job.key) else 1,job.sequence)
+        return (KINDS.index(job.kind)+1,job.sequence)
 
     def _pump(self):
         if self._timer is not None:
@@ -430,6 +456,8 @@ class ModelScheduler:
         if self._closed:
             return
         now = self.clock()
+        for key in self._sources:
+            self.adaptive.touch(key,sum(j.key==key for j in self._active),self._limit(key))
         if self.busy():
             self._idle_since = None
             for job in tuple(self._active):
@@ -441,7 +469,9 @@ class ModelScheduler:
         elif self._idle_since is None:
             self._idle_since = now
         idle = self._idle_since is not None and now - self._idle_since >= self.idle_seconds
-        for job in sorted(self._waiting, key=lambda item: self._priority(item, now)):
+        candidates=sorted(self._waiting,key=lambda item:self._priority(item,now))
+        while candidates:
+            job=candidates.pop(0)
             if job.ready.cancelled():
                 self._waiting.remove(job)
                 continue
@@ -455,15 +485,20 @@ class ModelScheduler:
             if job.kind == 'background' and not idle:
                 continue
             running = [item for item in self._active if item.key == job.key]
+            necessary=any(w.key==job.key and w.kind in {'interactive','review'} and not w.ready.cancelled() for w in self._waiting)
+            if job.kind=='scheduled':
+                if any(item.kind=='scheduled' for item in self._active):continue
+                if necessary and (now-job.queued<self.promotion_seconds or self._since_scheduled.get(job.key,0)<9):continue
+            if job.kind=='auxiliary' and necessary:continue
             # Speculative idle learning must not occupy every upstream slot.
             # Keep all work queued; real replies retain the configured concurrency.
             if job.kind=='background' and any(item.kind=='background' for item in running):
                 continue
             if len(running) >= self._limit(job.key):
-                if job.kind == 'interactive':
+                if job.kind in {'interactive','review','scheduled'}:
                     for duplicate in running:
                         if (duplicate.after_primary and duplicate.kind=='auxiliary'
-                                and duplicate.trace_id!=job.trace_id and not duplicate.paused
+                                and not duplicate.paused
                                 and duplicate.worker is not None and not duplicate.worker.done()):
                             # Only the optional shared risk/image prediction is
                             # disposable. Its caller falls back to local image
@@ -486,9 +521,15 @@ class ModelScheduler:
             self._waiting.remove(job)
             job.started = now
             self._active.add(job)
+            if job.kind in {'interactive','review'}:
+                self._last_lane[job.key]=job.kind
+                self._since_scheduled[job.key]=min(9,self._since_scheduled.get(job.key,0)+1)
+            elif job.kind=='scheduled':self._since_scheduled[job.key]=0
             if job.kind == 'interactive' and job.trace is not None:
                 job.trace.primary_admitted = True
             job.ready.set_result(None)
+            self.adaptive.touch(job.key,sum(j.key==job.key for j in self._active),self._limit(job.key))
+            candidates=sorted(self._waiting,key=lambda item:self._priority(item,now))
         if (self._idle_since is not None and not idle
                 and any(job.kind == 'background' for job in self._waiting)):
             self._timer = asyncio.get_running_loop().call_later(
@@ -558,6 +599,15 @@ class ModelScheduler:
         return asyncio.CancelledError()
 
     def _report(self, job, outcome):
+        if job.started is not None:
+            from .wire_admission import _frame
+            frame=_frame.get()
+            if frame and frame.scheduler is self:
+                from .chain_metrics import model_completed
+                model_completed(self.clock()-job.started,(job.started-job.queued)*1000,job.kind)
+            self.adaptive.finish(job.key,job.started-job.queued,self.clock()-job.started,
+                status=job.status_code,timed_out=job.timed_out,
+                necessary=job.kind in {'interactive','review','scheduled'} and outcome in {'ok','failed'},already_down=job.rate_limit_reported)
         if self.audit:
             try:
                 fields = {
@@ -571,6 +621,12 @@ class ModelScheduler:
             except Exception:
                 pass  # A diagnostic sink must never cause a retry of successful I/O.
 
+    def _wire_error(self,job,exc):
+        job.status_code=getattr(exc,'status_code',None) or getattr(getattr(exc,'response',None),'status_code',None)
+        job.timed_out=isinstance(exc,TimeoutError) or type(exc).__name__=='APITimeoutError'
+        if job.status_code==429 and not job.rate_limit_reported:
+            self.adaptive.rate_limit(job.key);job.rate_limit_reported=True
+
     async def run(self, provider, operation, *, kind=None, hedge=None):
         """Await a model-only factory; preserve its result/exception and arguments."""
         key = provider_key(provider)
@@ -583,6 +639,8 @@ class ModelScheduler:
             token = _lease.set((self, job))
             try:
                 return await operation()
+            except Exception as exc:
+                self._wire_error(job,exc);raise
             finally:
                 _lease.reset(token)
                 self._release(job)
@@ -612,7 +670,7 @@ class ModelScheduler:
         except HedgePreempted:
             outcome = 'preempted'
             raise
-        except Exception:
+        except Exception as exc:
             # Some adapters translate cancellation/cleanup into an ordinary
             # exception. Requested preemption must still preserve the caller's
             # recovery path instead of becoming a model failure.
@@ -620,6 +678,8 @@ class ModelScheduler:
                 reason = self._cancel_reason(job)
                 outcome = 'closed' if isinstance(reason, WorkClosed) else 'paused' if isinstance(reason, BackgroundPaused) else 'preempted'
                 raise reason from None
+            job.status_code=getattr(exc,'status_code',None) or getattr(getattr(exc,'response',None),'status_code',None)
+            job.timed_out=isinstance(exc,TimeoutError) or type(exc).__name__=='APITimeoutError'
             raise
         finally:
             self._release(job)
@@ -673,6 +733,8 @@ class ModelScheduler:
                         reply.set_result(item)
                     if complete:
                         return
+            except Exception as exc:
+                self._wire_error(job,exc);raise
             finally:
                 try:
                     if iterator is not None:
@@ -714,12 +776,14 @@ class ModelScheduler:
         except BackgroundPaused:
             outcome = 'paused'
             raise
-        except Exception:
+        except Exception as exc:
             if (job.paused or self._closed) and not asyncio.current_task().cancelling():
                 reason = self._cancel_reason(job)
                 outcome = 'closed' if isinstance(reason, WorkClosed) else 'paused'
                 raise reason from None
             outcome = 'failed'
+            job.status_code=getattr(exc,'status_code',None) or getattr(getattr(exc,'response',None),'status_code',None)
+            job.timed_out=isinstance(exc,TimeoutError) or type(exc).__name__=='APITimeoutError'
             raise
         finally:
             if not job.worker.done():
@@ -736,6 +800,7 @@ class ModelScheduler:
             waiting = [job for job in self._waiting if job.key == key]
             providers[key] = {
                 'limit': self._limit(key), 'auxiliary_limit': 1,
+                'adaptive':self.adaptive.public(key),
                 'running': {kind: sum(job.kind == kind for job in running) for kind in KINDS},
                 'waiting': {kind: sum(job.kind == kind for job in waiting) for kind in KINDS},
                 'oldest_wait_ms': round(max((now - job.queued for job in waiting), default=0) * 1000),
@@ -907,7 +972,7 @@ class WorkRuntime:
         fields = {'mode': 'stream' if stream else 'nonstream',
                   'work_kind': job.kind if job else _kind.get() or 'interactive',
                   'call_role': ('hedge' if job and job.kind == 'auxiliary' else 'primary') if hedging else 'single'}
-        if job is not None and job.hedge is not None and job.kind == 'interactive':
+        if job is not None and job.hedge is not None and job.kind in {'interactive','review'}:
             fields['call_role'] = 'hedge_recovery'
         if job is not None:
             fields['queue_ms'] = round((job.started - job.queued) * 1000)
@@ -935,7 +1000,11 @@ class WorkRuntime:
             raise
         finally:
             _provider_observation.reset(token)
-            model_completed(observation['seconds'],fields.get('queue_ms',0),fields['work_kind'])
+            from .wire_admission import _frame
+            if _frame.get():
+                from .chain_metrics import add
+                add('provider_total_ms',observation['seconds']*1000)
+            else:model_completed(observation['seconds'],fields.get('queue_ms',0),fields['work_kind'])
             self._audit('model_provider_call', {**fields, **observation['usage'],
                 'status': observation['status'], 'provider_elapsed_ms': round(observation['seconds'] * 1000)})
 
@@ -961,6 +1030,27 @@ class WorkRuntime:
 
     def busy(self):
         return self.enabled and self.scheduler.busy()
+
+    async def model_call(self,provider,operation,*,kind=None,hedge=None,maximum=5,on_start=None):
+        from .wire_admission import native,scope
+        lane=kind or _kind.get() or 'interactive'
+        if getattr(self,'_wire_installed',False) and native(provider):
+            async with scope(self.scheduler,provider,lane,maximum,hedge,on_start=on_start):
+                return await operation()
+        async def run():
+            if on_start:on_start()
+            return await operation()
+        return await self.scheduler.run(provider,run,kind=lane,hedge=hedge)
+
+    @asynccontextmanager
+    async def parked_model(self):
+        if getattr(self,'reply_queue',None) is None:
+            yield;return
+        from .reply_jobs import current_job
+        queue=getattr(self,'reply_queue',None);job=current_job.get()
+        if queue and job and job.owner is asyncio.current_task():
+            async with queue.parked(job,'model_or_retry_wait'):yield
+        else:yield
 
     def status(self):
         return {**self.scheduler.status(), 'enabled': self.enabled, 'busy': self.busy(),
@@ -998,11 +1088,12 @@ class WorkRuntime:
     def _hedge_trace(self, values):
         scope = self._scope(owner_required=False)
         if (not self.enabled or not values or not self._hedge_seconds()
-                or (_kind.get() or 'interactive') != 'interactive' or _lease.get() is not None
+                or (_kind.get() or 'interactive') not in {'interactive','review'} or _lease.get() is not None
                 or not scope or scope.trace.reply_owner is None or scope.trace.hedge_used
                 or scope.trace.delivered or values.get('image_urls') or values.get('audio_urls')
                 or values.get('tool_calls_result') or _has_current_tools(values.get('contexts'))
-                or _has_current_media(values)):
+                or _has_current_media(values)
+                or _kind.get()=='review' and values.get('func_tool') is not None):
             return None
         return scope.trace
 
@@ -1029,6 +1120,7 @@ class WorkRuntime:
         from astrbot.core.provider.entities import LLMResponse
 
         delay = self._hedge_seconds()
+        primary_kind = _kind.get() or 'interactive'
         try:
             # Freeze both requests BEFORE either can mutate its context/payload.
             # ToolSet holds bound application handlers: keep it as the original
@@ -1050,22 +1142,33 @@ class WorkRuntime:
         except Exception:
             # Unknown request objects may not be copyable. The optional hedge
             # must never break the established single-call path.
-            return await self.scheduler.run(provider, lambda: previous(_isolated_provider(provider), *args, **kwargs))
+            from .wire_admission import attempts
+            return await self.model_call(provider, lambda: previous(_isolated_provider(provider), *args, **kwargs),maximum=attempts(kwargs))
 
         started, primary_success, primary_finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
         hedge_control = _HedgeControl()
         children = []
+        first_review = None
+        first_review_origin = None
 
-        def validate(response):
+        def validate(response, source):
+            nonlocal first_review, first_review_origin
             if not _valid_model_response(response, LLMResponse):
                 raise InvalidModelResponse('Model returned no complete usable response')
+            # Capture before releasing admission, not in completion-callback
+            # order. A rejected/malformed first verdict must never lose to a
+            # later pass. The reviewer still parses, rewrites and rechecks it.
+            if primary_kind=='review' and first_review is None:
+                first_review=response;first_review_origin=source
             return response
+
+        def selected(response):
+            return first_review if first_review is not None else response
 
         async def primary_operation():
             lane = _isolated_provider(template)
-            started.set()  # Measure slow execution, not time waiting for a slot.
             try:
-                result = validate(await previous(lane, *first_args, **first_kwargs))
+                result = validate(await previous(lane, *first_args, **first_kwargs),'primary')
                 primary_success.set()  # Set BEFORE releasing the source's slot.
                 hedge_control.primary_succeeded = True
                 return result
@@ -1088,7 +1191,7 @@ class WorkRuntime:
                 return _HEDGE_SKIPPED
             self._hedge_stat('hedged', state, template)
             try:
-                return validate(await previous(_isolated_provider(template), *call_args, **call_kwargs))
+                return validate(await previous(_isolated_provider(template), *call_args, **call_kwargs),'backup')
             except Exception:
                 lease = _lease.get()
                 if not (lease and lease[0] is self.scheduler and lease[1].preempted):
@@ -1098,8 +1201,9 @@ class WorkRuntime:
         async def backup_request():
             with model_work('auxiliary'):
                 try:
-                    return await self.scheduler.run(template, lambda: backup_operation(second_args, second_kwargs),
-                                                    kind='auxiliary', hedge=hedge_control)
+                    from .wire_admission import attempts
+                    return await self.model_call(template, lambda: backup_operation(second_args, second_kwargs),
+                                                    kind='auxiliary', hedge=hedge_control,maximum=attempts(second_kwargs))
                 except HedgePreempted:
                     self._audit('reply_hedge', {'status': 'preempted', 'trace_id': state.trace_id,
                                                'provider': provider_key(template)})
@@ -1108,24 +1212,26 @@ class WorkRuntime:
             await primary_finished.wait()
             if not hedge_control.primary_failed:
                 return _HEDGE_SKIPPED
-            with model_work('interactive'):
-                return await self.scheduler.run(template, lambda: backup_operation(recovery_args, recovery_kwargs),
-                                                kind='interactive', hedge=hedge_control)
+            with model_work(primary_kind):
+                from .wire_admission import attempts
+                return await self.model_call(template, lambda: backup_operation(recovery_args, recovery_kwargs),
+                                                kind=primary_kind, hedge=hedge_control,maximum=attempts(recovery_kwargs))
 
         try:
-            primary = self._hedge_task(self.scheduler.run(template, primary_operation, kind='interactive'), 'primary')
+            from .wire_admission import attempts
+            primary = self._hedge_task(self.model_call(template, primary_operation, kind=primary_kind,maximum=attempts(first_kwargs),on_start=started.set), 'primary')
             children.append(primary)
             timer = self._hedge_task(timer_operation(), 'timer')
             children.append(timer)
             await asyncio.wait((primary, timer), return_when=asyncio.FIRST_COMPLETED)
             if primary.done():
-                return primary.result()
+                return selected(primary.result())
             if self.scheduler._closed:
                 raise WorkClosed('Model scheduler is closed')
             timer.result()
             if (primary_success.is_set() or not self.enabled or not self._hedge_seconds()
                     or state.hedge_used or not state.live or state.delivered):
-                return await primary
+                return selected(await primary)
             # This shared event state also covers sibling tasks, retries and
             # provider fallbacks in the SAME turn. Claim synchronously, once.
             state.hedge_used = True
@@ -1146,9 +1252,9 @@ class WorkRuntime:
                     continue
                 if result is _HEDGE_SKIPPED:
                     continue
-                if candidate is backup:
+                if (first_review_origin=='backup' if primary_kind=='review' else candidate is backup):
                     self._hedge_stat('won', state, template)
-                return result
+                return selected(result)
             # Preserve the primary failure when neither supplied a valid result.
             raise errors.get(primary) or errors.get(backup) or InvalidModelResponse('No usable model response')
         finally:
@@ -1399,11 +1505,15 @@ def install_work_runtime(plugin):
     runtime = getattr(plugin, '_work', None)
     if not isinstance(runtime, WorkRuntime):
         runtime = plugin._work = WorkRuntime(plugin._cfg, plugin._audit)
+    runtime.reply_queue=getattr(plugin,'_reply_queue',None)
+    from .wire_admission import install as install_wire,attempts,native as native_wire,scope as wire_scope
+    restore_wire=install_wire(runtime);runtime._wire_installed=restore_wire is not None
     from aiocqhttp import CQHttp
     from astrbot.core.pipeline.scheduler import PipelineScheduler
     from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
     from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
     from astrbot.core.provider.entities import LLMResponse
+    from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
     from .conversation_review import _receipt
 
     previous_process = InternalAgentSubStage.process
@@ -1411,8 +1521,20 @@ def install_work_runtime(plugin):
     previous_chat = ProviderOpenAIOfficial.text_chat
     previous_stream = ProviderOpenAIOfficial.text_chat_stream
     previous_send = CQHttp.call_action
+    previous_await = ToolLoopAgentRunner._await_or_stop
     chat_signature = inspect.signature(previous_chat)
     stream_signature = inspect.signature(previous_stream)
+
+    @wraps(previous_await)
+    async def await_or_stop(runner, awaitable):
+        if not lease.active or not runtime.enabled:
+            return await previous_await(runner,awaitable)
+        # Native Runner creates a child task for model/context operations. The
+        # provider hook in that child cannot release its parent's execution
+        # capacity. Park the real owner before spawning; native cancellation
+        # still joins the operation before execution is reacquired.
+        async with runtime.parked_model():
+            return await previous_await(runner,awaitable)
 
     @wraps(previous_execute)
     async def execute(scheduler, event):
@@ -1452,14 +1574,17 @@ def install_work_runtime(plugin):
             with runtime._observe_provider(chat_signature, lane, call_args, call_kwargs, hedging=state is not None) as observation:
                 with runtime._provider_time(observation):
                     result = await previous_chat(lane, *call_args, **call_kwargs)
+                verdict_observer=_review_verdict_observer.get()
+                if verdict_observer is not None:verdict_observer()
                 runtime._observe_usage(observation, result)
                 if observation is not None:
                     observation['status'] = 'ok'
                 return result
 
-        if state is not None:
-            return await runtime._hedged_chat(provider, observed_chat, args, kwargs, values, state)
-        return await runtime.scheduler.run(provider, lambda: observed_chat(_isolated_provider(provider), *args, **kwargs))
+        async with runtime.parked_model():
+            if state is not None:
+                return await runtime._hedged_chat(provider, observed_chat, args, kwargs, values, state)
+            return await runtime.model_call(provider, lambda: observed_chat(_isolated_provider(provider), *args, **kwargs),maximum=attempts(kwargs))
 
     @wraps(previous_stream)
     async def text_chat_stream(provider, *args, **kwargs):
@@ -1494,11 +1619,22 @@ def install_work_runtime(plugin):
                         with runtime._provider_time(observation):
                             await _aclose(original)
 
-            iterator = runtime.scheduler.stream(provider, observed_stream,
-                is_final=lambda item: isinstance(item, LLMResponse) and not item.is_chunk)
+            if native_wire(provider):
+                async def admitted_stream():
+                    async with wire_scope(runtime.scheduler,provider,_kind.get() or 'interactive',attempts(kwargs),streaming=True):
+                        inner=observed_stream()
+                        try:
+                            async for item in inner:yield item
+                        finally:await _aclose(inner)
+                from .stream_context import owned_stream
+                iterator=owned_stream(admitted_stream,
+                    is_final=lambda item:isinstance(item,LLMResponse) and not item.is_chunk)
+            else:
+                iterator = runtime.scheduler.stream(provider, observed_stream,
+                    is_final=lambda item: isinstance(item, LLMResponse) and not item.is_chunk)
         try:
-            async for item in iterator:
-                yield item
+            async with runtime.parked_model():
+                async for item in iterator:yield item
         finally:
             await _aclose(iterator)
 
@@ -1513,6 +1649,7 @@ def install_work_runtime(plugin):
                                        platform=_config_get(runtime.cfg, 'platform_id', 'aiocqhttp'), receipt=_receipt.get)
 
     patches = [(PipelineScheduler, 'execute', execute, previous_execute),
+               (ToolLoopAgentRunner, '_await_or_stop', await_or_stop, previous_await),
                (InternalAgentSubStage, 'process', process, previous_process),
                (ProviderOpenAIOfficial, 'text_chat', text_chat, previous_chat),
                (ProviderOpenAIOfficial, 'text_chat_stream', text_chat_stream, previous_stream),
@@ -1525,6 +1662,8 @@ def install_work_runtime(plugin):
 
     def restore():
         lease.close()
+        if restore_wire:restore_wire()
+        runtime._wire_installed=False
         for cls, name, wrapper, previous in reversed(patches):
             if getattr(cls, name) is wrapper:
                 setattr(cls, name, previous)

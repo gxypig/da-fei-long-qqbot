@@ -1,0 +1,732 @@
+[
+  {
+    "id": "direct-01",
+    "category": "direct",
+    "input": "老板说这是福报，啊对对对",
+    "recent": [
+      "前文：我连续加班一周了"
+    ],
+    "expected_intent": "识别对老板话术的敷衍反讽，不真心认同福报"
+  },
+  {
+    "id": "direct-02",
+    "category": "direct",
+    "input": "这破地图我再也不玩了……算了，再开一局，真香",
+    "recent": [
+      "前文：刚说游戏不好玩"
+    ],
+    "expected_intent": "接住立场反转、自打脸的笑点"
+  },
+  {
+    "id": "direct-03",
+    "category": "direct",
+    "input": "我才是小丑，礼物送完发现记错生日了",
+    "recent": [],
+    "expected_intent": "自嘲出错，不攻击收礼的人"
+  },
+  {
+    "id": "direct-04",
+    "category": "direct",
+    "input": "绷不住了，他找了十分钟眼镜，眼镜就在头上",
+    "recent": [],
+    "expected_intent": "因滑稽而笑，不当成情绪崩溃"
+  },
+  {
+    "id": "direct-05",
+    "category": "direct",
+    "input": "一顿操作猛如虎，结算一看零杠五",
+    "recent": [],
+    "expected_intent": "游戏表现与忙碌操作反差"
+  },
+  {
+    "id": "direct-06",
+    "category": "direct",
+    "input": "你这操作，属于是典中典了",
+    "recent": [
+      "前文：朋友又给失败找借口"
+    ],
+    "expected_intent": "吐槽熟悉的套路，不解释典故"
+  },
+  {
+    "id": "direct-07",
+    "category": "direct",
+    "input": "今天的我：CPU烧了",
+    "recent": [
+      "前文：开会三个小时，要求改了五遍"
+    ],
+    "expected_intent": "脑力过载的夸张，不维修电脑"
+  },
+  {
+    "id": "direct-08",
+    "category": "direct",
+    "input": "这波属于痛失网名了",
+    "recent": [
+      "前文：嘴上说全场最强却第一个出局"
+    ],
+    "expected_intent": "对人设与实际表现的反差调侃"
+  },
+  {
+    "id": "direct-09",
+    "category": "direct",
+    "input": "别问，问就是下次一定",
+    "recent": [
+      "前文：朋友已经第三次鸽健身"
+    ],
+    "expected_intent": "识别敷衍承诺，轻松接话"
+  },
+  {
+    "id": "direct-10",
+    "category": "direct",
+    "input": "尊嘟假嘟，这么快就放假？",
+    "recent": [],
+    "expected_intent": "惊喜确认，不逐字纠正拼写"
+  },
+  {
+    "id": "direct-11",
+    "category": "direct",
+    "input": "家人们谁懂啊，刚出门就下雨",
+    "recent": [],
+    "expected_intent": "模仿网络抱怨语气，围绕淋雨"
+  },
+  {
+    "id": "direct-12",
+    "category": "direct",
+    "input": "蚌埠住了，他一本正经把猫叫成了狗",
+    "recent": [],
+    "expected_intent": "好笑而非地名查询"
+  },
+  {
+    "id": "direct-13",
+    "category": "direct",
+    "input": "栓Q，闹钟没响也算帮我睡了个好觉",
+    "recent": [],
+    "expected_intent": "反讽感谢，不当成真实赞赏闹钟"
+  },
+  {
+    "id": "direct-14",
+    "category": "direct",
+    "input": "芭比Q了，作业文件还没保存电脑就重启了",
+    "recent": [],
+    "expected_intent": "担心糟了，提供贴合反应而非烧烤话题"
+  },
+  {
+    "id": "direct-15",
+    "category": "direct",
+    "input": "我现在彻底摆烂了，今晚不想刷日常",
+    "recent": [],
+    "expected_intent": "游戏疲惫放弃内耗，不给道德说教"
+  },
+  {
+    "id": "direct-16",
+    "category": "direct",
+    "input": "谁还不是个打工人呢，早餐都在电梯吃",
+    "recent": [],
+    "expected_intent": "工作赶时间的自嘲"
+  },
+  {
+    "id": "direct-17",
+    "category": "direct",
+    "input": "游戏队友全倒了，他一个人把局翻回来，YYDS",
+    "recent": [],
+    "expected_intent": "赞赏高光表现，不解释缩写字母"
+  },
+  {
+    "id": "direct-18",
+    "category": "direct",
+    "input": "这波叫反向操作，修得比坏之前还坏",
+    "recent": [],
+    "expected_intent": "修理效果适得其反"
+  },
+  {
+    "id": "direct-19",
+    "category": "direct",
+    "input": "一开口就是老懂哥了",
+    "recent": [
+      "前文：没看说明书的人开始教我操作"
+    ],
+    "expected_intent": "反讽装懂，不能当成正面称赞"
+  },
+  {
+    "id": "direct-20",
+    "category": "direct",
+    "input": "你搁这搁这呢",
+    "recent": [
+      "前文：他说成功的秘诀就是要成功"
+    ],
+    "expected_intent": "吐槽循环废话"
+  },
+  {
+    "id": "direct-21",
+    "category": "direct",
+    "input": "建议直接颁个奥斯卡",
+    "recent": [
+      "前文：猫装睡躲洗澡，零食袋一响就醒"
+    ],
+    "expected_intent": "调侃演技，不发布真实获奖消息"
+  },
+  {
+    "id": "direct-22",
+    "category": "direct",
+    "input": "这不科学，但很柯学",
+    "recent": [
+      "前文：侦探动画里大家都没被爆炸吓到"
+    ],
+    "expected_intent": "接动画夸张逻辑，不展开科学批驳"
+  },
+  {
+    "id": "direct-23",
+    "category": "direct",
+    "input": "别骂了别骂了，已经在练了",
+    "recent": [
+      "前文：朋友调侃我跳舞四肢各跳各的"
+    ],
+    "expected_intent": "自嘲练习状态，不突然强制道歉"
+  },
+  {
+    "id": "direct-24",
+    "category": "direct",
+    "input": "爷青回，小时候的游戏又出了新版本",
+    "recent": [],
+    "expected_intent": "怀旧兴奋，不冒充自己真实童年"
+  },
+  {
+    "id": "direct-25",
+    "category": "direct",
+    "input": "这可真是电子榨菜，下饭刚刚好",
+    "recent": [
+      "前文：午休看轻松综艺"
+    ],
+    "expected_intent": "理解消遣视频而非食品"
+  },
+  {
+    "id": "direct-26",
+    "category": "direct",
+    "input": "我这该死的胜负欲，拼图缺一块也非要找出来",
+    "recent": [],
+    "expected_intent": "轻松较真，围绕找拼图"
+  },
+  {
+    "id": "direct-27",
+    "category": "direct",
+    "input": "听君一席话，如听一席话",
+    "recent": [
+      "前文：他说每个人的一天都有二十四小时"
+    ],
+    "expected_intent": "吐槽无信息量，不真心感谢建议"
+  },
+  {
+    "id": "direct-28",
+    "category": "direct",
+    "input": "不是吧阿sir，这都能堵车",
+    "recent": [
+      "前文：凌晨两点出门"
+    ],
+    "expected_intent": "惊讶吐槽，不当成呼叫警察"
+  },
+  {
+    "id": "direct-29",
+    "category": "direct",
+    "input": "好家伙，买个键盘送了这么大一箱空气",
+    "recent": [],
+    "expected_intent": "吐槽过度包装，不指责真实卖家违法"
+  },
+  {
+    "id": "direct-30",
+    "category": "direct",
+    "input": "这就是传说中的天选之人吧",
+    "recent": [
+      "前文：朋友连续两次抽中喜欢的皮肤"
+    ],
+    "expected_intent": "调侃好运，不证明超自然能力"
+  },
+  {
+    "id": "ordinary-01",
+    "category": "ordinary",
+    "input": "工资刚到账，交完房租就只剩一点了",
+    "recent": [],
+    "expected_intent": "工资迅速花掉的自嘲"
+  },
+  {
+    "id": "ordinary-02",
+    "category": "ordinary",
+    "input": "又加班到现在，咖啡都喝凉了",
+    "recent": [],
+    "expected_intent": "工作疲惫"
+  },
+  {
+    "id": "ordinary-03",
+    "category": "ordinary",
+    "input": "昨天说要早睡，结果刷手机刷到两点",
+    "recent": [],
+    "expected_intent": "计划和行动反差"
+  },
+  {
+    "id": "ordinary-04",
+    "category": "ordinary",
+    "input": "打游戏冲得最快，倒得也最快",
+    "recent": [],
+    "expected_intent": "游戏失误自嘲"
+  },
+  {
+    "id": "ordinary-05",
+    "category": "ordinary",
+    "input": "健身卡办了一年，去了两回",
+    "recent": [],
+    "expected_intent": "拖延与消费反差"
+  },
+  {
+    "id": "ordinary-06",
+    "category": "ordinary",
+    "input": "等外卖等到不饿了",
+    "recent": [],
+    "expected_intent": "等待过久"
+  },
+  {
+    "id": "ordinary-07",
+    "category": "ordinary",
+    "input": "闹钟响了五遍，一次都没听见",
+    "recent": [],
+    "expected_intent": "睡过头"
+  },
+  {
+    "id": "ordinary-08",
+    "category": "ordinary",
+    "input": "我搜减肥食谱，最后下单了炸鸡",
+    "recent": [],
+    "expected_intent": "意图与结果反差"
+  },
+  {
+    "id": "ordinary-09",
+    "category": "ordinary",
+    "input": "本来只想买瓶水，提了两袋零食回来",
+    "recent": [],
+    "expected_intent": "购物超出计划"
+  },
+  {
+    "id": "ordinary-10",
+    "category": "ordinary",
+    "input": "朋友说带我赢，结果两个人连输",
+    "recent": [],
+    "expected_intent": "游戏落差"
+  },
+  {
+    "id": "ordinary-11",
+    "category": "ordinary",
+    "input": "老板又临下班改需求，计划全重来",
+    "recent": [],
+    "expected_intent": "工作反复"
+  },
+  {
+    "id": "ordinary-12",
+    "category": "ordinary",
+    "input": "手机只剩百分之一，我还在看视频",
+    "recent": [],
+    "expected_intent": "明知电量低仍继续"
+  },
+  {
+    "id": "ordinary-13",
+    "category": "ordinary",
+    "input": "一把伞都忘带，今天倒是准时下雨",
+    "recent": [],
+    "expected_intent": "不走运的日常"
+  },
+  {
+    "id": "ordinary-14",
+    "category": "ordinary",
+    "input": "群里说好早起，结果全员睡过头",
+    "recent": [],
+    "expected_intent": "集体计划落空"
+  },
+  {
+    "id": "ordinary-15",
+    "category": "ordinary",
+    "input": "队友问我在哪，我已经在复活倒计时了",
+    "recent": [],
+    "expected_intent": "游戏失误的黑色幽默"
+  },
+  {
+    "id": "ordinary-16",
+    "category": "ordinary",
+    "input": "洗完车半小时就下雨了",
+    "recent": [],
+    "expected_intent": "运气反差"
+  },
+  {
+    "id": "ordinary-17",
+    "category": "ordinary",
+    "input": "做饭照着步骤来，端出来像另一道菜",
+    "recent": [],
+    "expected_intent": "手艺反差"
+  },
+  {
+    "id": "ordinary-18",
+    "category": "ordinary",
+    "input": "我练了半天操作，实战还是按错键",
+    "recent": [],
+    "expected_intent": "练习与实战反差"
+  },
+  {
+    "id": "ordinary-19",
+    "category": "ordinary",
+    "input": "买的新猫窝没人睡，快递纸箱倒抢着住",
+    "recent": [],
+    "expected_intent": "宠物选择出人意料"
+  },
+  {
+    "id": "ordinary-20",
+    "category": "ordinary",
+    "input": "开会说五分钟，已经一个小时了",
+    "recent": [],
+    "expected_intent": "拖延超时"
+  },
+  {
+    "id": "ordinary-21",
+    "category": "ordinary",
+    "input": "我每天都说改天整理桌面，桌面每天更乱",
+    "recent": [],
+    "expected_intent": "拖延"
+  },
+  {
+    "id": "ordinary-22",
+    "category": "ordinary",
+    "input": "下楼拿快递都忘了要拿哪个",
+    "recent": [],
+    "expected_intent": "短暂健忘"
+  },
+  {
+    "id": "ordinary-23",
+    "category": "ordinary",
+    "input": "上班五分钟就想着下班",
+    "recent": [],
+    "expected_intent": "工作疲惫"
+  },
+  {
+    "id": "ordinary-24",
+    "category": "ordinary",
+    "input": "排了半天队，轮到我时刚好卖完",
+    "recent": [],
+    "expected_intent": "期待落空"
+  },
+  {
+    "id": "ordinary-25",
+    "category": "ordinary",
+    "input": "这局赢得莫名其妙，队友真的强",
+    "recent": [],
+    "expected_intent": "赞赏队友而非贬低"
+  },
+  {
+    "id": "ordinary-26",
+    "category": "ordinary",
+    "input": "换了个头像就觉得自己游戏变强了",
+    "recent": [],
+    "expected_intent": "自嘲迷信"
+  },
+  {
+    "id": "ordinary-27",
+    "category": "ordinary",
+    "input": "本来清理购物车，清着清着又多了十件",
+    "recent": [],
+    "expected_intent": "越清越多"
+  },
+  {
+    "id": "ordinary-28",
+    "category": "ordinary",
+    "input": "我想省点钱，先买了一本省钱指南",
+    "recent": [],
+    "expected_intent": "省钱的反差"
+  },
+  {
+    "id": "ordinary-29",
+    "category": "ordinary",
+    "input": "抽奖抽了一堆不想要的，朋友一发就中了",
+    "recent": [],
+    "expected_intent": "好运对比"
+  },
+  {
+    "id": "ordinary-30",
+    "category": "ordinary",
+    "input": "周末一觉醒来，早饭午饭可以合并了",
+    "recent": [],
+    "expected_intent": "睡懒觉"
+  },
+  {
+    "id": "serious-01",
+    "category": "serious",
+    "input": "别拿这个开玩笑，我是真的很难过",
+    "recent": [],
+    "expected_intent": "尊重停止玩笑"
+  },
+  {
+    "id": "serious-02",
+    "category": "serious",
+    "input": "请认真回答，我需要整理一下失业后的事情",
+    "recent": [],
+    "expected_intent": "认真协助"
+  },
+  {
+    "id": "serious-03",
+    "category": "serious",
+    "input": "家人去世了，我现在不知道该怎么说",
+    "recent": [],
+    "expected_intent": "尊重哀伤"
+  },
+  {
+    "id": "serious-04",
+    "category": "serious",
+    "input": "我受伤了，正准备找人陪我去医院",
+    "recent": [],
+    "expected_intent": "支持现实求助"
+  },
+  {
+    "id": "serious-05",
+    "category": "serious",
+    "input": "停止玩梗，刚才那句话让我不舒服",
+    "recent": [],
+    "expected_intent": "立即停止调侃"
+  },
+  {
+    "id": "serious-06",
+    "category": "serious",
+    "input": "不要损我了，这件事对我很重要",
+    "recent": [],
+    "expected_intent": "停止损人"
+  },
+  {
+    "id": "serious-07",
+    "category": "serious",
+    "input": "我被困在电梯里，已经按了报警按钮",
+    "recent": [],
+    "expected_intent": "认真接住安全问题"
+  },
+  {
+    "id": "serious-08",
+    "category": "serious",
+    "input": "今天真的快哭了，不想被调侃",
+    "recent": [],
+    "expected_intent": "认真情绪支持"
+  },
+  {
+    "id": "serious-09",
+    "category": "serious",
+    "input": "这不是段子，我确实把重要文件误删了",
+    "recent": [],
+    "expected_intent": "认真处理实际损失"
+  },
+  {
+    "id": "serious-10",
+    "category": "serious",
+    "input": "我没有开玩笑，朋友现在联系不上",
+    "recent": [],
+    "expected_intent": "不虚构情况、不强玩梗"
+  },
+  {
+    "id": "serious-11",
+    "category": "serious",
+    "input": "别阴阳我了，正常说话行吗",
+    "recent": [],
+    "expected_intent": "尊重对方边界"
+  },
+  {
+    "id": "serious-12",
+    "category": "serious",
+    "input": "请不要拿我的家人当梗",
+    "recent": [],
+    "expected_intent": "停止相关玩笑"
+  },
+  {
+    "id": "serious-13",
+    "category": "serious",
+    "input": "我刚失去养了好多年的猫",
+    "recent": [],
+    "expected_intent": "尊重失去宠物的难过"
+  },
+  {
+    "id": "serious-14",
+    "category": "serious",
+    "input": "这几天睡不好，心情很低落",
+    "recent": [],
+    "expected_intent": "不敷衍脆弱情绪"
+  },
+  {
+    "id": "serious-15",
+    "category": "serious",
+    "input": "我想认真聊聊刚才的争执",
+    "recent": [],
+    "expected_intent": "认真沟通"
+  },
+  {
+    "id": "serious-16",
+    "category": "serious",
+    "input": "别叫我小丑，我不喜欢",
+    "recent": [],
+    "expected_intent": "停止不喜欢的称呼"
+  },
+  {
+    "id": "serious-17",
+    "category": "serious",
+    "input": "先别开玩笑了，手机丢了要处理账号",
+    "recent": [],
+    "expected_intent": "认真处理账号问题，不索要秘密"
+  },
+  {
+    "id": "serious-18",
+    "category": "serious",
+    "input": "这件事让我很焦虑，能正常听我说吗",
+    "recent": [],
+    "expected_intent": "认真倾听"
+  },
+  {
+    "id": "serious-19",
+    "category": "serious",
+    "input": "认真点，我不是来玩梗的",
+    "recent": [],
+    "expected_intent": "明确停止玩梗"
+  },
+  {
+    "id": "serious-20",
+    "category": "serious",
+    "input": "我手在流血，正在找纱布",
+    "recent": [],
+    "expected_intent": "认真安全应对"
+  },
+  {
+    "id": "ambiguous-01",
+    "category": "ambiguous",
+    "input": "我家住在蚌埠，周末回去",
+    "recent": [],
+    "expected_intent": "地名不是绷不住"
+  },
+  {
+    "id": "ambiguous-02",
+    "category": "ambiguous",
+    "input": "今天买了真正的榨菜，配白粥吃",
+    "recent": [],
+    "expected_intent": "食品不是视频"
+  },
+  {
+    "id": "ambiguous-03",
+    "category": "ambiguous",
+    "input": "我的CPU温度有点高，风扇声音也大",
+    "recent": [],
+    "expected_intent": "电脑硬件不是脑力梗"
+  },
+  {
+    "id": "ambiguous-04",
+    "category": "ambiguous",
+    "input": "水管堵了，得找师傅疏通",
+    "recent": [],
+    "expected_intent": "普通故障"
+  },
+  {
+    "id": "ambiguous-05",
+    "category": "ambiguous",
+    "input": "文件名是happy_notes.txt",
+    "recent": [],
+    "expected_intent": "英文文件名不拆成短梗"
+  },
+  {
+    "id": "ambiguous-06",
+    "category": "ambiguous",
+    "input": "APP今天更新了界面",
+    "recent": [],
+    "expected_intent": "普通应用"
+  },
+  {
+    "id": "ambiguous-07",
+    "category": "ambiguous",
+    "input": "我刚读了乐理书的第一章",
+    "recent": [],
+    "expected_intent": "乐理不等于乐梗"
+  },
+  {
+    "id": "ambiguous-08",
+    "category": "ambiguous",
+    "input": "着急出门，钥匙没找到",
+    "recent": [],
+    "expected_intent": "着急不是急了嘲讽"
+  },
+  {
+    "id": "ambiguous-09",
+    "category": "ambiguous",
+    "input": "请把音量调到六，别太响",
+    "recent": [],
+    "expected_intent": "数字六不代表赞叹"
+  },
+  {
+    "id": "ambiguous-10",
+    "category": "ambiguous",
+    "input": "公园里有个小丑在表演",
+    "recent": [],
+    "expected_intent": "职业表演不嘲讽聊天者"
+  },
+  {
+    "id": "ambiguous-11",
+    "category": "ambiguous",
+    "input": "真香菇和干香菇怎么存放",
+    "recent": [],
+    "expected_intent": "食品文字不拆真香梗"
+  },
+  {
+    "id": "ambiguous-12",
+    "category": "ambiguous",
+    "input": "我准备做个烧烤，冰箱里还有鸡翅",
+    "recent": [],
+    "expected_intent": "真实烧烤"
+  },
+  {
+    "id": "ambiguous-13",
+    "category": "ambiguous",
+    "input": "银行门口排了三个人，我去取点现金",
+    "recent": [],
+    "expected_intent": "普通日程，不硬补梗"
+  },
+  {
+    "id": "ambiguous-14",
+    "category": "ambiguous",
+    "input": "我想了解这台机器的操作说明",
+    "recent": [],
+    "expected_intent": "实际操作不吐槽一顿操作"
+  },
+  {
+    "id": "ambiguous-15",
+    "category": "ambiguous",
+    "input": "历史书里说这个人物当过皇帝",
+    "recent": [],
+    "expected_intent": "历史信息不是网络称号"
+  },
+  {
+    "id": "ambiguous-16",
+    "category": "ambiguous",
+    "input": "我正在检查日志里的error字段",
+    "recent": [],
+    "expected_intent": "错误字段不是自动认证AI"
+  },
+  {
+    "id": "ambiguous-17",
+    "category": "ambiguous",
+    "input": "这杯咖啡温度正好，先喝一口",
+    "recent": [],
+    "expected_intent": "普通陈述无需凑梗"
+  },
+  {
+    "id": "ambiguous-18",
+    "category": "ambiguous",
+    "input": "明天六点的车，今晚得早点睡",
+    "recent": [],
+    "expected_intent": "时间数字不是梗"
+  },
+  {
+    "id": "ambiguous-19",
+    "category": "ambiguous",
+    "input": "文件标题是memo_weekly，记得别改名",
+    "recent": [],
+    "expected_intent": "普通英文边界"
+  },
+  {
+    "id": "ambiguous-20",
+    "category": "ambiguous",
+    "input": "家里老人喜欢听戏，我陪她看一会儿",
+    "recent": [],
+    "expected_intent": "家庭日常不是角色争执"
+  }
+]

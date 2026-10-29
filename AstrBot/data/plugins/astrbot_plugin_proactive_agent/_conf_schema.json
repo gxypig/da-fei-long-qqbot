@@ -272,12 +272,6 @@
     "type": "int",
     "default": 2
   },
-  "chat_low_latency": {
-    "description": "简单闲聊低推理档（试验）",
-    "type": "bool",
-    "default": false,
-    "hint": "默认关闭，长多图历史实测未证明单独启用能提速。兼容GPT-5/6，历史图片保留；当前多模态、工具续写和用户显式推理参数保留原档。不兼容时回退。"
-  },
   "context_window_enabled": {
     "description": "智能压缩长聊天上下文",
     "type": "bool",
@@ -287,14 +281,20 @@
   "context_recent_turns": {
     "description": "近期完整对话最多保留轮数",
     "type": "int",
-    "default": 12,
+    "default": 20,
     "hint": "4至40轮；遇到图片等较大内容会按预算减少，但至少保留最近4轮和完整当前任务。"
   },
   "context_recent_tokens": {
     "description": "近期上下文估算预算",
     "type": "int",
-    "default": 6000,
+    "default": 10000,
     "hint": "2000至16000，估算值，不包含人设、工具定义与旧事摘要。当前任务、最少4轮或明确历史查询可超出预算。"
+  },
+  "chat_low_latency": {
+    "description": "简单闲聊低推理档（试验）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭，长多图历史实测未证明单独启用能提速。兼容GPT-5/6，历史图片保留；当前多模态、工具续写和用户显式推理参数保留原档。不兼容时回退。"
   },
   "fixed_message_random_enabled": {
     "type": "bool",
@@ -351,30 +351,10 @@
     "type": "bool",
     "default": false
   },
-  "learning_record_days": {
-    "type": "int",
-    "default": 30,
-    "description": "学习过程最长保留天数（1至365）"
-  },
-  "proactive_min_gap_minutes": {
-    "type": "int",
-    "default": 5,
-    "description": "普通主动消息最短冷却分钟（1至1440）"
-  },
   "proactive_life_enabled": {
     "type": "bool",
     "default": false,
     "description": "按连续生活、事件依据和联系动机决定主动消息；关闭可回退旧逻辑"
-  },
-  "learning_record_limit": {
-    "type": "int",
-    "default": 2000,
-    "description": "学习过程最多保留条数（50至50000），不限制知识学习"
-  },
-  "proactive_unanswered_limit": {
-    "type": "int",
-    "default": 2,
-    "description": "连续多少次主动消息未回应后暂停普通主动联系（1至10）"
   },
   "fixed_message_required": {
     "type": "bool",
@@ -386,9 +366,29 @@
     "default": false,
     "description": "动态定时规则作为明确必发任务；关闭时允许跳过无依据的动态"
   },
-  "counterattack_apology_enabled": {
-    "description": "旧版反差：被怼后强制短句认怂。默认关闭，反应跟随当前人格",
+  "proactive_unanswered_limit": {
+    "type": "int",
+    "default": 2,
+    "description": "连续多少次主动消息未回应后暂停普通主动联系（1至10）"
+  },
+  "proactive_min_gap_minutes": {
+    "type": "int",
+    "default": 5,
+    "description": "普通主动消息最短冷却分钟（1至1440）"
+  },
+  "learning_record_limit": {
+    "type": "int",
+    "default": 2000,
+    "description": "学习过程最多保留条数（50至50000），不限制知识学习"
+  },
+  "learning_record_days": {
+    "type": "int",
+    "default": 30,
+    "description": "学习过程最长保留天数（1至365）"
+  },
+  "hourly_data_backup_enabled": {
     "type": "bool",
-    "default": false
+    "default": true,
+    "description": "每小时空闲时一致备份配置、数据库和图片资料；保留24个小时点及最近7个每日点，前台聊天到来时延期"
   }
 }

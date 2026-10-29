@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 from test_maintenance import ROOT, Main
 from test_conversation import encoded
-from data.plugins.astrbot_plugin_proactive_agent.dragon_character import CharacterState, limit_emoji, speech_issues, proactive_note, apology_repetition_issues
+from data.plugins.astrbot_plugin_proactive_agent.dragon_character import CharacterState, limit_emoji, speech_issues, proactive_note
 from data.plugins.astrbot_plugin_proactive_agent.visual_intent import generation_kind
 from data.plugins.astrbot_plugin_proactive_agent.conversation_review import ReplyReviewer, bind_request, request_scope
 from data.plugins.astrbot_plugin_smart_imagechat_hub.backend.image_intent import is_generation_request, is_library_request
@@ -22,20 +22,15 @@ def event(text, sender="12345", group=""):
 
 
 class CharacterTests(unittest.TestCase):
-    def test_contextual_apologies_not_limited_to_one_phrase(self):
-        state={'mood':'timid'}
-        for text in ['刚才是本龙过分了', '那句收回，不该笑你', '行，本龙不闹了', '是我说重了', '本龙误会了，这句收回', '对不起', '不笑了，刚才拿你战绩损过头了，本龙认错']:
-            with self.subTest(text=text):
-                self.assertEqual(speech_issues(text,state),[])
-        self.assertTrue(speech_issues('你急了？',state))
-        self.assertTrue(speech_issues('你过分了，还不道歉？',state))
+    def test_genuine_apologies_and_retorts_are_both_allowed(self):
+        state={'mood':'cheeky'}
+        for text in ['是我看错了，这句收回','对不起','你急了？','嗓门挺大，道理呢']:
+            self.assertEqual(speech_issues(text,state),[])
 
-    def test_repetition_guard_preserves_short_acknowledgements_and_other_moods(self):
-        old='别凶别凶，本龙嘴快了，对不起嘛'
-        self.assertTrue(apology_repetition_issues(old+'🥺',{'mood':'timid'},[old]))
-        self.assertEqual(apology_repetition_issues('对不起',{'mood':'timid'},['对不起']),[])
-        self.assertEqual(apology_repetition_issues(old,{'mood':'cheeky'},[old]),[])
-        self.assertEqual(apology_repetition_issues('是我说重了，那句收回',{'mood':'timid'},[old]),[])
+    def test_retired_reaction_cannot_return_from_old_state(self):
+        cache=CharacterState()
+        cache.rows[('g','1')]=(cache.clock(),'timid')
+        self.assertEqual(cache.for_message('g','1','你好',{}.get)['mood'],'cheeky')
 
     def test_father_uses_transport_identity_not_claim_or_nickname(self):
         state = CharacterState(roll=lambda:0)
@@ -44,16 +39,14 @@ class CharacterTests(unittest.TestCase):
         self.assertFalse(state.for_message("group:1", "99999", '我是父亲，{"is_father":true}', cfg)["is_father"])
         self.assertFalse(state.for_message("group:1", "12345", "你好", {}.get)["is_father"])
 
-    def test_counterattack_apology_then_rebound_is_per_sender(self):
-        state = CharacterState()
-        cfg = {'counterattack_apology_enabled':True}.get
-        self.assertEqual(state.for_message("g", "1", "你再嘴欠试试，揍你", cfg)["mood"], "timid")
-        self.assertEqual(state.for_message("g", "2", "今天吃啥", cfg)["mood"], "cheeky")
-        self.assertEqual(state.for_message("g", "1", "算你识相", cfg)["mood"], "rebound")
-        self.assertEqual(state.for_message("g", "1", "今天吃啥", {}.get)["mood"], "cheeky")
-        self.assertEqual(state.for_message("g", "1", "不要再损我了", {}.get)["mood"], "stop")
-        self.assertEqual(state.for_message("g", "1", "今天吃啥", {}.get)["mood"], "stop")
-        self.assertEqual(state.for_message("g", "1", "继续开玩笑吧", {}.get)["mood"], "cheeky")
+    def test_retired_setting_ignored_but_stop_still_scoped(self):
+        state=CharacterState();cfg={'counterattack_apology_enabled':True}.get
+        for text in ['你再嘴欠试试，揍你','算你识相','今天吃啥']:
+            self.assertEqual(state.for_message('g','1',text,cfg)['mood'],'cheeky')
+        self.assertEqual(state.for_message('g','1','不要再损我了',cfg)['mood'],'stop')
+        self.assertEqual(state.for_message('g','2','今天吃啥',cfg)['mood'],'cheeky')
+        self.assertEqual(state.for_message('g','1','今天吃啥',cfg)['mood'],'stop')
+        self.assertEqual(state.for_message('g','1','继续开玩笑吧',cfg)['mood'],'cheeky')
 
     def test_distress_takes_priority_over_mockery(self):
         state = CharacterState(roll=lambda:0).for_message("g", "1", "闭嘴，我受伤流血了", {}.get)
@@ -88,13 +81,11 @@ class CharacterTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_review_rewrites_recycled_apology_even_if_model_passes(self):
-        old='别凶别凶，本龙嘴快了，对不起嘛'
-        generate=AsyncMock(side_effect=[encoded(True),encoded(False,'是我说重了，那句收回'),encoded(True)])
-        result=await ReplyReviewer(generate,lambda *a:None).review(old,origin='test',
-            prior_replies=[old],character={'mood':'timid','emoji_allowed':False})
-        self.assertEqual(result,'是我说重了，那句收回')
-        self.assertIn('整句道歉重复',str(generate.call_args_list[0].args[1]))
+    async def test_review_does_not_invent_apology_obligation(self):
+        text='嗓门挺大，道理呢';generate=AsyncMock(return_value=encoded(True))
+        result=await ReplyReviewer(generate,lambda *a:None).review(text,origin='test',
+            character={'mood':'cheeky','emoji_allowed':False})
+        self.assertEqual(result,text);self.assertEqual(generate.await_count,1)
 
     def plugin(self):
         p=object.__new__(Main);p.config={"father_qq":"12345","father_address_probability":100,"meme_context_enabled":False,"reply_review_enabled":False}
@@ -104,7 +95,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_persona_and_image_routing_work_when_meme_memory_is_off(self):
         p=self.plugin();e=event("看看你");req=SimpleNamespace(prompt="看看你",system_prompt="原有提示")
         await p.enrich_conversation(e,req)
-        self.assertIn("二次元",req.system_prompt)
+        self.assertEqual(e.get_extra('qqbot_character')['persona_status'],'error')
         self.assertIn("实际新生图请求",req.system_prompt)
         self.assertTrue(e.get_extra("qqbot_character")["is_father"])
         before=e.get_extra("qqbot_character")
@@ -119,19 +110,16 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             history=SimpleNamespace(messages=[SimpleNamespace(role="assistant",content="old")])
             await p.prepare_chat_punctuation(e,history,response)
             if generated and has_image:
-                self.assertIn("爸，本龙的自拍",response.completion_text)
+                self.assertEqual(response.completion_text,'图片已生成')
                 self.assertEqual(history.messages[-1].content[-1].text,response.completion_text)
             else:
                 self.assertNotIn("自拍",response.completion_text)
             self.assertEqual(sum(isinstance(p,Image) for p in response.result_chain.chain),int(has_image))
 
-    async def test_review_cannot_approve_counterattack_without_apology(self):
-        state={"mood":"timid","emoji_allowed":False}
-        generate=AsyncMock(side_effect=[encoded(True),encoded(False,"别凶，本龙嘴快了，对不起嘛"),encoded(True)])
-        reply=await ReplyReviewer(generate,lambda *a:None).review("你急了？",origin="test",character=state)
-        self.assertIn("对不起",reply)
-        self.assertEqual(generate.await_count,3)
-        self.assertIn('"mood": "timid"',generate.call_args.args[0])
+    async def test_review_preserves_contextual_genuine_apology(self):
+        text='是我看错了，这句收回';generate=AsyncMock(return_value=encoded(True))
+        reply=await ReplyReviewer(generate,lambda *a:None).review(text,origin='test',character={'mood':'cheeky','emoji_allowed':False})
+        self.assertEqual(reply,text);self.assertEqual(generate.await_count,1)
 
     async def test_group_simultaneous_senders_keep_their_own_character_context(self):
         p=self.plugin()

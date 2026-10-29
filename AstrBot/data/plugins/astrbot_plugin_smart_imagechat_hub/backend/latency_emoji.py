@@ -85,11 +85,9 @@ def compatible_with_reply(text, character, item, *, semantic_match=False):
     image_tones = _tones(tags)
     if any(_OPPOSITES.get(tone, set()) & image_tones for tone in tones):
         return False
-    if (mood == "timid" or tones & {"sad", "apology"}) and re.search(
+    if (tones & {"sad", "apology"}) and re.search(
         r"嘲讽|挑衅|幸灾乐祸|嘲笑|得意|大笑", tags,
     ):
-        return False
-    if mood == "timid" and "apology" not in image_tones:
         return False
     # A model-selected library ID already has semantic evidence. Requiring a
     # second literal keyword match rejects paraphrases like “眼皮开始打架”.
@@ -573,32 +571,32 @@ class LatencyEmojiMixin:
                     return
                 async with asyncio.timeout(remaining):
                     await asyncio.shield(turn.prepare)
-                    if (not turn.path or not self._current_latency_image(turn)
-                            or not self._latency_choice_fits(turn)
-                            or asyncio.get_running_loop().time() >= deadline):
-                        return
-                    # Reuse the installed task-local route guard and AstrBot API.
-                    from ...astrbot_plugin_proactive_agent.route_guard import bind_route
-                    bind_route(turn.origin, turn.snapshot.get_sender_id(),
-                               getattr(turn.snapshot.message_obj, "message_id", ""),
-                               bool(turn.snapshot.get_group_id()))
-                    turn.sending += 1
-                    try:
-                        from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import optional_attachment
-                        with optional_attachment():
-                            sent = await self.context.send_message(turn.origin, MessageEventResult().file_image(str(turn.path)))
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        self._record_latency_emoji("image_send_failed", turn.companion)
-                        return
-                    finally:
-                        turn.sending -= 1
-                        if turn.closed:
-                            self._cleanup_latency_paths(turn)
-                    if sent is False:
-                        self._record_latency_emoji("image_send_failed", turn.companion)
-                        return
+                if (not turn.path or not self._current_latency_image(turn)
+                        or not self._latency_choice_fits(turn)
+                        or asyncio.get_running_loop().time() >= deadline):
+                    return
+                # The grace deadline bounds preparation, never a submitted platform receipt.
+                from ...astrbot_plugin_proactive_agent.route_guard import bind_route
+                bind_route(turn.origin, turn.snapshot.get_sender_id(),
+                           getattr(turn.snapshot.message_obj, "message_id", ""),bool(turn.snapshot.get_group_id()))
+                turn.sending += 1
+                sending=getattr(self,'_latency_emoji_sending',None)
+                if sending is None:sending=self._latency_emoji_sending=set()
+                task=asyncio.current_task();sending.add(task)
+                try:
+                    from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import optional_attachment
+                    with optional_attachment():
+                        sent = await self.context.send_message(turn.origin, MessageEventResult().file_image(str(turn.path)))
+                except asyncio.CancelledError:raise
+                except Exception:
+                    self._record_latency_emoji("image_send_failed", turn.companion)
+                    return
+                finally:
+                    sending.discard(task);turn.sending -= 1
+                    if turn.closed:self._cleanup_latency_paths(turn)
+                if sent is False:
+                    self._record_latency_emoji("image_send_failed", turn.companion)
+                    return
             elif not self._current_latency_image(turn):
                 return
             self._record_latency_emoji("sent_combined" if turn.embedded else "sent_separate", turn.companion)
@@ -614,6 +612,10 @@ class LatencyEmojiMixin:
             self._finish_latency_turn(turn)
 
     def _finish_latency_turn(self, turn, reason=None):
+        if turn.sending and reason=='superseded':
+            # A newer reply invalidates unsent preparation, not an HTTP send in flight.
+            # The receipt collector owns final cleanup and delivery truth.
+            return
         if reason and not turn.closed:
             self._record_latency_emoji(reason, turn.companion)
         turn.closed = True
@@ -642,6 +644,17 @@ class LatencyEmojiMixin:
     def _cleanup_latency_paths(self, turn):
         if turn.sending:
             return  # A transport may still be reading the prepared file.
+        ledger=getattr(turn.companion,'_delivery',None)
+        job=turn.event.get_extra('qqbot_reply_job')
+        pending=[task for task in getattr(ledger,'receipt_tasks',()) if not task.done()
+                 and job and task.get_name() in {'receipt-'+id_ for id_ in job.sends}]
+        if pending:
+            watched=getattr(turn,'watched_receipts',set())
+            for task in pending:
+                if task not in watched:
+                    watched.add(task);task.add_done_callback(lambda _,turn=turn:self._cleanup_latency_paths(turn))
+            turn.watched_receipts=watched
+            return
         paths = list(turn.cleanup)
         if turn.conversion and turn.conversion.done() and not turn.conversion.cancelled():
             try:
@@ -652,6 +665,10 @@ class LatencyEmojiMixin:
         turn.cleanup = []
 
     async def _terminate_latency_emoji(self):
+        sending=[t for t in getattr(self,'_latency_emoji_sending',()) if not t.done()]
+        if sending:
+            _,pending=await asyncio.wait(sending,timeout=8)
+            if pending:raise RuntimeError('表情包发送回执仍在途中，已中止卸载')
         self._latency_emoji_closed = True
         for turn in list(getattr(self, "_latency_emoji_turns", {}).values()):
             self._finish_latency_turn(turn)

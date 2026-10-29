@@ -25,6 +25,14 @@ def explicit_voice_request(text):
         if re.search(r'(?:发|来|录|回|给|生成).{0,7}(?:语音|音频)|(?:用|以|换成|改成).{0,3}(?:语音|声音|音频)|(?:语音|音频).{0,4}(?:回复|回答|回我|说|读出来)|想听.{0,5}(?:声音|语音)',part):return True
     return False
 
+def forbidden_voice_request(text):
+    text=re.sub(r'```.*?```|“[^”]*”|「[^」]*」|"[^"]*"','',str(text or ''),flags=re.S)
+    if re.search(r'代码|脚本|实现|开发|设置|概率|开关|接口|功能',text):return False
+    for part in reversed(re.split(r'[，,。；;！？!?\n]',text)):
+        if re.search(r'(?:不要|不用|别|不许|禁止|取消|不是让你).{0,8}(?:语音|音频)|(?:语音|音频).{0,5}(?:不要|不用|别发)|(?:只用|直接|用|改成).{0,2}(?:文字|打字)(?:回复|回答|回我|就行|吧)?',part):return True
+        if explicit_voice_request(part):return False
+    return False
+
 
 async def prepare_voice_state(plugin,event,state):
     """Only voice-related turns need local configuration/provider resolution."""
@@ -122,9 +130,11 @@ def install_voice_memory(plugin):
             async for x in old_decorate(stage,event):yield x
             return
         force=explicit_voice_request(event.get_message_str())
+        forbidden=forbidden_voice_request(event.get_message_str())
         event.set_extra('qqbot_voice_result_text',None)
-        if force:
-            stage=copy.copy(stage);stage.tts_trigger_probability=1.0
+        if force or forbidden:
+            stage=copy.copy(stage);stage.tts_trigger_probability=0.0 if forbidden else 1.0
+            force=force and not forbidden
         async for x in old_decorate(stage,event):yield x
         result=event.get_result()
         # Native TTS skips a one-character utterance. Explicit requests must be

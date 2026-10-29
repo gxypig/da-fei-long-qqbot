@@ -9,8 +9,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import time
 import uuid
+import time
 
 from quart import jsonify, request
 
@@ -36,18 +36,17 @@ FIELDS = {
     "reply_audit_sample_percent": 10, "emoji_late_grace_seconds": 3,
     "reply_latency_target_seconds": 30, "model_concurrency": 2,
     "reply_hedge_after_seconds": 15,
-    "context_window_enabled": False, "context_recent_turns": 12, "context_recent_tokens": 6000,
+    "context_window_enabled": False, "context_recent_turns": 20, "context_recent_tokens": 10000,
 }
 LEGACY_FIELDS=set(FIELDS)
-FIELDS['counterattack_apology_enabled']=False
 FIELDS['reply_review_enabled']=False
 FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
 SECTIONS={
     'groups':{'group_flow_enabled','group_passive_max_age','chat_low_latency','group_chat_ids','group_chat_probability','group_wake_words','group_wake_anywhere','auto_quote_enabled'},
-    'character':{'counterattack_apology_enabled','father_qq','father_nickname','emoji_probability','father_address_probability','meme_separate_probability'},
-    'learning':{'idle_learning_enabled','style_learning_enabled','history_recall_enabled','meme_understanding_enabled','learning_record_limit','learning_record_days'},
+    'character':{'father_qq','father_nickname','emoji_probability','father_address_probability','meme_separate_probability'},
+    'learning':{'idle_learning_enabled','style_learning_enabled','meme_understanding_enabled','learning_record_limit','learning_record_days'},
     'proactive':{'enable','allow_group','allow_private','allow_qzone','interval_minutes','quiet_hours','discretionary_enabled',
         'fixed_messages_enabled','fixed_group_ids','fixed_private_ids','fixed_message_interval_minutes','fixed_message_random_enabled',
         'fixed_message_min_minutes','fixed_message_max_minutes','fixed_qzone_enabled','fixed_qzone_interval_minutes',
@@ -202,8 +201,17 @@ class PanelMixin:
             ('meme_repository', self.meme_repository_api, ['GET','POST']),
             ('panel_review_metrics',self.panel_review_metrics_api,['GET']),
             ('meme_wiki',self.meme_wiki_api,['GET','POST']),
+            ('panel_capabilities',self.panel_capabilities_api,['GET']),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
+
+    async def panel_capabilities_api(self):
+        return jsonify(status='ok',data={'schema':2,'settings_sections':True,'partial_feature_updates':True,
+            'features':{'persona_editor':bool(getattr(self,'_personas',None)),
+                'session_mute':bool(getattr(self,'_mutes',None)),
+                'meme_usage':bool(getattr(self,'_meme_usage',None)),
+                'delivery_history':bool(getattr(self,'_delivery',None))},
+            'note':'接口可用性与QQ、模型连接状态独立显示'})
 
     async def meme_wiki_api(self):
         from .wiki_panel import wiki_api
@@ -412,7 +420,8 @@ class PanelMixin:
                     generated=report.get('generated_at') or datetime.fromisoformat(report['time']).timestamp()
                     report['age_seconds']=max(0,time.time()-generated);report['stale']=time.time()>report.get('expires_at',generated+240)
                 except (KeyError,ValueError,TypeError):report['stale']=True
-            delivery=self._delivery.health() if getattr(self,'_delivery',None) else None
+            from .health_projection import runtime_health
+            delivery=runtime_health(self) if getattr(self,'_delivery',None) else None
             return jsonify({"status": "ok", "data": {"report": report, "delivery":delivery,"job": current_job(),"watchdog":local_json('watchdog-heartbeat.json')}})
         # The repair runner must survive AstrBot being offline. No panel execution.
         return jsonify({"status": "error", "message": "请在项目目录运行一键检查修复.bat，面板仅展示最近报告"}), 405

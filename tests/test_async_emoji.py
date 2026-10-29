@@ -116,9 +116,9 @@ class LocalRecall(unittest.TestCase):
         for text in ["我并不开心，我真的很难过", "哈哈我刚才在笑。" + "这是背景。" * 300 + "但其实我很难过", "别笑了，对不起，是我错了"]:
             self.assertFalse(compatible_with_reply(text, {}, happy))
         self.assertFalse(compatible_with_reply("我不同意", {}, item("a", ["同意", "点头"])))
-        for mood in ("serious", "stop", "timid"):
+        for mood in ("serious", "stop"):
             self.assertFalse(compatible_with_reply("哈哈开心", {"mood": mood}, happy))
-        self.assertTrue(compatible_with_reply("对不起，是我错了", {"mood": "timid"}, sorry))
+        self.assertTrue(compatible_with_reply("对不起，是我错了", {"mood": "cheeky"}, sorry))
 
     def test_model_semantic_match_allows_paraphrase_but_not_contradiction(self):
         sleepy = item("sleepy", ["困倦", "睡觉"])
@@ -127,6 +127,13 @@ class LocalRecall(unittest.TestCase):
         happy = item("h", ["开心", "大笑"])
         self.assertFalse(compatible_with_reply("其实我很难过", {}, happy, semantic_match=True))
         self.assertFalse(compatible_with_reply("眼皮打架", {"mood": "serious"}, sleepy, semantic_match=True))
+
+    def test_retired_reaction_state_cannot_force_apology_images(self):
+        happy = item("happy", ["开心", "大笑"])
+        for mood in ("timid", "rebound"):
+            self.assertTrue(compatible_with_reply("哈哈开心极了", {"mood": mood}, happy))
+            self.assertTrue(compatible_with_reply("乐得睡不着", {"mood": mood}, happy, semantic_match=True))
+            self.assertFalse(compatible_with_reply("其实我很难过", {"mood": mood}, happy, semantic_match=True))
 
 
 class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
@@ -365,8 +372,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.p._latency_emoji_stats.get('image_send_failed'), 1)
         self.assertNotIn('sent_separate', self.p._latency_emoji_stats)
 
-    async def test_cancelled_late_send_keeps_temp_file_until_transport_exits(self):
-        entered = asyncio.Event()
+    async def test_next_turn_keeps_submitted_send_and_temp_file_until_receipt(self):
+        entered = asyncio.Event();release=asyncio.Event()
         seen = []
         converted = self.directory / 'sending.gif'
         converted.write_bytes(b'converted')
@@ -374,7 +381,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         async def sending(*args):
             entered.set()
             try:
-                await asyncio.Event().wait()
+                await release.wait()
             finally:
                 seen.append(converted.exists())
         self.p.context.send_message.side_effect = sending
@@ -383,6 +390,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         await self.sent()
         await asyncio.wait_for(entered.wait(), 1)
         await self.start(Event())
+        self.assertFalse(turn.delivery.done());self.assertTrue(converted.exists())
+        release.set()
         await self.drain(turn)
         self.assertEqual(seen, [True])
         self.assertFalse(converted.exists())

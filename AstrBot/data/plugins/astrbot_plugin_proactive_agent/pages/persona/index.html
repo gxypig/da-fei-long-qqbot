@@ -1,0 +1,10 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>人格总设定</title><link rel="stylesheet" href="./style.css"></head><body>
+<main><header><div><p class="eyebrow">大肥龙 · 人格集中管理</p><h1>一份设定，各处同步</h1><p>整理和适配在后台完成，旧版本继续服务；确认全部用途通过校验后一起生效</p></div><label>当前人格<select id="people" aria-label="选择原生人格"></select></label></header>
+<div id="notice" role="status" aria-live="polite">正在连接 AstrBot…</div>
+<section class="editor"><div class="bar"><h2>完整总设定</h2><span id="version"></span><button id="refresh">刷新状态</button></div><textarea id="master" spellcheck="false" aria-label="完整人格总设定" placeholder="首次使用可点击 AI 整理来源，整理结果先成为草稿"></textarea><div class="bar actions"><span id="dirty">尚未加载</span><button id="merge">AI 整理来源</button><button id="save">保存草稿</button><button id="publish" class="primary">保存并同步各用途</button></div></section>
+<section><h2>同步状态</h2><p id="status">尚无任务</p><div id="jobs"></div></section>
+<details><summary>来源、取舍与冲突草稿</summary><div id="sources"></div><pre id="conflicts"></pre></details>
+<details><summary>各用途实际生效文本</summary><div id="variants"></div></details>
+<details><summary>版本记录与回退</summary><div id="versions"></div></details>
+<p class="foot">原生人格的工具权限、技能、预设对话和自定义错误保留。不同人格独立保存；人格停用或内容为空时不自动套用龙娘设定</p>
+</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./app.js"></script></body></html>

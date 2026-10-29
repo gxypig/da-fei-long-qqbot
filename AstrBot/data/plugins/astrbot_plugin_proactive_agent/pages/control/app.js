@@ -8,11 +8,12 @@
   const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
-  booleans.push('counterattack_apology_enabled','proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
+  booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
   numbers.push('learning_record_limit','learning_record_days','proactive_unanswered_limit','proactive_min_gap_minutes','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes');
   strings.push('group_ids','private_ids');
   const fieldValue=k=>booleans.includes(k)?$(k).checked:numbers.includes(k)?Number($(k).value):$(k).value;
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
+  async function capabilities(){const badge=$('capabilities');if(!badge)return;try{const d=await api('panel_capabilities');for(const [view,key] of [['persona','persona_editor'],['sessions','session_mute']]){const b=document.querySelector('[data-subview='+view+']');if(b)b.disabled=!d.features?.[key];}const missing=Object.entries(d.features||{}).filter(([,v])=>!v).map(([k])=>({persona_editor:'人格编辑器',session_mute:'会话静默',meme_usage:'梗使用记录',delivery_history:'投递历史'}[k]||k));badge.textContent=missing.length?'功能待就绪：'+missing.join('、'):'本版管理功能已就绪';}catch{document.querySelectorAll('[data-subview]').forEach(b=>b.disabled=true);badge.textContent='功能接口尚未提供，连接状态单独显示';}}
   async function api(endpoint, body, params) {
     const result = await (body===undefined ? bridge.apiGet(endpoint, params) : bridge.apiPost(endpoint,body));
     if(result?.status==='error') throw new Error(result.message||'请求失败');
@@ -20,12 +21,19 @@
   }
   function changed() {dirty=true; $('save-state').textContent='有未保存的设置';}
   function selected() {return new Set($('group_chat_ids').value.split(/[,，\s]+/).filter(Boolean));}
+  let groupPage=0;
+  const groupSearch=document.createElement('input');groupSearch.type='search';groupSearch.placeholder='搜索群名称或群号';groupSearch.setAttribute('aria-label','搜索特殊接话群');
+  const groupPager=document.createElement('div'),groupPrev=document.createElement('button'),groupNext=document.createElement('button'),groupCount=document.createElement('span');
+  groupPrev.type=groupNext.type='button';groupPrev.textContent='上一页群聊';groupNext.textContent='下一页群聊';groupPager.append(groupPrev,groupCount,groupNext);$('group-list').before(groupSearch);$('group-list').after(groupPager);
+  groupSearch.oninput=()=>{groupPage=0;renderGroups();};groupPrev.onclick=()=>{groupPage=Math.max(0,groupPage-1);renderGroups();};groupNext.onclick=()=>{groupPage++;renderGroups();};
   function renderGroups() {
     const checked=selected(), rows=[...groups];
     checked.forEach(id=>{if(!rows.some(g=>g.id===id))rows.push({id,name:'已配置的群（暂未获取名称）'});});
     $('group-list').replaceChildren();
     if(!rows.length){$('group-list').textContent='暂无可选群，可展开下方手动填写群号';return;}
-    rows.forEach(g=>{
+    const query=groupSearch.value.trim().toLowerCase(),matches=rows.filter(g=>!query||(`${g.id} ${g.name}`).toLowerCase().includes(query));
+    groupPage=Math.min(groupPage,Math.max(0,Math.ceil(matches.length/20)-1));groupPrev.disabled=groupPage===0;groupNext.disabled=(groupPage+1)*20>=matches.length;groupCount.textContent=` ${matches.length?groupPage*20+1:0}—${Math.min((groupPage+1)*20,matches.length)} / ${matches.length} `;
+    matches.slice(groupPage*20,(groupPage+1)*20).forEach(g=>{
       const displayName=String(g.name).replace(/<\$[^>]*>/g,'').replace(/[\x00-\x1f]/g,'').trim()||'未命名群';
       const label=document.createElement('label');label.className='group';
       const box=document.createElement('input');box.type='checkbox';box.checked=checked.has(g.id);box.setAttribute('aria-label',`将 ${displayName} 设为特殊接话群`);
@@ -57,7 +65,7 @@
     $('save').disabled=false;renderGroups();renderTargets();
   }
   async function loadGroups() {try{groups=await api('panel_groups');renderGroups();}catch(e){notice(e.message,true);renderGroups();}}
-  async function loadSettings(discard=false) {const serial=++settingsRequest;try{const data=await api('panel_settings');if(serial!==settingsRequest)return;fill(data,{discard});$('connection').textContent='面板已连接';}catch(e){if(serial===settingsRequest){notice(e.message,true);$('connection').textContent='连接失败';}}}
+  async function loadSettings(discard=false) {const serial=++settingsRequest;let connected=false;try{const data=await api('panel_settings');connected=true;if(serial!==settingsRequest)return;fill(data,{discard});$('connection').textContent='面板已连接';}catch(e){if(serial===settingsRequest){notice(e.message,true);$('connection').textContent=connected?'已连接 · 功能版本需更新':'设置暂不可读取';}}}
   async function save(event) {
     event.preventDefault();if(!values)return;
     const section=$('rule-editor')?.open?'proactive':document.querySelector?.('nav .active')?.dataset.tab;
@@ -264,7 +272,7 @@
   async function poll() {
     if(polling)return;polling=true;
     const deadline=Date.now()+900000;
-    while(Date.now()<deadline&&!document.hidden&&!$('health').hidden){await new Promise(r=>setTimeout(r,3000));if(document.hidden||$('health').hidden)break;if(!await refreshHealth())break;}
+    while(Date.now()<deadline&&(!document.hidden&&!window.QQBotSubviewActive)&&!$('health').hidden){await new Promise(r=>setTimeout(r,3000));if(document.hidden||window.QQBotSubviewActive||$('health').hidden)break;if(!await refreshHealth())break;}
     polling=false;
   }
   function renderTargets() {
@@ -324,11 +332,12 @@
     $('meme-prev').disabled=memeOffset===0;$('meme-next').disabled=memeOffset+30>=memeTotal;
   }catch(e){if(serial===memeRequest)notice(e.message,true);}finally{if(serial===memeRequest)memeLoading=false;}}
   let learningRequest=0,learningLoading=false,eventCursors=[null],jobCursors=[null],nextEvent=null,nextJob=null;
-  async function loadLearningContent(paging=false){if(paging!==true){eventCursors=[null];jobCursors=[null];}const serial=++learningRequest;learningLoading=true;try{
+  async function loadLearningContent(paging=false,requestedEvents=eventCursors,requestedJobs=jobCursors){if(paging!==true){requestedEvents=[null];requestedJobs=[null];}const serial=++learningRequest;learningLoading=true;try{
     const params={q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0'};
-    if(eventCursors.at(-1)!==null)params.cursor=eventCursors.at(-1);if(jobCursors.at(-1)!==null)params.job_cursor=jobCursors.at(-1);
+    if(requestedEvents.at(-1)!==null)params.cursor=requestedEvents.at(-1);if(requestedJobs.at(-1)!==null)params.job_cursor=requestedJobs.at(-1);
     const d=await api('learning_content',undefined,params);
     if(serial!==learningRequest)return;
+    eventCursors=requestedEvents.slice();jobCursors=requestedJobs.slice();
     const root=$('learning-content');root.replaceChildren();
     const counts=d.counts||{jobs:(d.jobs||[]).length,events:(d.events||[]).length,rules:(d.rules||[]).length};
     nextEvent=d.next_events_cursor;nextJob=d.next_jobs_cursor;
@@ -347,10 +356,10 @@
     if(!root.childNodes.length)root.textContent=d.closed?'学习服务尚未启动':$('learning-search').value.trim()||$('learning-only-learned').checked?'暂无符合筛选条件的学习内容':'暂无学习内容，新任务会在空闲时执行';
   }catch(e){if(serial===learningRequest){$('learning-content').textContent=e.message;$('learning-content-count').textContent='读取失败，可重新搜索或刷新';}}finally{if(serial===learningRequest)learningLoading=false;}}
   $('refresh-learning-content').addEventListener('click',loadLearningContent);
-  $('learning-prev').onclick=()=>{if(!learningLoading&&eventCursors.length>1){eventCursors.pop();loadLearningContent(true);}};
-  $('learning-next').onclick=()=>{if(!learningLoading&&nextEvent!=null){eventCursors.push(nextEvent);loadLearningContent(true);}};
-  $('learning-jobs-prev').onclick=()=>{if(!learningLoading&&jobCursors.length>1){jobCursors.pop();loadLearningContent(true);}};
-  $('learning-jobs-next').onclick=()=>{if(!learningLoading&&nextJob!=null){jobCursors.push(nextJob);loadLearningContent(true);}};
+  $('learning-prev').onclick=()=>{if(!learningLoading&&eventCursors.length>1)loadLearningContent(true,eventCursors.slice(0,-1));};
+  $('learning-next').onclick=()=>{if(!learningLoading&&nextEvent!=null)loadLearningContent(true,[...eventCursors,nextEvent]);};
+  $('learning-jobs-prev').onclick=()=>{if(!learningLoading&&jobCursors.length>1)loadLearningContent(true,eventCursors,jobCursors.slice(0,-1));};
+  $('learning-jobs-next').onclick=()=>{if(!learningLoading&&nextJob!=null)loadLearningContent(true,eventCursors,[...jobCursors,nextJob]);};
   document.addEventListener?.('qqbot:view',e=>{$('save-bar').hidden=!['idle','speed'].includes(e.detail);if(e.detail==='memes')loadMemes();if(e.detail==='idle')loadLearningContent();if(e.detail==='speed')refreshPerformance();});
   $('search-learning').addEventListener('click',loadLearningContent);
   $('learning-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();return loadLearningContent();}});
@@ -370,5 +379,5 @@
   $('group_chat_probability').addEventListener('input',()=>{$('probability-slider').value=$('group_chat_probability').value;});
   $('refresh-health').addEventListener('click',refreshHealth);
   window.addEventListener('beforeunload',event=>{if(dirty||emojiDirty){event.preventDefault();event.returnValue='';}});
-  (async()=>{try{bridge=window.AstrBotPluginView||window.AstrBotPluginPage;if(!bridge)throw new Error('请从 AstrBot 控制台的插件页面打开');await bridge.ready();await Promise.all([loadSettings(),loadEmojiSettings()]);await loadTargets();}catch(e){notice(e.message,true);}})();
+  (async()=>{try{bridge=window.AstrBotPluginView||window.AstrBotPluginPage;if(!bridge)throw new Error('请从 AstrBot 控制台的插件页面打开');await bridge.ready();await Promise.all([loadSettings(),loadEmojiSettings(),capabilities()]);await loadTargets();}catch(e){notice(e.message,true);}})();
 })();

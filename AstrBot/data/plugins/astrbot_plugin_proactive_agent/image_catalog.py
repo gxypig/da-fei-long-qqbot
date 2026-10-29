@@ -1,5 +1,6 @@
 """Local bridge to the gallery's first caption, keyed by actual file content."""
 import json
+import hashlib
 import re
 
 
@@ -25,11 +26,12 @@ class GalleryFacts:
         row=self.rows.get(digest,{})
         if row.get('caption_status')!='done':return None
         structured=row.get('caption_semantic') or {}
+        source_revision=hashlib.sha256(json.dumps({'semantic':structured,'tags':row.get('auto_tags',[])},ensure_ascii=False,sort_keys=True).encode()).hexdigest()
         if structured.get('content_hash')==digest and isinstance(structured.get('description'),str):
-            return {**structured,'source':'gallery_first_caption'}
+            return {**structured,'source':'gallery_first_caption','source_revision':source_revision}
         tags=[s[:80] for s in row.get('auto_tags',[])[:32] if isinstance(s,str) and s.strip()]
         if not tags:return None
         # Old tag arrays mix scene, intent and OCR. Do not falsely turn them into
         # quoted image text. They still avoid an unnecessary second vision call.
         return {'description':'已有图库标签（画面、情绪和适用语境的混合参考，不是逐字OCR）：'+'、'.join(tags),
-                'ocr':[],'emotion':[],'inferred_usage':[],'text_complete':False,'source':'gallery_legacy_tags'}
+                'ocr':[],'emotion':[],'inferred_usage':[],'text_complete':False,'source':'gallery_legacy_tags','source_revision':source_revision}

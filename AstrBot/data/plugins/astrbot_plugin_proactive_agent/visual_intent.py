@@ -26,9 +26,14 @@ def generation_kind(text):
     return "scene"
 
 
-def generation_note(kind):
+def generation_note(kind,state=None):
     if kind == "none":
         return ""
+    if state is not None and 'persona_status' in state:
+        from .persona_authority import role_text
+        subject='依据当前人格的外观生成虚拟自拍；人格未给外观时保持未指定，不能自行套用其他人物。' if kind=='selfie' else '按请求的主体和构图创作。'
+        return ('\n本次是实际新生图请求，不是图库搜索。'+subject+'使用可用生图能力生成并返回图片附件，不能用旧图代替。'
+            '附图成功后的台词依照本轮图片人格；没有成功就如实说明，不能无图声称已拍好。\n'+role_text('image',state))
     subject = "主体固定为大肥龙本人：成年二次元白色长发龙娘，明显龙角和龙尾，可爱的傲娇表情，虚拟自拍构图。" if kind == "selfie" else "按这次请求的主体和构图创作。"
     return ("\n本次是实际新生图请求，不是图库搜索或文字问答。" + subject +
             "默认二次元插画画风，禁止把龙娘画成真人照片。使用可用生图能力生成并返回图片附件；不要调用表情包检索替代、只复述提示词或只承诺稍后生成。"

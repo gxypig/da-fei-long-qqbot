@@ -48,3 +48,32 @@ class PortableOperations(unittest.TestCase):
         with patch.object(manage,'owned',return_value=None),patch.object(manage,'api') as api:
             manage.stop_child(child)
         api.assert_not_called();child.terminate.assert_not_called()
+
+    def test_missing_or_negative_durable_proof_never_terminates(self):
+        child=Mock(pid=42,_qqbot_identity={'pid':42})
+        for response in ({},{'status':'ok','data':{'drained':True}},
+            {'status':'ok','data':{'drained':True,'durable':True,'pending_receipts':1}},
+            {'status':'error','data':{'drained':False,'durable':False}}):
+            with patch.object(manage,'owned',return_value=child),patch.object(manage,'api',return_value=response):
+                with self.assertRaises(manage.UnsafeShutdown):manage.stop_child(child)
+        child.terminate.assert_not_called()
+
+    def test_unreachable_drain_does_not_kill_owned_process(self):
+        child=Mock(pid=42,_qqbot_identity={'pid':42})
+        with patch.object(manage,'owned',return_value=child),patch.object(manage,'api',side_effect=TimeoutError):
+            with self.assertRaises(manage.UnsafeShutdown):manage.stop_child(child)
+        child.terminate.assert_not_called()
+
+    def test_confirmed_durable_drain_allows_stop(self):
+        child=Mock(pid=42,_qqbot_identity={'pid':42});parent=Mock();parent.children.return_value=[]
+        with tempfile.TemporaryDirectory() as d,patch.object(manage,'LOGS',Path(d)),patch.object(manage,'owned',return_value=parent),\
+            patch.object(manage,'api',return_value={'status':'ok','data':{'drained':True,'durable':True,'pending_persistence':0,'pending_receipts':0}}),\
+            patch('psutil.Process',return_value=parent),patch('psutil.wait_procs',return_value=([],[])):
+            manage.stop_child(child)
+        child.terminate.assert_called_once()
+
+    def test_drain_only_validates_proof_without_signalling_processes(self):
+        data={'drained':True,'durable':True,'pending_receipts':0,'pending_persistence':0}
+        with patch.object(manage,'api',return_value={'status':'ok','data':data}),patch('psutil.Process') as process:
+            self.assertEqual(manage.drain(),data)
+        process.assert_not_called()

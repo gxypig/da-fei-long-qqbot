@@ -75,7 +75,7 @@ class ImageMemory:
     def recover_confirmed(self):
         ledger=getattr(self.plugin,'_delivery',None)
         if not ledger or not self.enabled():return
-        for row in sorted(ledger.store.rows.values(),key=lambda r:r.get('at',0),reverse=True):
+        for row in ledger.store.iter_select(states={'confirmed'},predicate=lambda r:r.get('image'),reverse=True):
             if len(self.pending)>=1000:break
             if row.get('state')=='confirmed':self.confirmed(row,recovery=True)
 
@@ -193,12 +193,14 @@ class ImageMemory:
 
     def reuse_gallery(self,digest):
         row=self.store.rows.get(digest,{})
-        if row.get('semantic',{}).get('version')==VERSION:return True
         raw=self.gallery.semantic(digest)
-        if not raw:return False
+        ready=row.get('semantic',{}).get('version')==VERSION
+        if not raw:return ready
+        if ready and (row.get('source_revision')==raw.get('source_revision') and raw.get('source_revision')
+            or raw['source']=='gallery_legacy_tags' and row.get('semantic_source') not in {None,'gallery_legacy_tags'}):return True
         try:semantic=safe_semantic(raw)
         except ValueError:return False
-        self.store.put(digest,{**row,'semantic':semantic,'semantic_source':raw['source'],'learned_at':time.time()})
+        self.store.put(digest,{**row,'semantic':semantic,'semantic_source':raw['source'],'source_revision':raw.get('source_revision'),'learned_at':time.time()})
         self.stats['gallery_reused']+=1
         return True
 
@@ -209,7 +211,8 @@ class ImageMemory:
         gallery=self.gallery.path.parent
         def candidate():
             for item in self.gallery.rows.values():
-                rel=item.get('rel_path');fingerprint=(rel,item.get('sha256'),item.get('mtime'))
+                rel=item.get('rel_path');semantic=self.gallery.semantic(item.get('sha256'))
+                fingerprint=(rel,item.get('sha256'),item.get('mtime'),semantic.get('source_revision') if semantic else None)
                 if fingerprint in self.scanned or not rel:continue
                 self.scanned.add(fingerprint)
                 path=(gallery/rel).resolve()
@@ -290,10 +293,17 @@ class ImageMemory:
         if not self.enabled() or not FOLLOWUP.search(event.get_message_str() or ''):return
         cid=getattr(getattr(req,'conversation',None),'cid',None)
         quoted={str(getattr(p,'id','')) for p in event.get_messages() if str(getattr(p,'type','')).lower().split('.')[-1]=='reply'}
+        if not quoted and any(type(p).__name__=='Image' for p in event.get_messages()):
+            req.system_prompt=(req.system_prompt or '')+'\n本轮用户附了当前图片；追问优先针对这次附件，不借用其他发言人的历史配图'
+            return
         if quoted:
-            rows=[row for row in self.plugin._delivery.store.rows.values() if row.get('state')=='confirmed'
-                  and row.get('origin')==event.unified_msg_origin and row.get('cid')==cid and str(row.get('message_id')) in quoted]
-        else:rows=self.plugin._delivery.recent(event.unified_msg_origin,cid,include_history=True)
+            rows=self.plugin._delivery.store.select(origin=event.unified_msg_origin,states={'confirmed'},
+                  predicate=lambda r:r.get('cid')==cid and str(r.get('message_id')) in quoted)
+        else:
+            rows=self.plugin._delivery.recent(event.unified_msg_origin,cid,include_history=True)
+            if getattr(event,'get_group_id',lambda:None)():
+                sender=str(event.get_sender_id())
+                rows=[r for r in rows if str(r.get('sender','')) in {sender,''}]
         candidates=[(row,a) for row in rows for a in row.get('attachments',[]) if a.get('kind')=='image']
         if not candidates:return
         # An explicit quoted sent-message id wins; otherwise use the most recent

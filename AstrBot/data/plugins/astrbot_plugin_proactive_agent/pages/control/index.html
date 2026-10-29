@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥龙控制面板</title><link rel="stylesheet" href="./style.css?v=1.16.0"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥龙控制面板</title><link rel="stylesheet" href="./style.css?v=round6-20261029-b"></head>
 <body><main>
   <header><div><div class="eyebrow">大肥龙 / 日常管理</div><h1>让聊天按你的节奏来</h1><p>群聊规则、主动行为和运行状态，都在这里设置</p></div><span id="connection" class="badge">连接中</span></header>
   <div id="notice" role="status" aria-live="polite"></div>
+  <p id="capabilities" role="status">正在检查管理功能是否就绪</p>
   <nav aria-label="管理分类"><button class="tab active" data-tab="groups">群聊规则</button><button class="tab" data-tab="proactive">主动行为</button><button class="tab" data-tab="fixed">固定定时发送</button><button class="tab" data-tab="character">龙娘设定</button><button class="tab" data-tab="performance">性能与审查</button><button class="tab" data-tab="learning">空闲学习</button><button class="tab" data-tab="memes">梗仓库</button><button class="tab" data-tab="health">运行报告</button></nav>
   <form id="settings"><section id="groups" class="tab-panel">
+    <article class="card"><h2>会话管理</h2><p>按群或好友设置静默时间；继续记忆和学习，恢复后不补发旧回复</p><button type="button" data-subview="sessions">打开会话管理</button></article>
     <div id="round2-settings-hidden" hidden>
       <input id="proactive_life_enabled" type="checkbox"><input id="fixed_message_required" type="checkbox"><input id="fixed_qzone_required" type="checkbox">
       <input id="proactive_unanswered_limit" type="number"><input id="proactive_min_gap_minutes" type="number"><input id="learning_record_limit" type="number"><input id="learning_record_days" type="number">
@@ -34,7 +36,7 @@
     <h2>各目标的运行状态</h2><button type="button" id="refresh-schedule" class="secondary">刷新定时状态</button><div id="schedule-status" class="callout">保存选择后约10秒开始计时</div>
   </section>
   <section id="character" class="tab-panel" hidden>
-    <h2>龙娘设定与表达</h2><p>性格以当前会话选定的人格为准；修改AstrBot人格保存后用于新回复。修改下列源码提示词则需要重载插件</p><article class="card"><h2>被反击时的反应</h2><label class="toggle"><input id="counterattack_apology_enabled" type="checkbox">启用旧版反差：被怼后强制短句认怂</label><p>默认关闭，按当前人格自然接话，审阅不因没有道歉而判失败；开启后恢复旧版被怼认怂、下一轮恢复嘴欠的行为。真实过错仍可自然认错</p></article>
+    <h2>龙娘设定与表达</h2><p>在人格编辑器修改后，选择“保存并同步各用途”。全部校验通过后，新回复统一使用新版本；只保存草稿不会改变正在使用的人格</p><article class="card"><h2>统一人格总设定</h2><p>在独立编辑器集中整理和修改人格，各功能同步使用已发布版本</p><button type="button" data-subview="persona">打开人格编辑器</button></article>
     <div class="card-grid"><article class="card"><h2>父亲身份</h2><label for="father_qq">父亲 QQ 号（留空表示不绑定）</label><input id="father_qq" type="text" inputmode="numeric" maxlength="20"><label for="father_nickname">父亲昵称（仅作本机备注）</label><input id="father_nickname" type="text" maxlength="80"><p>只按消息真实发送者的QQ识别；昵称和头像不授予身份，也不改变管理员权限</p></article>
     <article class="card"><h2>偶尔带一个 Emoji</h2><label for="emoji_probability">每轮允许使用的概率（%）</label><input id="emoji_probability" type="number" min="0" max="100" required><p>默认18%，允许时由模型判断是否合适，最多一个。0表示禁用；严肃求助不添加</p></article></div>
     <div class="card-grid"><article class="card"><h2>偶尔称呼父亲</h2><label for="father_address_probability">每轮允许称呼爸 / 老爸的概率（%）</label><input id="father_address_probability" type="number" min="0" max="100" required><p>默认20%。父亲关系始终保留，只调整称呼频率；0表示直接说话，不加称呼</p></article><article class="card"><h2>表情包发送方式</h2><label for="meme_separate_probability">表情包另发一条的概率（%）</label><input id="meme_separate_probability" type="number" min="0" max="100" required><p>默认50%，其余与文字放在一起。0总是合并，100总是分开；只作用于聊天自动配的图库表情，不影响生图附件</p></article></div>
@@ -42,7 +44,6 @@
     <p class="callout">设置下一轮生效，无需重启；主动消息分别选话题，并检查本对象历史与近期重复正文</p>
   </section>
   <section id="performance" class="tab-panel" hidden>
-    <p class="callout">发送前 AI 二次审阅为可选功能，公开版默认关闭；可在插件配置中按需开启。修改这里的策略不会开启二次审阅，只决定已开启审阅后的执行方式</p>
     <div class="section-head"><div><h2>性能与审查</h2><p>全部功能保留，仅改变调度方式；默认关闭延迟优化，沿用全部审查</p></div><button id="refresh-performance" type="button" class="secondary">刷新性能状态</button></div>
     <div class="callout">默认 30s（30秒）目标从收到消息计到真实正文发出，排队、生成和审查都计入；工具任务单独统计。目标用于观察耗时，不是超时后取消任务或保证发送的期限。</div>
     <div class="card-grid">
@@ -52,7 +53,7 @@
         <p>保存后后续调度读取新设置，已开始的任务继续完成。</p></article>
       <article class="card"><h2>审查策略</h2><label class="toggle"><input id="reply_review_enabled" type="checkbox">启用 AI 二次审阅</label><label for="review_policy">选择审查策略</label><select id="review_policy"><option value="all">全部审查（默认）</option><option value="speed_first">速度优先</option></select><p>保留原有功能链，由调度服务按策略安排审查。</p><label for="reply_audit_sample_percent">回复审计抽样比例（%，0至100）</label><input id="reply_audit_sample_percent" type="number" min="0" max="100" step="1" required><label for="emoji_late_grace_seconds">表情包迟到宽限（秒，0至10）</label><input id="emoji_late_grace_seconds" type="number" min="0" max="10" step="1" required></article>
     </div>
-    <article class="card"><h2>长对话记忆</h2><label class="toggle"><input id="context_window_enabled" type="checkbox">智能压缩长聊天上下文</label><label for="context_recent_turns">近期完整对话最多保留轮数（4至40）</label><input id="context_recent_turns" type="number" min="4" max="40" step="1" required><label for="context_recent_tokens">近期上下文估算预算（2000至16000）</label><input id="context_recent_tokens" type="number" min="2000" max="16000" step="500" required><p>默认12轮、6000估算token。较旧内容保留重点摘录，空闲时整理为摘要；当前任务、工具结果、近期图片与最少4轮完整保留，可超出预算。人设、工具定义和摘要另计。原始记录仍在本地，追问旧事优先检索当前会话相关原话，旧图片追问保留原来的图片回看路径。</p><label class="toggle"><input id="history_recall_enabled" type="checkbox">从本地原始文本找回旧事</label><div id="performance-context">尚未提供压缩状态</div></article>
+    <article class="card"><h2>长对话记忆</h2><label class="toggle"><input id="context_window_enabled" type="checkbox">智能压缩长聊天上下文</label><label for="context_recent_turns">近期完整对话最多保留轮数（4至40）</label><input id="context_recent_turns" type="number" min="4" max="40" step="1" required><label for="context_recent_tokens">近期上下文估算预算（2000至16000）</label><input id="context_recent_tokens" type="number" min="2000" max="16000" step="500" required><p>默认20轮、10000估算token。较旧内容保留重点摘录，空闲时整理为摘要；当前任务、工具结果、近期图片与最少4轮完整保留，可超出预算。人设、工具定义和摘要另计。原始记录仍在本地，追问旧事优先检索当前会话相关原话，旧图片追问保留原来的图片回看路径。</p><label class="toggle"><input id="history_recall_enabled" type="checkbox">从本地原始文本找回旧事</label><div id="performance-context">尚未提供压缩状态</div></article>
     <article class="card"><h2>回复预测</h2><label class="toggle"><input id="reply_prediction_enabled" type="checkbox">允许回复预测（默认开启，供延迟优化调度使用）</label><label for="prediction_provider_id">预测模型提供商 ID</label><input id="prediction_provider_id" type="text" placeholder="留空使用插件默认提供商" autocomplete="off"><p>更改后保存设置，后续预测读取新的提供商选择。</p></article>
     <h2 class="status-heading">当前运行状态</h2><p id="performance-status" role="status" aria-live="polite">打开本页后读取运行状态</p>
     <div class="card-grid"><article class="card"><h2>调度工作</h2><div id="performance-work">暂无状态</div></article><article class="card"><h2>预测统计</h2><div id="performance-prediction">暂无状态</div></article></div>
@@ -85,4 +86,4 @@
     <p class="footnote">独立脚本会检查服务、QQ连接、模型和审阅，并重启可恢复的故障服务。需要扫码、重新授权、等待额度或更换网络节点时，会列出原因和下一步</p>
   </section>
   <footer>设置保存后生效 · 特殊群默认不选 · 固定定时独立计时 · 管理员权限保持不变</footer>
-</main><link rel="stylesheet" href="./round2.css?v=1.19.1-r1"><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./fullchain.js?v=1.19.1-r1"></script><script src="./round2.js?v=1.19.1-r1"></script><link rel="stylesheet" href="./wiki.css?v=1.19.1-r1"><script src="./wiki.js?v=1.19.1-r1"></script><script src="./round4.js?v=1.19.1-r1"></script><script src="./app.js?v=1.19.1-r1"></script></body></html>
+</main><link rel="stylesheet" href="./round2.css?v=round6-20261029-b"><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./fullchain.js?v=round6-20261029-b"></script><script src="./round2.js?v=round6-20261029-b"></script><link rel="stylesheet" href="./wiki.css?v=round6-20261029-b"><script src="./wiki.js?v=round6-20261029-b"></script><script src="./round4.js?v=round6-20261029-b"></script><script src="./app.js?v=round6-20261029-b"></script><script src="./subview.js?v=round6-20261029-b"></script></body></html>

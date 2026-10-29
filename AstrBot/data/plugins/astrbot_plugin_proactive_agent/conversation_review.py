@@ -3,21 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import re
 import time
 import uuid
 from contextvars import ContextVar
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from aiocqhttp import CQHttp, Message
 from .chat_style_policy import CHAT_STYLE_POLICY, output_issues
 from .local_recall import BRIEF_RULE
 from .chat_punctuation import PUNCTUATION_RULE, casual_punctuation
-from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address, apology_repetition_issues
+from .dragon_character import character_note, speech_issues, limit_emoji, limit_father_address
 from .voice_memory import voice_note,voice_issues
 from .speaker_context import speaker_note
-from .persona_authority import review_persona
+from .persona_authority import review_persona,REVIEW_FUNCTIONAL
 
 
 REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句话是否像正在 QQ 中随口聊天”，不只是正确、简短或礼貌。
@@ -47,7 +48,10 @@ _approved = ContextVar("qqbot_review_approved", default=None)
 def approve_once(origin, text, *, policy_version=None):
     """A same-task, exact-text receipt; another plugin's edit forces a new review."""
     scope = _request_scope.get() or {}
-    _approved.set((origin, text, time.monotonic(), scope.get('request_id'), policy_version))
+    _approved.set((origin, text, time.monotonic(), scope.get('request_id'), policy_version,approval_context(scope)))
+
+def approval_context(scope):
+    return hashlib.sha256(json.dumps({k:scope.get(k) for k in ('recent','management','character')},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
 
 
 def consume_approval(origin, text, *, policy_version=None):
@@ -56,7 +60,8 @@ def consume_approval(origin, text, *, policy_version=None):
     scope = _request_scope.get() or {}
     return bool(receipt and receipt[0] == origin and receipt[1] == text
                 and time.monotonic() - receipt[2] < 120
-                and receipt[3] == scope.get('request_id') and receipt[4] == policy_version)
+                and receipt[3] == scope.get('request_id') and receipt[4] == policy_version
+                and receipt[5]==approval_context(scope))
 
 
 @contextmanager
@@ -139,7 +144,21 @@ class ReplyReviewer:
         self.stats = {"checked": 0, "rewritten": 0, "failed": 0, "model_calls": 0, "guard_rejections": 0}
         self._slots = asyncio.Semaphore(3)
 
-    async def review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None):
+    async def review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None, on_verdict=None):
+        if not self.enabled() or not text.strip():return text
+        from .reply_jobs import current_job
+        job=current_job.get();queue=getattr(job,'queue',None)
+        # Park the owner BEFORE waiting for the review semaphore. Parking only
+        # the model request permits a capacity cycle: semaphore holders wait to
+        # resume execution while execution holders wait for that semaphore.
+        # Release the review semaphore/deadline before reacquiring execution.
+        parking=(queue.parked(job,'review_slot_or_model_wait')
+                 if queue and job.owner is asyncio.current_task() else nullcontext())
+        async with parking:
+            return await self._review(text,origin=origin,recent=recent,mode=mode,media=media,
+                prior_replies=prior_replies,character=character,on_verdict=on_verdict)
+
+    async def _review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None, on_verdict=None):
         if not self.enabled():return text
         if not text.strip():
             return text
@@ -153,25 +172,31 @@ class ReplyReviewer:
                     formatted=candidate
                     feedback = []
                     for attempt in range(3):
-                        issues = output_issues(candidate, mode, recent) + speech_issues(candidate, state, mode)
+                        issues = ([] if 'persona_status' in state else output_issues(candidate, mode, recent)) + speech_issues(candidate, state, mode)
                         if mode == 'chat':
-                            issues += apology_repetition_issues(candidate, state, prior_replies)
                             issues += voice_issues(candidate,state)
                         video_links = re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', text)
                         if video_links and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', candidate) != video_links:
                             issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))
                         self.stats["model_calls"] += 1
-                        data = json_object(await self.generate(
-                            REVIEW_SYSTEM + "\n" + PUNCTUATION_RULE + BRIEF_RULE + (character_note(state) if state else "")
-                            + (voice_note(state) if mode=='chat' else '')
-                            + (speaker_note(state) if mode=='chat' else '')
-                            + (review_persona(state) if mode=='chat' else '')
-                            + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
-                            {"mode": mode, "同一会话近期消息": list(recent)[-6:],
-                             "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
-                             "待发文字": candidate, "附件数": media, "审阅轮次": attempt + 1,
-                             "必须修正的问题": list(dict.fromkeys(issues + feedback))}, origin,
-                        ))
+                        from .work_scheduler import review_verdict_observer
+                        # Provider admission/hedge cleanup may outlive receipt of
+                        # the raw verdict. Notify at that earlier boundary too,
+                        # so a late prediction cannot discard an existing reject.
+                        with review_verdict_observer(on_verdict) as verdict_arrived:
+                            raw = await self.generate(
+                                (REVIEW_FUNCTIONAL if 'persona_status' in state else REVIEW_SYSTEM) + "\n" + PUNCTUATION_RULE + ('' if 'persona_status' in state else BRIEF_RULE) + (character_note(state) if state else "")
+                                + (voice_note(state) if mode=='chat' else '')
+                                + (speaker_note(state) if mode=='chat' else '')
+                                + (review_persona(state) if mode!='management' else '')
+                                + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
+                                {"mode": mode, "同一会话近期消息": list(recent)[-6:],
+                                 "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
+                                 "待发文字": candidate, "附件数": media, "审阅轮次": attempt + 1,
+                                 "必须修正的问题": list(dict.fromkeys(issues + feedback))}, origin,
+                            )
+                            verdict_arrived()
+                        data = json_object(raw)
                         if any(type(data.get(key)) is not bool for key in ("pass", "natural", "chat_fit")):
                             raise ValueError("Missing explicit review judgements")
                         accepted = data["pass"] and data["natural"] and data["chat_fit"] and not issues
@@ -268,6 +293,12 @@ class OutboundGuard:
         # and clears the rest. Empty components have no visible text; including
         # them here adds spurious newlines and needlessly invalidates its receipt.
         text = "\n".join(container[key] for container, key in slots if container[key])
+        scope=request_scope(origin)
+        if getattr(self.plugin,'_personas',None) and (not scope or 'persona_status' not in scope.get('character',{})):
+            from .persona_authority import bind_origin
+            state=await bind_origin(self.plugin,origin,purpose='qzone' if qzone else 'chat')
+            if scope:scope['character']={**scope.get('character',{}),**state}
+            else:bind_request(origin,recent,mode=='management',state)
         version = (self.plugin.review_policy_version()
                    if self.plugin._cfg('latency_optimization_enabled', False)
                    and hasattr(self.plugin, 'review_policy_version') else None)

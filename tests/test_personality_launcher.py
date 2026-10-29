@@ -70,7 +70,9 @@ class PersonalityLauncherTests(unittest.TestCase):
         editors = [c for c in calls if not c['file'].startswith('http')]
         self.assertTrue(editors)
         self.assertTrue(all(Path(c['file']).name.lower() in {'notepad.exe','code.exe','cursor.exe'} for c in editors))
-        self.assertEqual(sum(c['file'].startswith('http') for c in calls), 7)
+        pages=[c['file'] for c in calls if c['file'].startswith('http')]
+        self.assertEqual(len(pages),8)
+        self.assertTrue(any(p.endswith('/plugin-view/astrbot_plugin_proactive_agent/persona') for p in pages))
         for call in editors:
             args = call['args'] if isinstance(call['args'], list) else [call['args']]
             self.assertTrue(all(a=='--new-window' or a.startswith('"') and a.endswith('"') for a in args))

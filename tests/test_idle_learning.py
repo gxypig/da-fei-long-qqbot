@@ -41,6 +41,31 @@ PREFIXES = {
 
 
 class IdleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_source_revoke_removes_only_source_isolation_and_keeps_other_reasons(self):
+        now=time.time()
+        with self.s._db:
+            for i,reason in enumerate(['','legacy_unverified_delivery']):
+                body={'source':{'platform':'qq','account':'123','kind':'unverified'},'exclusion_reason':reason,'exclude_evidence':bool(reason)}
+                self.s._db.execute('INSERT INTO cases(fingerprint,category,payload,created,expires) VALUES(?,?,?,?,?)',
+                    (f'reclass-{i}','no_template',json.dumps(body),now,now+1000))
+        await self.s.reclassify_source('qq','123','automatic_confirmed')
+        await self.s.reclassify_source('qq','123','unverified')
+        rows=[json.loads(r[0]) for r in self.s._db.execute('SELECT payload FROM cases ORDER BY id')]
+        self.assertFalse(rows[0]['exclude_evidence']);self.assertTrue(rows[1]['exclude_evidence'])
+        self.assertEqual(rows[1]['isolation_reasons'],['legacy_unverified_delivery'])
+
+    async def test_learned_expression_is_pinned_to_persona_version(self):
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import _bound
+        with self.s._db:
+            self.s._db.execute('INSERT INTO versions(rules,published,evidence) VALUES(?,?,?)',
+                (json.dumps(['no_template']),time.time(),json.dumps({'persona':{'persona_id':'dragon','persona_version':'v1'}})))
+        self.assertEqual(self.s._active_rules({'persona_id':'dragon','persona_version':'v1'}),['no_template'])
+        for state in [{'persona_id':'elf','persona_version':'v1'},{'persona_id':'dragon','persona_version':'v2'},
+                      {'persona_id':'dragon','persona_version':'v1','persona_status':'disabled'}]:
+            token=_bound.set(state)
+            try:self.assertEqual(self.s.style_note('根据你的需求，开始吧'),'')
+            finally:_bound.reset(token)
+
     async def asyncSetUp(self):
         self.temp = TemporaryDirectory(prefix="idle-learning-tests-")
         self.root = Path(self.temp.name)

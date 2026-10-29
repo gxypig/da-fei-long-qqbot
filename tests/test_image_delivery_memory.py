@@ -89,17 +89,17 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdaptiveContextTests(unittest.IsolatedAsyncioTestCase):
-    async def test_short_view_keeps_recall_and_tool_pairs_complex_budget(self):
+    async def test_configured_view_keeps_recall_and_tool_pairs_without_shortcut_budget(self):
         with tempfile.TemporaryDirectory() as d:
             cfg={'context_window_enabled':True,'adaptive_context_enabled':True,'context_recent_turns':24,'context_recent_tokens':12000}
             w=ContextWindow(Path(d)/'cache.json',cfg.get,busy=lambda:True);self.addAsyncCleanup(w.close)
             rows=[{'role':'system','content':'私人提示保持不动'}]
             for i in range(30):rows.extend([{'role':'user','content':f'普通闲聊{i}'},{'role':'assistant','content':'随便聊几句'}])
             short=w.project(None,{'messages':rows},'cid')['messages']
-            self.assertLessEqual(len(split_rounds(short)[1]),13);self.assertEqual(short[0],rows[0])
+            self.assertEqual(len(split_rounds(short)[1]),25);self.assertEqual(short[0],rows[0])
             rows[-2]['content']='请分析一下这个问题的完整步骤，比较两种方案'
             complex_=w.project(None,{'messages':rows},'cid')['messages']
-            self.assertGreater(len(complex_),len(short))
+            self.assertEqual(len(complex_),len(short))
 
     async def test_old_picture_only_retrieves_matching_round_and_keeps_current_image(self):
         with tempfile.TemporaryDirectory() as d:

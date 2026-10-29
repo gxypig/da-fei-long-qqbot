@@ -57,6 +57,7 @@ class MemeMemory:
         self.stats = {"detection_hits": 0, "detections": 0, "memory_hits": 0}
         self._retry_after = {}
         self._usage_cache = {}
+        self._index_generation=0;self._index_key=None;self._local_index=None
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -114,22 +115,33 @@ class MemeMemory:
             self.audit("meme_detection", {"elapsed_ms": int((time.monotonic() - started) * 1000), "phrases": len(phrases[:2])})
             return phrases[:2]
 
-    def match(self, text):
-        folded = unicodedata.normalize("NFKC", text).casefold()
-        learned=[row for key, row in sorted(self.entries.items(), key=lambda x: len(x[0]), reverse=True)
-                 if key in folded and self.fresh(row)]
-        primary=self.wiki.match(text) if self.wiki else []
-        result={}
-        for row in [r for r in learned if r.get('provenance')=='custom']+primary+learned:
-            key=row['phrase'].casefold()
-            if key in result:continue
-            result[key]=self._with_understanding(row)
-        return list(result.values())[:4]
+    def match(self,text):
+        return self._retrieve(text,direct_only=True)
+
+    def _retrieve(self,text,recent=(),direct_only=False):
+        from .meme_index import MemeIndex,fold
+        if self.wiki:self.wiki.refresh()
+        signature=(id(self.entries),len(self.entries),self._index_generation,self.wiki.signature if self.wiki else None)
+        if self._local_index is None or self._index_key!=signature:
+            rows=[]
+            for previous in self.entries.values():
+                primary=self.wiki.local_entries.get(fold(previous['phrase'])) if self.wiki and previous.get('provenance')!='custom' else None
+                row=self._with_understanding(primary or previous)
+                if primary or self.fresh(row):rows.append(row)
+            self._local_index=MemeIndex(rows);self._index_key=signature
+        local=self._local_index.search(text,recent,limit=6,direct_only=direct_only)
+        primary=(self.wiki.index.search(text,recent,limit=6,direct_only=direct_only,exclude=self._local_index.rows)
+            if self.wiki and self.wiki.index else [])
+        rows=local+primary
+        rows.sort(key=lambda r:(r['retrieval_kind']=='direct',r.get('provenance')=='custom',r['retrieval_score'],len(r['phrase'])),reverse=True)
+        return rows[:3]
 
     def _with_understanding(self,row):
+        from .meme_index import strings
         previous=self.entries.get(row['phrase'].casefold(),{})
         if row.get('provenance')=='memewiki' and previous.get('provenance')!='custom':
-            row={**row,**{k:v for k,v in previous.items() if k in {'intent','avoid','adaptations','triggers','understood_at'}}}
+            row={**row,**{k:v for k,v in previous.items() if k in {'intent','avoid','adaptations','triggers','understood_at'}},
+                **{k:list(dict.fromkeys(strings(row.get(k))+strings(previous.get(k)))) for k in ('aliases','tags')}}
         return row
 
     def _remember_wiki(self,row):
@@ -171,39 +183,11 @@ class MemeMemory:
             os.fsync(stream.fileno())
         os.replace(staged, self.path)
         self._usage_cache.clear()
+        self._index_generation+=1
 
-    def contextual(self, text, recent=()):
-        """Conservative local recall, optional candidates; never a foreground LLM call."""
-        direct = self.match(text)
-        if re.search(r'救命|急救|去世|自杀|自残|认真|别开玩笑|不要玩梗|密码|验证码', text):
-            return direct
-        query = terms(text[:800])
-        previous = '\n'.join(str(t) for t in recent[-4:]).casefold()
-        ranked = []
-        for key, row in self.entries.items():
-            if key in {r['phrase'].casefold() for r in direct} or not self.fresh(row) or key in previous:
-                continue
-            triggers = row.get('triggers', [])
-            triggered = any(t.casefold() in text.casefold() for t in triggers if isinstance(t,str) and len(t)>=2)
-            usage_text = row.get('usage', '')
-            cached = self._usage_cache.get(key)
-            if cached is None or cached[0] != usage_text:
-                cached = (usage_text, terms(usage_text))
-                self._usage_cache[key] = cached
-            usage = cached[1]
-            overlap = len(query & usage)
-            # Require multiple overlapping terms, not a generic single word.
-            if triggered or overlap >= 3 and overlap / max(1, len(query)) >= .25:
-                ranked.append((100 if triggered else overlap, key, row))
-        selected = (direct + [row for _, _, row in sorted(ranked, key=lambda x:(-x[0],x[1]))[:2]])[:3]
-        # A tiny rotating set of understood scene cards lets the main model reason
-        # beyond exact vocabulary. These are optional references, never auto replies.
-        if len(selected) < 2 and not re.search(r'搜索|查找|生成|画一|计算|代码|脚本|设置|指令|难过|悲伤|受伤', text):
-            pool = [(key,row) for key,row in self.entries.items() if row.get('intent') and self.fresh(row)
-                    and row not in selected and key not in previous]
-            pool.sort(key=lambda p:hashlib.sha256((text[:200]+p[0]).encode()).digest())
-            selected += [row for _,row in pool[:2-len(selected)]]
-        return selected
+    def contextual(self,text,recent=()):
+        """One local index contract across dictionary, custom and learned entries."""
+        return self._retrieve(text,recent)
 
     async def understand(self, phrase, origin='qzone'):
         key = normalize(phrase).casefold()
@@ -253,7 +237,7 @@ class MemeMemory:
                 if not isinstance(value,str) or not value.strip() or len(value)>limit:
                     raise ValueError(f'{phrase} 的 {field} 必填且不超过{limit}字')
                 clean[field] = value.strip()
-            for field, count, limit in [('examples',3,100),('triggers',12,24)]:
+            for field, count, limit in [('examples',3,100),('triggers',12,24),('aliases',12,40),('tags',16,24)]:
                 values = row.get(field, [])
                 if not isinstance(values,list) or len(values)>count or any(not isinstance(v,str) or not (1 if field=='examples' else 2)<=len(v.strip())<=limit for v in values):
                     raise ValueError(f'{phrase} 的 {field} 格式不正确')

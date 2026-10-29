@@ -14,6 +14,7 @@ class AsyncRecordStore:
         self.path=Path(path);self.limit=limit;self.rows={};self.pending={};self.persisted={}
         self.wake=asyncio.Event();self.progress=asyncio.Event();self.task=None;self.closed=False
         self._io=None
+        self._close_task=None;self.closing=False
         self._stats_dirty=False
         self.stats={'failures':0,'dropped':0,'last_error':None,'last_error_at':None,'recovered_at':None}
 
@@ -31,7 +32,7 @@ class AsyncRecordStore:
 
     async def start(self):
         loaded=await asyncio.to_thread(self._load)
-        self.rows={k:body for k,(rev,body) in loaded.items()};self.persisted={k:rev for k,(rev,body) in loaded.items()}
+        self._install_loaded(loaded)
         self.stats.update(self.rows.get('__persistence_stats__',{}).get('stats',{}))
         try:
             spool=json.loads(await asyncio.to_thread(self.path.with_suffix('.pending.json').read_text,'utf-8'))
@@ -45,14 +46,20 @@ class AsyncRecordStore:
         self.task.add_done_callback(lambda _: self.progress.set())
         if self.pending:self.wake.set()
 
+    def _install_loaded(self,loaded):
+        self.rows={k:body for k,(rev,body) in loaded.items()};self.persisted={k:rev for k,(rev,body) in loaded.items()}
+
+    def _trim(self):pass
+
     def put(self,key,body):
-        if self.closed:raise RuntimeError('persistence closed')
+        if self.closed or self.closing:raise RuntimeError('persistence closed or draining')
         if key not in self.pending and key not in self.rows and len(self.pending)>=self.limit:
             self.stats['dropped']+=1;self.stats['last_error']='pending capacity exceeded'
             raise RuntimeError('persistence queue full')
         revision=self.rows.get(key,{}).get('revision',0)+1
         body={**body,'revision':revision}
         self.rows[key]=body;self.pending[key]=(revision,body);self.wake.set()
+        self._trim()
         return body
 
     async def flush(self,key,timeout=3):
@@ -98,6 +105,7 @@ class AsyncRecordStore:
                 for key,(revision,_) in batch.items():
                     self.persisted[key]=revision
                     if self.pending.get(key,(None,))[0]==revision:self.pending.pop(key,None)
+                self._trim()
                 self.progress.set();delay=.1
                 if self.stats['last_error']:
                     self.stats['recovered_at']=time.time();self.stats['latest_error']=self.stats['last_error'];self.stats['last_error']=None
@@ -111,13 +119,20 @@ class AsyncRecordStore:
     def _spool(self):
         path=self.path.with_suffix('.pending.json');temp=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
         try:
-            temp.write_text(json.dumps({k:v[1] for k,v in self.pending.items()},ensure_ascii=False),encoding='utf-8')
+            with temp.open('w',encoding='utf-8') as f:
+                json.dump({k:v[1] for k,v in self.pending.items()},f,ensure_ascii=False);f.flush();os.fsync(f.fileno())
             os.replace(temp,path)
         finally:temp.unlink(missing_ok=True)
 
     async def close(self,timeout=5):
         if self.closed:return
+        if self._close_task is None or self._close_task.done() and self._close_task.exception() is not None:
+            self._close_task=asyncio.create_task(self._finish_close(timeout))
+        await asyncio.shield(self._close_task)
+
+    async def _finish_close(self,timeout):
         self._stats_dirty=True;self._queue_stats()
+        self.closing=True
         try:
             async with asyncio.timeout(timeout):
                 while self.pending:
@@ -130,6 +145,7 @@ class AsyncRecordStore:
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)
         if self._io:
             try:await asyncio.wait_for(asyncio.shield(self._io),3)
-            except Exception:pass
+            except TimeoutError:raise RuntimeError('Persistence writer still active; stopping is unsafe')
+            except Exception:pass  # failed batch remains in the durable spool
         await asyncio.to_thread(self._spool)
         self.closed=True

@@ -11,6 +11,12 @@ def revision(row):return hashlib.sha256(json.dumps(row,ensure_ascii=False,sort_k
 async def wiki_api(plugin):
     memory=plugin._memory
     try:
+        if request.method=='GET' and request.args.get('view')=='usage':
+            usage=getattr(plugin,'_meme_usage',None)
+            if not usage:return jsonify(status='error',message='当前版本不支持使用记录',capabilities={'usage_trace':False}),501
+            cursor=json.loads(request.args['before']) if request.args.get('before') else None
+            if cursor and (not isinstance(cursor,list) or len(cursor)!=2 or not isinstance(cursor[0],(float,int)) or not isinstance(cursor[1],str)):raise ValueError('invalid cursor')
+            return jsonify(status='ok',data=usage.page(cursor))
         if request.method=='POST':
             if request.content_length and request.content_length>20000:raise ValueError('单条词条内容过大')
             body=await request.get_json(silent=True)

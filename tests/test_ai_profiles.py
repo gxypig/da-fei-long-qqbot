@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 import tempfile
 from temp_support import TemporaryDirectory
@@ -10,6 +11,29 @@ from data.plugins.astrbot_plugin_proactive_agent.reply_jobs import QueueConflict
 
 
 class ProfileTests(unittest.IsolatedAsyncioTestCase):
+    async def test_weak_style_and_speed_are_display_only_no_probe_or_learning_isolation(self):
+        from unittest.mock import AsyncMock
+        self.observe('分点说一下我今天的计划')
+        row=self.service.store.rows[self.key];message=row['observations'][-1]['id']
+        self.service.generate=AsyncMock(return_value=json.dumps({'judgement_type':'ai','evidence':[
+            {'kind':'style','message_ids':[message],'summary':'有分点','strength':'strong'},
+            {'kind':'speed','message_ids':[message],'summary':'很快','strength':'weak'}],'counterevidence':[],'reason':'只有文风'}))
+        await self.service.analyze(self.key,row['epoch'])
+        current=self.service.store.rows[self.key]
+        self.assertEqual(len(current['evidence']),2);self.assertFalse(current['probe_eligible'])
+        self.assertEqual(self.service.source_label('qq','123'),'unverified')
+        self.assertIsNone(await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1'))
+
+    async def test_semantic_probe_closes_as_not_asked_when_final_text_contains_no_question(self):
+        from unittest.mock import AsyncMock
+        await self.seed_suspect()
+        self.service.generate=AsyncMock(return_value=json.dumps({'judgement_type':'insufficient','evidence':[],'counterevidence':[], 'probe_links':[]}))
+        probe=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        self.service.delivery(probe,'今天先聊这个吧','confirmed','delivered','message')
+        await self.service.analyze(self.key,probe['epoch'])
+        row=self.service.store.rows[self.key]
+        self.assertIsNone(row['outstanding']);self.assertEqual(row['probe_history'][probe['id']]['outcome'],'not_asked')
+
     async def asyncSetUp(self):
         self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.now=1793000000.;self.cfg={'ai_profiles_enabled':True,'ai_probe_enabled':True}

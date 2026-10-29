@@ -12,18 +12,15 @@ from data.plugins.astrbot_plugin_proactive_agent.life_state import role_context
 
 class PersonaAuthorityTests(unittest.IsolatedAsyncioTestCase):
     def test_default_counterattack_does_not_force_apology(self):
-        state = CharacterState().for_message('g', '1', '你再嘴欠试试，揍你', {}.get)
-        self.assertEqual(state['mood'], 'confronted')
-        self.assertFalse(state['apology_required'])
-        self.assertEqual(speech_issues('嗓门挺大，道理呢', state), [])
-        self.assertIn('本轮没有强制认怂要求', character_note(state))
+        state=CharacterState().for_message('g','1','你再嘴欠试试，揍你',{}.get)
+        self.assertEqual(state['mood'],'cheeky');self.assertNotIn('apology_required',state)
+        self.assertEqual(speech_issues('嗓门挺大，道理呢',state),[])
 
-    def test_switching_off_does_not_reuse_legacy_mood(self):
-        cache = CharacterState()
-        state = cache.for_message('g', '1', '你再嘴欠试试，揍你', {'counterattack_apology_enabled':True}.get)
-        self.assertTrue(state['apology_required'])
-        self.assertEqual(cache.for_message('g', '1', '今天吃啥', {}.get)['mood'], 'cheeky')
-        self.assertFalse(cache.for_message('g', '1', '揍你', {}.get)['apology_required'])
+    def test_legacy_toggle_is_no_longer_an_input(self):
+        cache=CharacterState()
+        for enabled in (True,False):
+            state=cache.for_message('g','1','揍你',{'counterattack_apology_enabled':enabled}.get)
+            self.assertEqual(state['mood'],'cheeky');self.assertNotIn('apology_required',state)
 
     async def test_selected_persona_is_live_and_session_scoped(self):
         resolve = AsyncMock(side_effect=[('one', {'prompt':'保留锋芒'}, None, None), ('two', {'prompt':'当前已修改的口吻'}, None, None)])
@@ -58,4 +55,5 @@ class PersonaAuthorityTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_manager_does_not_break_generation(self):
         state = {'persona_prompt':'old'}
         await bind_persona(SimpleNamespace(), event('你好'), SimpleNamespace(), state)
-        self.assertNotIn('persona_prompt', state)
+        self.assertEqual(state['persona_prompt'],'')
+        self.assertEqual(state['persona_status'],'error')
