@@ -91,7 +91,7 @@
     "AstrBot/data/plugins/astrbot_plugin_proactive_agent/voice_memory.py": "65fc49587b213efdb363ed8f1c74d03396b3e33d67b9a0d6519b2302a7056b42",
     "AstrBot/data/plugins/astrbot_plugin_proactive_agent/wiki_panel.py": "0351c1b982cf1ba192426dc0f7c39e31ae4496fdb0daf6007d27ecbfb6351234",
     "AstrBot/data/plugins/astrbot_plugin_proactive_agent/wire_admission.py": "fa72acde8f8b21eabcc512c67f18a8af62bc3792eb5797bcb1c64f2bb3f55ea9",
-    "AstrBot/data/plugins/astrbot_plugin_proactive_agent/work_scheduler.py": "bd519b40b6a7e4e44c18a8c147eb178f11521393f1c052dfc6bfac62c0ccb890",
+    "AstrBot/data/plugins/astrbot_plugin_proactive_agent/work_scheduler.py": "5d77a042ae3b972799f54a236a93822adb62be7e5774348c6ffe7b0a3a94669f",
     "AstrBot/data/plugins/astrbot_plugin_proactive_agent/_conf_schema.json": "b10deea5eb1a199d80818a0ddf07fe3402250d05249444f70e4b2372e87e3db1",
     "AstrBot/data/plugins/astrbot_plugin_smart_imagechat_hub/.gitattributes": "1a1dbe176bc233b499d35a57db7513f2941c99ab9759f177830c9149be99005b",
     "AstrBot/data/plugins/astrbot_plugin_smart_imagechat_hub/.gitignore": "142f64e0e095b497d9dea7e024bf08dde3fc875512af87d6ea481c2758c3978d",

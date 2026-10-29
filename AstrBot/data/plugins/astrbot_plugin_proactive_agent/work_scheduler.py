@@ -1225,7 +1225,26 @@ class WorkRuntime:
             children.append(timer)
             await asyncio.wait((primary, timer), return_when=asyncio.FIRST_COMPLETED)
             if primary.done():
-                return selected(primary.result())
+                from openai import APIConnectionError
+                try:
+                    return selected(primary.result())
+                except APIConnectionError:
+                    # A disconnected review has no verdict to preserve. Use
+                    # the same turn's one backup budget even when it failed
+                    # before the slow-request timer; never retry a verdict.
+                    if (primary_kind != 'review' or first_review is not None
+                            or self.scheduler._closed or not self.enabled
+                            or not self._hedge_seconds() or state.hedge_used
+                            or not state.live or state.delivered):
+                        raise
+                    state.hedge_used = True
+                    result = await self.model_call(
+                        template, lambda: backup_operation(recovery_args, recovery_kwargs),
+                        kind=primary_kind, hedge=hedge_control, maximum=attempts(recovery_kwargs))
+                    if result is _HEDGE_SKIPPED:
+                        raise
+                    self._hedge_stat('won', state, template)
+                    return selected(result)
             if self.scheduler._closed:
                 raise WorkClosed('Model scheduler is closed')
             timer.result()
