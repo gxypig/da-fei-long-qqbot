@@ -1,0 +1,2971 @@
+{
+  "version": "1.20.0",
+  "baseline": "1.19.1",
+  "updated": "2026-10-30T06:05:49.158255+08:00",
+  "method": {
+    "model": "same configured model and reasoning for both revisions",
+    "real_model": true,
+    "simulated_platform": true,
+    "outbound_qq_test_messages": 0,
+    "bili_test_comments": 0,
+    "repeats_per_variant_per_category": 5,
+    "timing": "Receipt timestamps include reply queue; necessary first/all confirmations separate from optional attachments and later history commit",
+    "reply_queue_metric": "Initial reply execution admission wait; later model queues and suspension/resumption remain included in end-to-end receipt timing, not added to initial admission",
+    "provider_event_metric": "Provider wrapper elapsed includes SDK wire-admission waits, retry/backoff, preparation and cleanup on the native SDK path; not socket-only or generation-only time",
+    "attempt_count": "2280 counts reply tasks across both revisions, not billable model API calls; one task may perform generation, prediction, review and retries.",
+    "input_clock": "Case text, prior context and sampling seed are fixed; runtime receipt/recency timestamps use the advancing clock and are not bit-identical across runs",
+    "summary_population": "Confirmed necessary answers with history commit; failed/cancelled/unknown counts retained, 30s rate uses all attempts",
+    "faults": "Controlled slow tool, repeated review,429,slow ledger and delayed simulated receipt; separate from ordinary cases",
+    "limitations": [
+      "Simulated QQ receipts do not establish real network latency",
+      "Semantic judge is an independent model assessment, not human certification",
+      "Live service remained enabled; remote model load may vary",
+      "Timed fixtures are synthetic group messages; private-message behavior is covered by regressions, not a separate paired network-latency series",
+      "The isolated replay loads the persistent idle-learning queue but does not start its worker; it does not measure end-to-end latency with background learning actively running in that replay process",
+      "Private provider/persona configuration and raw conversations are not published; these timings are not a guarantee for public installation defaults",
+      "Earlier candidate experiments remain local and are not mixed into this final-source series"
+    ]
+  },
+  "hashes": {
+    "frozen_sha256": "8efa7a36d054f5d26d8e8bf2e1d26e412f8e8860ac971a795103e208d830f51f",
+    "cases_sha256": "f6f89135aa780ea9c4c30589e69f1e310a6eae07cee656db2f00e8919b074ec0",
+    "candidate_source_sha256": "c62490a43a6277e4647a987dc36b16a51546ad1fb2b08a89681754e2c414bd7b"
+  },
+  "tests": {
+    "local_windows": {
+      "tests": 910,
+      "seconds": 277.56,
+      "status": "passed"
+    },
+    "public_windows": {
+      "tests": 892,
+      "seconds": 270.082,
+      "status": "passed"
+    },
+    "review_transport_targeted": {
+      "tests": 52,
+      "seconds": 10.76,
+      "status": "passed"
+    },
+    "native_runner_stream_targeted": {
+      "tests": 96,
+      "seconds": 22.541,
+      "status": "passed"
+    },
+    "native_runner_stream_lifecycle": {
+      "tests": 11,
+      "seconds": 2.196,
+      "status": "passed"
+    },
+    "review_saturation_targeted": {
+      "tests": 100,
+      "seconds": 23.939,
+      "status": "passed"
+    },
+    "local_native_review_followup": {
+      "tests": 5,
+      "seconds": 1.327,
+      "status": "passed"
+    },
+    "public_native_review_followup": {
+      "tests": 5,
+      "seconds": 1.26,
+      "status": "passed"
+    },
+    "local_persona_reconnect_followup": {
+      "tests": 4,
+      "seconds": 0.46,
+      "status": "passed"
+    },
+    "public_persona_reconnect_followup": {
+      "tests": 4,
+      "seconds": 0.403,
+      "status": "passed"
+    }
+  },
+  "semantic": {
+    "total": 100,
+    "direct_natural_correct": 29,
+    "ordinary_meme_uses": 10,
+    "serious_forced_jokes": 0,
+    "meme_adoptions": 17,
+    "adoption_fit": 1.0,
+    "sent_failures": 0,
+    "content_passed": true,
+    "complete_delivery": true,
+    "passed": true,
+    "timing": {
+      "median_ms": 5726.999999999918,
+      "p95_ms": 14672.000000000025,
+      "max_ms": 27078.000000000204,
+      "within30": 100,
+      "attempts": 100
+    },
+    "issue_counts": {
+      "final_correct": 1,
+      "natural": 1,
+      "target_correct": 1,
+      "meme_fit": 0
+    }
+  },
+  "paired_quality": {
+    "baseline": {
+      "naturalness": 4.640909090909091,
+      "character": 4.595454545454546,
+      "grounded": 4.659090909090909,
+      "non_repetitive": 4.804545454545455,
+      "addresses_current": 4.763636363636364
+    },
+    "candidate": {
+      "naturalness": 4.209090909090909,
+      "character": 4.2,
+      "grounded": 4.527272727272727,
+      "non_repetitive": 4.5181818181818185,
+      "addresses_current": 4.540909090909091
+    },
+    "no_dimension_regressed": false,
+    "pairs": 220,
+    "by_category": {
+      "ordinary": {
+        "baseline": {
+          "naturalness": 4.76,
+          "character": 4.72,
+          "grounded": 4.68,
+          "non_repetitive": 4.86,
+          "addresses_current": 4.7
+        },
+        "candidate": {
+          "naturalness": 4.46,
+          "character": 4.46,
+          "grounded": 4.82,
+          "non_repetitive": 4.72,
+          "addresses_current": 4.8
+        }
+      },
+      "long_history": {
+        "baseline": {
+          "naturalness": 4.76,
+          "character": 4.66,
+          "grounded": 4.72,
+          "non_repetitive": 4.98,
+          "addresses_current": 4.88
+        },
+        "candidate": {
+          "naturalness": 4.5,
+          "character": 4.5,
+          "grounded": 4.9,
+          "non_repetitive": 4.94,
+          "addresses_current": 5
+        }
+      },
+      "same_group": {
+        "baseline": {
+          "naturalness": 4.725,
+          "character": 4.75,
+          "grounded": 4.65,
+          "non_repetitive": 4.925,
+          "addresses_current": 4.775
+        },
+        "candidate": {
+          "naturalness": 4.45,
+          "character": 4.425,
+          "grounded": 4.85,
+          "non_repetitive": 4.8,
+          "addresses_current": 4.8
+        }
+      },
+      "slow_tool": {
+        "baseline": {
+          "naturalness": 3.9,
+          "character": 3.825,
+          "grounded": 4.225,
+          "non_repetitive": 4.2,
+          "addresses_current": 4.45
+        },
+        "candidate": {
+          "naturalness": 2.725,
+          "character": 2.65,
+          "grounded": 2.9,
+          "non_repetitive": 3,
+          "addresses_current": 2.925
+        }
+      },
+      "multi_review": {
+        "baseline": {
+          "naturalness": 5,
+          "character": 4.975,
+          "grounded": 5,
+          "non_repetitive": 5,
+          "addresses_current": 5
+        },
+        "candidate": {
+          "naturalness": 4.775,
+          "character": 4.825,
+          "grounded": 5,
+          "non_repetitive": 4.975,
+          "addresses_current": 5
+        }
+      }
+    },
+    "category_note": "Descriptive breakdown of the same frozen judgments. Failed sends remain zero; this does not replace or relax the original overall acceptance gate."
+  },
+  "host_conditions": {
+    "before_run_gate": {
+      "min_available_gib": 1.5,
+      "max_memory_percent": 90,
+      "max_cpu_percent": 80,
+      "stable_samples": 3,
+      "checked_before_each_run": true
+    },
+    "observed": {
+      "baseline": {
+        "observations": 100,
+        "cpu_median_percent": 5.45,
+        "cpu_max_percent": 21.5,
+        "memory_median_percent": 78.7,
+        "available_gib_min": 2.39
+      },
+      "candidate": {
+        "observations": 100,
+        "cpu_median_percent": 5.3,
+        "cpu_max_percent": 23.6,
+        "memory_median_percent": 78.65,
+        "available_gib_min": 2.318
+      }
+    },
+    "amendment": null,
+    "limitation": "Readiness checked before each run, not continuously enforced; other applications are never stopped or modified"
+  },
+  "categories": {
+    "ordinary": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 50,
+        "confirmed": 50,
+        "failures": 0,
+        "median_ms": 4054.499999999962,
+        "p95_ms": 8844.000000000051,
+        "queue_p95_ms": 16,
+        "first_confirmed_median_ms": 4054.499999999962,
+        "first_confirmed_p95_ms": 8844.000000000051,
+        "whole_workflow_p95_ms": 8844,
+        "within_30s": 50,
+        "attachments": 2,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 50
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 50,
+        "confirmed": 50,
+        "failures": 0,
+        "median_ms": 5336.000000000013,
+        "p95_ms": 7608.999999999924,
+        "queue_p95_ms": 16,
+        "first_confirmed_median_ms": 5336.000000000013,
+        "first_confirmed_p95_ms": 7608.999999999924,
+        "whole_workflow_p95_ms": 7609,
+        "within_30s": 50,
+        "attachments": 13,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 50
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 10
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 11
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 11
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 10
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 10
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "long_history": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 50,
+        "confirmed": 50,
+        "failures": 0,
+        "median_ms": 4702.9999999999745,
+        "p95_ms": 10202.999999999975,
+        "queue_p95_ms": 16,
+        "first_confirmed_median_ms": 4702.9999999999745,
+        "first_confirmed_p95_ms": 10202.999999999975,
+        "whole_workflow_p95_ms": 10203,
+        "within_30s": 50,
+        "attachments": 1,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 50
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 50,
+        "confirmed": 50,
+        "failures": 0,
+        "median_ms": 5805.000000000064,
+        "p95_ms": 9422.000000000025,
+        "queue_p95_ms": 16,
+        "first_confirmed_median_ms": 5805.000000000064,
+        "first_confirmed_p95_ms": 9422.000000000025,
+        "whole_workflow_p95_ms": 9422,
+        "within_30s": 50,
+        "attachments": 16,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 50
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 10,
+                      "queue_p95": 0,
+                      "execution_p95": 8.032000000000153,
+                      "errors": false,
+                      "utilization": 0.9471500000000029,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 1
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 11
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 10,
+                      "queue_p95": 0,
+                      "execution_p95": 9.172000000000025,
+                      "errors": false,
+                      "utilization": 0.9426916666666633,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 2
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 11,
+                      "queue_p95": 0,
+                      "execution_p95": 6.6720000000000255,
+                      "errors": false,
+                      "utilization": 0.9692833333333358,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 2
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 10
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "burst8": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 160,
+        "confirmed": 160,
+        "failures": 0,
+        "median_ms": 39015.49999999997,
+        "p95_ms": 69858.99999999993,
+        "queue_p95_ms": 61438,
+        "first_confirmed_median_ms": 39015.49999999997,
+        "first_confirmed_p95_ms": 69858.99999999993,
+        "whole_workflow_p95_ms": 69875,
+        "within_30s": 59,
+        "attachments": 0,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 160
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 160,
+        "confirmed": 160,
+        "failures": 0,
+        "median_ms": 81116.50000000009,
+        "p95_ms": 138250.0,
+        "queue_p95_ms": 111578,
+        "first_confirmed_median_ms": 81116.50000000009,
+        "first_confirmed_p95_ms": 138250.0,
+        "whole_workflow_p95_ms": 138265,
+        "within_30s": 23,
+        "attachments": 32,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 160
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 6.014999999999873,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 28,
+                      "queue_p95": 20.28099999999995,
+                      "execution_p95": 6.014999999999873,
+                      "errors": false,
+                      "utilization": 0.9929666666666662,
+                      "limit": 2
+                    },
+                    {
+                      "samples": 29,
+                      "queue_p95": 20.65599999999995,
+                      "execution_p95": 8.014999999999873,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 10
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 3,
+                "adaptive": {
+                  "limit": 3,
+                  "baseline2": 6.125,
+                  "reason": "两窗必要调用拥堵且执行稳定，增加一个名额",
+                  "windows": [],
+                  "window_samples": 9
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 3,
+                "adaptive": {
+                  "limit": 3,
+                  "baseline2": 6.140999999999622,
+                  "reason": "两窗必要调用拥堵且执行稳定，增加一个名额",
+                  "windows": [],
+                  "window_samples": 11
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 3,
+                "adaptive": {
+                  "limit": 3,
+                  "baseline2": 6.561999999999898,
+                  "reason": "两窗必要调用拥堵且执行稳定，增加一个名额",
+                  "windows": [],
+                  "window_samples": 12
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 5.516000000000531,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 28,
+                      "queue_p95": 23.15599999999995,
+                      "execution_p95": 5.516000000000531,
+                      "errors": false,
+                      "utilization": 0.9921833333333325,
+                      "limit": 2
+                    },
+                    {
+                      "samples": 25,
+                      "queue_p95": 15.063000000000102,
+                      "execution_p95": 6.657000000000153,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 14
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "burst32": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 640,
+        "confirmed": 640,
+        "failures": 0,
+        "median_ms": 149405.99999999994,
+        "p95_ms": 279094.00000000006,
+        "queue_p95_ms": 269703,
+        "first_confirmed_median_ms": 149405.99999999994,
+        "first_confirmed_p95_ms": 279094.00000000006,
+        "whole_workflow_p95_ms": 279094,
+        "within_30s": 52,
+        "attachments": 0,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 640
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 640,
+        "confirmed": 627,
+        "failures": 13,
+        "median_ms": 275686.9999999999,
+        "p95_ms": 715842.9999999999,
+        "queue_p95_ms": 641594,
+        "first_confirmed_median_ms": 275686.9999999999,
+        "first_confirmed_p95_ms": 715842.9999999999,
+        "whole_workflow_p95_ms": 715859,
+        "within_30s": 22,
+        "attachments": 119,
+        "error_kinds": {
+          "RuntimeError": 13
+        },
+        "terminal_states": {
+          "confirmed": 627,
+          "failed": 13
+        },
+        "failed_attempt_elapsed_ms": [
+          335187,
+          389750,
+          429500,
+          572156,
+          832703,
+          908360,
+          450844,
+          455125,
+          468891,
+          474641,
+          631125,
+          708766,
+          742484
+        ],
+        "failure_stage_evidence": {
+          "review_error_counts": {
+            "TimeoutError": 13
+          },
+          "review_blocked_elapsed_ms": [
+            55000,
+            55014,
+            55030,
+            55000,
+            55000,
+            55000,
+            55032,
+            55015,
+            55015,
+            55000,
+            55014,
+            55015,
+            55000
+          ],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": 5.625,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 15,
+                      "queue_p95": 24.28099999999995,
+                      "execution_p95": 6.453000000000429,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 1
+                    },
+                    {
+                      "samples": 14,
+                      "queue_p95": 22.640000000000327,
+                      "execution_p95": 7.844000000000051,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 6
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 3,
+                "adaptive": {
+                  "limit": 3,
+                  "baseline2": 7.109000000000378,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 41,
+                      "queue_p95": 5.82799999999952,
+                      "execution_p95": 6.640999999999622,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 3
+                    },
+                    {
+                      "samples": 40,
+                      "queue_p95": 5.921999999999571,
+                      "execution_p95": 8.813000000000102,
+                      "errors": false,
+                      "utilization": 0.9995666666666694,
+                      "limit": 3
+                    }
+                  ],
+                  "window_samples": 4
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": 6.061999999999898,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 13,
+                      "queue_p95": 47.42100000000028,
+                      "execution_p95": 11.046000000000276,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 1
+                    },
+                    {
+                      "samples": 12,
+                      "queue_p95": 31.23400000000038,
+                      "execution_p95": 8.5,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 6
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 6.140999999999622,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 31,
+                      "queue_p95": 10.186999999999898,
+                      "execution_p95": 5.125,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 2
+                    },
+                    {
+                      "samples": 24,
+                      "queue_p95": 10.656000000000859,
+                      "execution_p95": 9.79700000000048,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 15
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 3,
+                "adaptive": {
+                  "limit": 3,
+                  "baseline2": 7.938000000000102,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 41,
+                      "queue_p95": 6.360000000000582,
+                      "execution_p95": 9.593000000000757,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 3
+                    },
+                    {
+                      "samples": 40,
+                      "queue_p95": 5.42200000000048,
+                      "execution_p95": 8.140999999999622,
+                      "errors": false,
+                      "utilization": 1.0,
+                      "limit": 3
+                    }
+                  ],
+                  "window_samples": 19
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "same_group": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 23109.49999999957,
+        "p95_ms": 41297.00000000048,
+        "queue_p95_ms": 35750,
+        "first_confirmed_median_ms": 23109.49999999957,
+        "first_confirmed_p95_ms": 41297.00000000048,
+        "whole_workflow_p95_ms": 41312,
+        "within_30s": 29,
+        "attachments": 1,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 25304.000000000087,
+        "p95_ms": 42468.00000000076,
+        "queue_p95_ms": 37562,
+        "first_confirmed_median_ms": 25304.000000000087,
+        "first_confirmed_p95_ms": 42468.00000000076,
+        "whole_workflow_p95_ms": 42484,
+        "within_30s": 24,
+        "attachments": 11,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 8
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 11
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 8
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 8
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 9
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "slow_tool": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 36,
+        "failures": 4,
+        "median_ms": 41132.99999999981,
+        "p95_ms": 78500.0,
+        "queue_p95_ms": 42656,
+        "first_confirmed_median_ms": 41132.99999999981,
+        "first_confirmed_p95_ms": 78500.0,
+        "whole_workflow_p95_ms": 78515,
+        "within_30s": 11,
+        "attachments": 0,
+        "error_kinds": {
+          "RuntimeError": 4
+        },
+        "terminal_states": {
+          "confirmed": 36,
+          "failed": 4
+        },
+        "failed_attempt_elapsed_ms": [
+          64453,
+          99609,
+          101703,
+          88875
+        ],
+        "failure_stage_evidence": {
+          "review_error_counts": {
+            "ValueError": 4
+          },
+          "review_blocked_elapsed_ms": [
+            39859,
+            25327,
+            21593,
+            34703
+          ],
+          "required_tool_result_missing_at_final_check": 4,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 25,
+        "failures": 15,
+        "median_ms": 41484.00000000038,
+        "p95_ms": 60016.00000000144,
+        "queue_p95_ms": 781,
+        "first_confirmed_median_ms": 41484.00000000038,
+        "first_confirmed_p95_ms": 60016.00000000144,
+        "whole_workflow_p95_ms": 60062,
+        "within_30s": 2,
+        "attachments": 0,
+        "error_kinds": {
+          "RuntimeError": 15
+        },
+        "terminal_states": {
+          "confirmed": 25,
+          "failed": 15
+        },
+        "failed_attempt_elapsed_ms": [
+          63282,
+          69875,
+          69922,
+          74797,
+          78078,
+          67875,
+          72640,
+          74171,
+          77594,
+          71422,
+          73234,
+          64468,
+          68562,
+          72282,
+          72344
+        ],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 15,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 17,
+                      "queue_p95": 13.811999999999898,
+                      "execution_p95": 11.515999999999622,
+                      "errors": false,
+                      "utilization": 0.974483333333319,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 5
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 18,
+                      "queue_p95": 11.125,
+                      "execution_p95": 13.390999999999622,
+                      "errors": false,
+                      "utilization": 0.9670666666666724,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 5
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 8.57799999999952,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 20,
+                      "queue_p95": 11.75,
+                      "execution_p95": 8.57799999999952,
+                      "errors": false,
+                      "utilization": 0.9692833333333207,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 4
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 18,
+                      "queue_p95": 10.936999999999898,
+                      "execution_p95": 12.421999999998661,
+                      "errors": false,
+                      "utilization": 0.9727916666666867,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 4
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "multi_review": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 39398.00000000014,
+        "p95_ms": 59140.99999999962,
+        "queue_p95_ms": 35407,
+        "first_confirmed_median_ms": 39398.00000000014,
+        "first_confirmed_p95_ms": 59140.99999999962,
+        "whole_workflow_p95_ms": 59141,
+        "within_30s": 14,
+        "attachments": 9,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 43976.00000000057,
+        "p95_ms": 64735.00000000058,
+        "queue_p95_ms": 750,
+        "first_confirmed_median_ms": 43976.00000000057,
+        "first_confirmed_p95_ms": 64735.00000000058,
+        "whole_workflow_p95_ms": 64750,
+        "within_30s": 10,
+        "attachments": 23,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 24
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 8.328999999999724,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 23,
+                      "queue_p95": 20.65600000000086,
+                      "execution_p95": 8.328999999999724,
+                      "errors": false,
+                      "utilization": 0.9661333333333156,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 1
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 11.375,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 21,
+                      "queue_p95": 23.23400000000038,
+                      "execution_p95": 11.375,
+                      "errors": false,
+                      "utilization": 0.9914166666666764,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 3
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 24
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": 5.29700000000048,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 22,
+                      "queue_p95": 19.39099999999962,
+                      "execution_p95": 5.29700000000048,
+                      "errors": false,
+                      "utilization": 0.9121000000000095,
+                      "limit": 2
+                    }
+                  ],
+                  "window_samples": 1
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "retry429": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 16500.0,
+        "p95_ms": 25875.0,
+        "queue_p95_ms": 15734,
+        "first_confirmed_median_ms": 16500.0,
+        "first_confirmed_p95_ms": 25875.0,
+        "whole_workflow_p95_ms": 25875,
+        "within_30s": 40,
+        "attachments": 0,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {
+            "429": 39
+          },
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 37,
+        "failures": 3,
+        "median_ms": 46280.99999999904,
+        "p95_ms": 74468.00000000076,
+        "queue_p95_ms": 719,
+        "first_confirmed_median_ms": 46280.99999999904,
+        "first_confirmed_p95_ms": 74468.00000000076,
+        "whole_workflow_p95_ms": 74468,
+        "within_30s": 9,
+        "attachments": 14,
+        "error_kinds": {
+          "RuntimeError": 3
+        },
+        "terminal_states": {
+          "confirmed": 37,
+          "failed": 3
+        },
+        "failed_attempt_elapsed_ms": [
+          64219,
+          64265,
+          79407
+        ],
+        "failure_stage_evidence": {
+          "review_error_counts": {
+            "InternalServerError": 2
+          },
+          "review_blocked_elapsed_ms": [
+            13077,
+            4750
+          ],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 1,
+          "http_error_code_log_mentions": {
+            "429": 40,
+            "504": 1,
+            "503": 41
+          },
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 22,
+                      "queue_p95": 44.09300000000076,
+                      "execution_p95": 4.42200000000048,
+                      "errors": true,
+                      "utilization": 0.9845158308297024,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 2
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 22,
+                      "queue_p95": 41.92200000000048,
+                      "execution_p95": 4.718999999999141,
+                      "errors": true,
+                      "utilization": 0.9845158308296423,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 2
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 20,
+                      "queue_p95": 45.45399999999972,
+                      "execution_p95": 7.5,
+                      "errors": true,
+                      "utilization": 0.9855319008373623,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 7
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 43,
+                      "queue_p95": 20.57799999999952,
+                      "execution_p95": 4.063000000000102,
+                      "errors": true,
+                      "utilization": 0.7519391358880241,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 5
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 1,
+                "adaptive": {
+                  "limit": 1,
+                  "baseline2": null,
+                  "reason": "样本不足，保持并发",
+                  "windows": [
+                    {
+                      "samples": 20,
+                      "queue_p95": 40.3130000000001,
+                      "execution_p95": 6.4210000000002765,
+                      "errors": true,
+                      "utilization": 0.9835008002111899,
+                      "limit": 1
+                    }
+                  ],
+                  "window_samples": 4
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "slow_database": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 16656.49999999914,
+        "p95_ms": 25077.99999999952,
+        "queue_p95_ms": 16344,
+        "first_confirmed_median_ms": 16656.49999999914,
+        "first_confirmed_p95_ms": 25077.99999999952,
+        "whole_workflow_p95_ms": 25078,
+        "within_30s": 40,
+        "attachments": 0,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 27187.5,
+        "p95_ms": 37968.99999999914,
+        "queue_p95_ms": 704,
+        "first_confirmed_median_ms": 27187.5,
+        "first_confirmed_p95_ms": 37968.99999999914,
+        "whole_workflow_p95_ms": 37984,
+        "within_30s": 24,
+        "attachments": 11,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 16
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 16
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 16
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "late_receipt": {
+      "baseline": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 15687.5,
+        "p95_ms": 24156.00000000086,
+        "queue_p95_ms": 15609,
+        "first_confirmed_median_ms": 15687.5,
+        "first_confirmed_p95_ms": 24156.00000000086,
+        "whole_workflow_p95_ms": 24156,
+        "within_30s": 40,
+        "attachments": 0,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": null,
+                  "baseline2": null,
+                  "reason": null,
+                  "windows": null,
+                  "window_samples": null
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "candidate": {
+        "repeats": 5,
+        "attempts": 40,
+        "confirmed": 40,
+        "failures": 0,
+        "median_ms": 26507.99999999981,
+        "p95_ms": 43421.99999999866,
+        "queue_p95_ms": 718,
+        "first_confirmed_median_ms": 26507.99999999981,
+        "first_confirmed_p95_ms": 43421.99999999866,
+        "whole_workflow_p95_ms": 43422,
+        "within_30s": 23,
+        "attachments": 11,
+        "error_kinds": {},
+        "terminal_states": {
+          "confirmed": 40
+        },
+        "failed_attempt_elapsed_ms": [],
+        "failure_stage_evidence": {
+          "review_error_counts": {},
+          "review_blocked_elapsed_ms": [],
+          "required_tool_result_missing_at_final_check": 0,
+          "main_request_returned_error": 0,
+          "http_error_code_log_mentions": {},
+          "http_error_code_note": "Log mentions may duplicate the same failure and are not distinct request counts. Only429 was deliberately injected in the retry429 category.",
+          "note": "Observed review failures within failed requests; may overlap other failure categories, not extra failed requests"
+        },
+        "model_admission_final": [
+          {
+            "repeat": 0,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 16
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 1,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 2,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 16
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 3,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          },
+          {
+            "repeat": 4,
+            "sources": [
+              {
+                "limit": 2,
+                "adaptive": {
+                  "limit": 2,
+                  "baseline2": null,
+                  "reason": "等待足够样本",
+                  "windows": [],
+                  "window_samples": 17
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "comparisons": {
+    "ordinary": {
+      "median_change_fraction": 0.31606856579111176,
+      "p95_change_fraction": -0.13964269561285847,
+      "queue_p95_change_fraction": 0.0,
+      "coverage_not_reduced": true
+    },
+    "long_history": {
+      "median_change_fraction": 0.23431852009357756,
+      "p95_change_fraction": -0.07654611388806731,
+      "queue_p95_change_fraction": 0.0,
+      "coverage_not_reduced": true
+    },
+    "burst8": {
+      "median_change_fraction": 1.0790839538132317,
+      "p95_change_fraction": 0.9789862437194943,
+      "queue_p95_change_fraction": 0.8161072951593475,
+      "coverage_not_reduced": true
+    },
+    "burst32": {
+      "median_change_fraction": 0.8452204061416542,
+      "p95_change_fraction": 1.5648813661347063,
+      "queue_p95_change_fraction": 1.378890854013489,
+      "coverage_not_reduced": false
+    },
+    "same_group": {
+      "median_change_fraction": 0.09496094679679601,
+      "p95_change_fraction": 0.02835557062256977,
+      "queue_p95_change_fraction": 0.050685314685314786,
+      "coverage_not_reduced": true
+    },
+    "slow_tool": {
+      "median_change_fraction": 0.008533294435138838,
+      "p95_change_fraction": -0.2354649681528479,
+      "queue_p95_change_fraction": -0.9816907351837959,
+      "coverage_not_reduced": false
+    },
+    "multi_review": {
+      "median_change_fraction": 0.11619879181685389,
+      "p95_change_fraction": 0.09458751120205933,
+      "queue_p95_change_fraction": -0.9788177479029571,
+      "coverage_not_reduced": true
+    },
+    "retry429": {
+      "median_change_fraction": 1.8049090909090326,
+      "p95_change_fraction": 1.8779903381642806,
+      "queue_p95_change_fraction": -0.9543027837803483,
+      "coverage_not_reduced": false
+    },
+    "slow_database": {
+      "median_change_fraction": 0.6322456698586978,
+      "p95_change_fraction": 0.5140362070340485,
+      "queue_p95_change_fraction": -0.9569260890846794,
+      "coverage_not_reduced": true
+    },
+    "late_receipt": {
+      "median_change_fraction": 0.6897529880477966,
+      "p95_change_fraction": 0.7975658221558668,
+      "queue_p95_change_fraction": -0.9540008969184445,
+      "coverage_not_reduced": true
+    }
+  },
+  "targets": {
+    "ordinary_median_minus20_percent": false,
+    "ordinary_p95_not_worse": true,
+    "ordinary_95_percent_within30_seconds": true,
+    "necessary_coverage_not_reduced": false,
+    "burst_p95_minus30_percent": false,
+    "burst_queue_p95_halved": false,
+    "semantic_quality": true,
+    "paired_quality_not_regressed": false
+  },
+  "ordinary_stage_attribution": {
+    "baseline": {
+      "samples": 50,
+      "prediction_unavailable_at_review_entry": 41,
+      "started_full_review": 0,
+      "stage_medians_ms": {
+        "context_prepare_ms": 14.99999999987267,
+        "main_model_ms": 3866.999999999962,
+        "prediction_total_ms": 3891.0000000000764,
+        "review_total_ms": null,
+        "persistence_ms": 63.00000000010186,
+        "send_ms": 0.0
+      }
+    },
+    "candidate": {
+      "samples": 50,
+      "prediction_unavailable_at_review_entry": 34,
+      "started_full_review": 34,
+      "stage_medians_ms": {
+        "context_prepare_ms": 16.000000000076398,
+        "main_model_ms": 4219.000000000051,
+        "prediction_total_ms": 4788.999999999987,
+        "review_total_ms": 1179.99999999995,
+        "persistence_ms": 54.4999999999618,
+        "send_ms": 15.000000000100044
+      }
+    }
+  },
+  "burst_stage_attribution": {
+    "burst8": {
+      "baseline": {
+        "samples": 160,
+        "review_verdict_events": {},
+        "provider_attempt_counts": {
+          "interactive": 160,
+          "auxiliary": 20
+        },
+        "successful_provider_median_ms": {
+          "interactive": 3969.0,
+          "review": null,
+          "auxiliary": 4422
+        },
+        "note": "Per-task provider wrapper events, not differences of concurrent shared counters; includes cancelled attempts that may never reach HTTP. Lane names differ across revisions; review verdict events separately corroborate whether review ran."
+      },
+      "candidate": {
+        "samples": 160,
+        "review_verdict_events": {
+          "passed": 146,
+          "rewritten": 14
+        },
+        "provider_attempt_counts": {
+          "interactive": 160,
+          "review": 174,
+          "auxiliary": 159
+        },
+        "successful_provider_median_ms": {
+          "interactive": 17969.0,
+          "review": 10859.0,
+          "auxiliary": null
+        },
+        "note": "Per-task provider wrapper events, not differences of concurrent shared counters; includes cancelled attempts that may never reach HTTP. Lane names differ across revisions; review verdict events separately corroborate whether review ran."
+      }
+    },
+    "burst32": {
+      "baseline": {
+        "samples": 640,
+        "review_verdict_events": {},
+        "provider_attempt_counts": {
+          "auxiliary": 8,
+          "interactive": 640
+        },
+        "successful_provider_median_ms": {
+          "interactive": 4031.0,
+          "review": null,
+          "auxiliary": 4203
+        },
+        "note": "Per-task provider wrapper events, not differences of concurrent shared counters; includes cancelled attempts that may never reach HTTP. Lane names differ across revisions; review verdict events separately corroborate whether review ran."
+      },
+      "candidate": {
+        "samples": 640,
+        "review_verdict_events": {
+          "passed": 575,
+          "rewritten": 52,
+          "blocked": 13
+        },
+        "provider_attempt_counts": {
+          "auxiliary": 641,
+          "interactive": 640,
+          "review": 700
+        },
+        "successful_provider_median_ms": {
+          "interactive": 13594.0,
+          "review": 11062,
+          "auxiliary": null
+        },
+        "note": "Per-task provider wrapper events, not differences of concurrent shared counters; includes cancelled attempts that may never reach HTTP. Lane names differ across revisions; review verdict events separately corroborate whether review ran."
+      }
+    }
+  },
+  "independent_recheck_evidence": {
+    "baseline": {
+      "attempts": 40,
+      "confirmed": 40,
+      "confirmed_with_rewrite_and_independent_recheck": 40,
+      "note": "Use review verdict events. Baseline labels review model calls as interactive, so its review-lane count is not a reliable full-review call count."
+    },
+    "candidate": {
+      "attempts": 40,
+      "confirmed": 40,
+      "confirmed_with_rewrite_and_independent_recheck": 40,
+      "note": "Use review verdict events. Baseline labels review model calls as interactive, so its review-lane count is not a reliable full-review call count."
+    }
+  },
+  "adaptive_recovery_diagnostic": {
+    "source_sha256": "e98a5e160ea9739555133405f8085aeacc52639bc31beecb70aeb771730ac01c",
+    "kind": "isolated deterministic state-machine diagnostic, no model calls or sends",
+    "starting_limit": 1,
+    "cooldown_already_elapsed": true,
+    "successful_requests": 300,
+    "simulated_seconds": 1200.0,
+    "request_duration_seconds": 4,
+    "request_queue_seconds": 20,
+    "final": {
+      "limit": 1,
+      "baseline2": 5.625,
+      "cooldown_until": 0,
+      "reason": "样本不足，保持并发",
+      "windows": [
+        {
+          "samples": 15,
+          "queue_p95": 20,
+          "execution_p95": 4,
+          "errors": false,
+          "utilization": 1.0,
+          "limit": 1
+        },
+        {
+          "samples": 15,
+          "queue_p95": 20,
+          "execution_p95": 4,
+          "errors": false,
+          "utilization": 1.0,
+          "limit": 1
+        }
+      ],
+      "window_samples": 1
+    },
+    "finding": "The per-minute minimum of 20 completed calls cannot be reached by a fully occupied one-slot source with four-second calls; recovery stays sample-starved even after cooldown.",
+    "limitation": "Shows recovery gating only. Does not prove the initial production downshift cause or predict actual remote latency.",
+    "hold_reason_diagnostic": {
+      "samples_per_window": [
+        28,
+        29
+      ],
+      "all_sample_minima_met": true,
+      "actual_hold_condition": "Execution P95 exceeds baseline by more than10% but less than20%; neither increase nor decrease qualifies",
+      "displayed_reason": "样本不足，保持并发",
+      "limit": 2,
+      "finding": "The no-change branch retains an earlier insufficient-samples reason instead of explaining the current hold condition"
+    },
+    "early_rate_limit_diagnostic": {
+      "early_429_before_two_slot_baseline": true,
+      "successful_calls_afterward": 1200,
+      "simulated_seconds": 1200.0,
+      "final": {
+        "limit": 1,
+        "baseline2": null,
+        "cooldown_until": 300.0,
+        "reason": "样本不足，保持并发",
+        "windows": [
+          {
+            "samples": 60,
+            "queue_p95": 20,
+            "execution_p95": 1,
+            "errors": false,
+            "utilization": 1.0,
+            "limit": 1
+          },
+          {
+            "samples": 60,
+            "queue_p95": 20,
+            "execution_p95": 1,
+            "errors": false,
+            "utilization": 1.0,
+            "limit": 1
+          }
+        ],
+        "window_samples": 1
+      },
+      "finding": "An early429 reduces to one slot before baseline2 exists. Only two-slot windows can establish baseline2, so recovery remains blocked despite ample fast successful samples and elapsed cooldown."
+    }
+  },
+  "all_targets_passed": false,
+  "backup_restore": {
+    "restored_to_new_directory": true,
+    "files": 1522,
+    "sqlite_integrity_checks": 14,
+    "delivery_replay": false
+  }
+}
