@@ -171,15 +171,32 @@ class AccountActions:
 
     async def perform(self, v, identity, kind, item, target, payload, path, detail, *, receipt=''):
         self.check(v, identity)
+        text=detail.get('text')
+        if isinstance(text,str) and hasattr(self.plugin,'review_account_text'):
+            final=await self.plugin.review_account_text(text)
+            mentions=json.loads(payload.get('at_name_to_mid') or '{}')
+            if any('@'+name not in final for name in mentions):raise BiliUnavailable('审阅改变了指定@对象，未发送')
+            payload=dict(payload);detail={**detail,'text':final}
+            if 'message' in payload:payload['message']=final
+            if 'msg[content]' in payload:
+                content=json.loads(payload['msg[content]']);content['content']=final
+                payload['msg[content]']=json.dumps(content,ensure_ascii=False)
+            from data.plugins.astrbot_plugin_proactive_agent.send_checks import snapshot
+            check=snapshot('bilibili:'+identity[0],final)
+            if check:detail['send_check']={**check,'target':'bilibili:'+kind+':'+str(target or item['bvid']),'submission_state':'reserved','delivery_state':'pending'}
         key = await asyncio.to_thread(self.ledger.reserve,identity[0], kind, item['bvid'], str(target), detail)
         if not key:
             return
         confirmed=False
         async def save(state,values):
+            if values.get('send_check'):
+                values={**values,'send_check':{**values['send_check'],'segment_id':key,'submission_state':'submitted','delivery_state':'confirmed' if state=='sent' else state}}
             await asyncio.to_thread(self.ledger.finish,key,state,values)
         try:
-            data = await self.account.post(path, payload, expected_identity=identity,
-                final_check=lambda: self.check(v, identity))
+            from data.plugins.astrbot_plugin_proactive_agent.stage_budgets import separate_stage
+            async with separate_stage('receipt',25):
+                data = await self.account.post(path, payload, expected_identity=identity,
+                    final_check=lambda: self.check(v, identity))
             if receipt == 'rpid':
                 rpid = str(data.get('rpid_str') or data.get('rpid') or (data.get('reply') or {}).get('rpid') or '')
                 if not rpid.isdigit():
@@ -256,6 +273,13 @@ class AccountActions:
                     return
 
     async def run(self):
+        from data.plugins.astrbot_plugin_proactive_agent.review_modes import scope
+        context=getattr(self.plugin,'context',None);getter=getattr(context,'get_registered_star',None)
+        meta=getter('astrbot_plugin_proactive_agent') if getter else None
+        plugin=meta.star_cls if meta and meta.activated else None
+        with scope(getattr(plugin,'_cfg',{}.get),fresh=True):return await self._run()
+
+    async def _run(self):
         async with self.lock:
             v, identity = self.plugin.values(), self.account.identity()
             try:
@@ -271,7 +295,7 @@ class AccountActions:
                     data = await self.plugin.discover(words[int(time.time() // 60) % len(words)],
                         excluded=await asyncio.to_thread(self.ledger.excluded,identity[0]))
                     for item in data['items'][:v['comment_per_round']]:
-                        text = await self.plugin.review_account_text(await self.plugin.make_copy(item, None))
+                        text = await self.plugin.make_copy(item, None)
                         # The model cannot choose recipients or insert extra mentions.
                         text = text.replace('@', '＠')
                         if names:

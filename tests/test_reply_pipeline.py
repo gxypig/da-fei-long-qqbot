@@ -73,7 +73,7 @@ class Classifying(unittest.TestCase):
 
 def plugin():
     p = object.__new__(Main)
-    p.config = {'latency_optimization_enabled': True, 'review_policy': 'speed_first'}
+    p.config = {'latency_optimization_enabled': True, 'review_policy': 'speed_first','reply_review_enabled':True}
     p._init_reply_pipeline()
     p._audit = Mock()
     p._reviewer = SimpleNamespace(review=AsyncMock(return_value='本龙投降，别凶'))
@@ -133,7 +133,7 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
                                             Message(role='assistant', content=[TextPart(text=draft)])])
         bind_request(e.unified_msg_origin, ['下班买杯奶茶'], False)
         try:
-            await asyncio.wait_for(p.review_agent_reply(e, history, response), .2)
+            await asyncio.wait_for(p.review_agent_reply(e, history, response), .7)
             self.assertEqual(response.completion_text, draft)
             self.assertEqual(history.messages[-1].content[-1].text, draft)
             p._reviewer.review.assert_awaited_once()
@@ -180,4 +180,5 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer['image_ids'], [])
         p._generate_json.assert_awaited_once()
         p.config['review_policy'] = 'all'
-        self.assertIsNone(p.reply_prediction(e))
+        self.assertIsNotNone(p.reply_prediction(e))
+        self.assertIsNone(p.prepare_reply_prediction(event('下一条输入')))

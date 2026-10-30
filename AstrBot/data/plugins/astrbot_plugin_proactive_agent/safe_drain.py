@@ -7,6 +7,11 @@ async def drain_project(plugin,timeout=8):
     meta=getter('astrbot_plugin_bili_scroll') if getter else None
     if meta and meta.activated:companions.append(meta.star_cls)
     tasks=set();stores=[];snapshots=[];queues=[];errors=[]
+    wiki=getattr(plugin,'_wiki_updates',None)
+    if wiki:
+        try:
+            async with asyncio.timeout(timeout):await wiki.close()
+        except Exception as exc:errors.append('词库更新尚未安全停止：'+type(exc).__name__)
     backups=getattr(plugin,'_backups',None)
     if backups:
         try:await backups.close()

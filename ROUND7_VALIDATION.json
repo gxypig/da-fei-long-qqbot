@@ -1,0 +1,404 @@
+{
+  "version": "1.21.0-rc1",
+  "status": "candidate_with_open_acceptance_items",
+  "same_primary_model_and_reasoning": true,
+  "platform_delivery_simulated": true,
+  "qq_test_messages_sent": 0,
+  "background_features_enabled": true,
+  "regressions": {
+    "private_full": {
+      "passed": 1021,
+      "seconds": 194.08,
+      "report_sha256": "bc848a793be6c6a7858d08b4885ab5f53d74c48fae3f07101bf6d9b2ef4f2855"
+    },
+    "public_full": {
+      "passed": 1005,
+      "seconds": 192.332,
+      "report_sha256": "d58be286dc0077fbff03d08b4c29053975cff08f923fb2a5a13a0dc7e5afa284"
+    }
+  },
+  "performance": {
+    "ordinary-baseline": {
+      "attempts": 50,
+      "complete_texts": 50,
+      "failures": 0,
+      "median_ms": 5454,
+      "p95_ms": 11437,
+      "max_ms": 11766,
+      "within_30s": 50,
+      "over_30s": 0,
+      "first_necessary_confirmation": {
+        "median_ms": 5430,
+        "p95_ms": 11422
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 5430,
+        "p95_ms": 11422
+      },
+      "initial_queue": {
+        "median_ms": 0,
+        "p95_ms": 16
+      },
+      "required_messages": 50,
+      "confirmed_attachments": 0,
+      "prediction_started": 43,
+      "full_review_calls": 0,
+      "reply_characters_median": 22.0,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "not_present_in_baseline"
+      },
+      "report_sha256": "d323d95cd3c4039e87631b528c2144dfc768209b767e595d5f78ebac9aa24fb7"
+    },
+    "ordinary-candidate": {
+      "attempts": 50,
+      "complete_texts": 50,
+      "failures": 0,
+      "median_ms": 5438,
+      "p95_ms": 8328,
+      "max_ms": 11500,
+      "within_30s": 50,
+      "over_30s": 0,
+      "first_necessary_confirmation": {
+        "median_ms": 5429,
+        "p95_ms": 8328
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 5429,
+        "p95_ms": 8328
+      },
+      "initial_queue": {
+        "median_ms": 0,
+        "p95_ms": 16
+      },
+      "required_messages": 50,
+      "confirmed_attachments": 21,
+      "prediction_started": 0,
+      "full_review_calls": 0,
+      "reply_characters_median": 21.5,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "completed"
+      },
+      "report_sha256": "d0fd7d40a248ca926a34d408a6c843658bb9418e94f66615fa8088d8238327f1"
+    },
+    "burst32-baseline": {
+      "attempts": 128,
+      "complete_texts": 128,
+      "failures": 0,
+      "median_ms": 151547,
+      "p95_ms": 244078,
+      "max_ms": 251859,
+      "within_30s": 9,
+      "over_30s": 119,
+      "first_necessary_confirmation": {
+        "median_ms": 151532,
+        "p95_ms": 244063
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 151532,
+        "p95_ms": 244063
+      },
+      "initial_queue": {
+        "median_ms": 138320,
+        "p95_ms": 231078
+      },
+      "required_messages": 128,
+      "confirmed_attachments": 0,
+      "prediction_started": 103,
+      "full_review_calls": 0,
+      "reply_characters_median": 19.5,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "not_present_in_baseline"
+      },
+      "report_sha256": "39a9073c6e56738a5ef90acda999dddb5233e872f17a9945af60ab8751c07c99"
+    },
+    "burst32-candidate": {
+      "attempts": 128,
+      "complete_texts": 128,
+      "failures": 0,
+      "median_ms": 146336,
+      "p95_ms": 235562,
+      "max_ms": 248516,
+      "within_30s": 10,
+      "over_30s": 118,
+      "first_necessary_confirmation": {
+        "median_ms": 146321,
+        "p95_ms": 235547
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 146321,
+        "p95_ms": 235547
+      },
+      "initial_queue": {
+        "median_ms": 133321,
+        "p95_ms": 223297
+      },
+      "required_messages": 128,
+      "confirmed_attachments": 13,
+      "prediction_started": 0,
+      "full_review_calls": 0,
+      "reply_characters_median": 19.0,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "completed"
+      },
+      "report_sha256": "d748923136aa8fd510977a9955ace06aa1854b201d7ddf848dde57de87060645"
+    },
+    "prediction-candidate": {
+      "attempts": 8,
+      "complete_texts": 8,
+      "failures": 0,
+      "median_ms": 10367,
+      "p95_ms": 13234,
+      "max_ms": 13234,
+      "within_30s": 8,
+      "over_30s": 0,
+      "first_necessary_confirmation": {
+        "median_ms": 10359,
+        "p95_ms": 13234
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 10359,
+        "p95_ms": 13234
+      },
+      "initial_queue": {
+        "median_ms": 0,
+        "p95_ms": 16
+      },
+      "required_messages": 8,
+      "confirmed_attachments": 5,
+      "prediction_started": 8,
+      "full_review_calls": 9,
+      "reply_characters_median": 22.0,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "completed"
+      },
+      "report_sha256": "7b5c0707e22640208c07d4a3f00f4e830a30690f09d1f47eef5e7637406d1960"
+    },
+    "full-review-candidate": {
+      "attempts": 8,
+      "complete_texts": 8,
+      "failures": 0,
+      "median_ms": 10500,
+      "p95_ms": 13343,
+      "max_ms": 13343,
+      "within_30s": 8,
+      "over_30s": 0,
+      "first_necessary_confirmation": {
+        "median_ms": 10492,
+        "p95_ms": 13343
+      },
+      "all_necessary_confirmation": {
+        "median_ms": 10492,
+        "p95_ms": 13343
+      },
+      "initial_queue": {
+        "median_ms": 0,
+        "p95_ms": 16
+      },
+      "required_messages": 8,
+      "confirmed_attachments": 5,
+      "prediction_started": 0,
+      "full_review_calls": 12,
+      "reply_characters_median": 23.5,
+      "background_recovered": {
+        "learning_alive": true,
+        "backup_ready": true,
+        "wiki_update": "completed"
+      },
+      "report_sha256": "645ff1a4b7ef63e4c8e1972cec7aefb21d494223550bea8a405827f08f958480"
+    }
+  },
+  "improvements_percent": {
+    "ordinary_median": 0.29,
+    "burst_p95": 3.49,
+    "initial_queue_p95": 3.37
+  },
+  "performance_targets": {
+    "ordinary_median_at_least_20_percent": false,
+    "ordinary_95_percent_under_30s": true,
+    "ordinary_p95_no_regression": true,
+    "burst_p95_at_least_30_percent": false,
+    "initial_queue_p95_at_least_50_percent": false,
+    "burst_delivery_no_regression": true
+  },
+  "quality": {
+    "problems-boundaries": {
+      "attempted": 81,
+      "completed_pipeline": 76,
+      "incomplete": 5,
+      "failure_types": {
+        "RuntimeError": 5
+      },
+      "delivered": 76,
+      "tool_replays_incomplete": 5,
+      "assessed": 81,
+      "verdicts": {
+        "pass": 58,
+        "unknown": 9,
+        "fail": 14
+      },
+      "original_problem_reproduced": 12,
+      "false_blocks": 0,
+      "assessment_complete": true
+    },
+    "variants": {
+      "attempted": 39,
+      "completed_pipeline": 39,
+      "incomplete": 0,
+      "failure_types": {},
+      "delivered": 39,
+      "tool_replays_incomplete": 0,
+      "assessed": 39,
+      "verdicts": {
+        "pass": 35,
+        "fail": 4
+      },
+      "original_problem_reproduced": 2,
+      "false_blocks": 0,
+      "assessment_complete": true
+    },
+    "normal": {
+      "attempted": 487,
+      "completed_pipeline": 441,
+      "incomplete": 46,
+      "failure_types": {
+        "OperationalError": 17,
+        "RuntimeError": 23,
+        "TimeoutError": 6
+      },
+      "delivered": 441,
+      "tool_replays_incomplete": 23,
+      "assessed": 487,
+      "verdicts": {
+        "pass": 393,
+        "unknown": 58,
+        "fail": 36
+      },
+      "original_problem_reproduced": 0,
+      "false_blocks": 2,
+      "assessment_complete": true
+    },
+    "proactive": {
+      "attempted": 3,
+      "completed_pipeline": 3,
+      "incomplete": 0,
+      "failure_types": {},
+      "simulated_deliveries": 1,
+      "decisions": {
+        "drop": 1,
+        "defer": 1,
+        "send": 1
+      },
+      "memory_stub_errors": 1,
+      "assessed": 3,
+      "verdicts": {
+        "unknown": 2,
+        "pass": 1
+      },
+      "original_problem_reproduced": 0,
+      "false_blocks": 0,
+      "assessment_complete": true
+    }
+  },
+  "historical_coverage": {
+    "total": 582,
+    "user_triggered_reconstructed": 573,
+    "native_context_recovered": 496,
+    "management_native_handler_replays": 5,
+    "proactive_candidate_basis_recovered": 3,
+    "remaining_partial_tool_sources": 6,
+    "original_full_system_requests_retained": false
+  },
+  "limits": [
+    "Actual model calls with simulated platform receipts do not prove live QQ delivery latency.",
+    "Historical contexts were reconstructed from retained original records; missing inputs were not invented.",
+    "Six old tool-share generations lack complete original inputs and are not counted as fully replayed.",
+    "Historical first-generation replay does not reconstruct native admission lifecycle; receipt-backed queue replay is reported separately.",
+    "Some historical first drafts are absent because concurrent test-only history imports bypassed the single journal writer. A bounded corrected-import recovery retains the original failures.",
+    "The first source snapshot has a proactive test-double memory error; corrected real-store follow-up is reported separately without replacing it.",
+    "Four bounded admission/intent/copy fixes followed the frozen main performance and quality series. Follow-up does not replace original failures.",
+    "Offline model judging is supporting evidence, not a guarantee of flawless open-ended dialogue.",
+    "Thirty small public persona tests overlapped optional prediction-mode benchmarking; ordinary and burst comparisons did not overlap those tests."
+  ],
+  "native_admission_replay": {
+    "records": 573,
+    "model_calls": 0,
+    "platform_sends": 0,
+    "normal_count": 487,
+    "normal_suppressed": 1,
+    "by_category": {
+      "goodbye_loop": {
+        "running": 1,
+        "ignored": 4
+      },
+      "repeated_machine_error": {
+        "running": 2,
+        "merged": 2
+      }
+    },
+    "verbatim_exact": 2,
+    "limits": [
+      "Only requests linked to retained confirmed text receipts are seeded; missing wake/probability decisions and attachment-only receipts are not invented.",
+      "First machine error after the original 120-second TTL may receive a reply; later split fragments share the pending head."
+    ]
+  },
+  "source_snapshots": {
+    "main_series": "d715c817bfc245bdf84edc49dd83815dfdacd926eda4faac37fef27c46b5365c",
+    "followup": "1eb4fb6da9bca84f0679d6f122a399f30e9ae162d9fd6016db69c480d31eda5d"
+  },
+  "followup_replay": {
+    "attempted": 3,
+    "completed": 3,
+    "note": "Only cases affected by changed local intent/copy paths; original series preserved.",
+    "verbatim_copies_exact": 2,
+    "past_drawing_narrative_no_tool": 1
+  },
+  "proactive_real_store_followup": {
+    "attempted": 3,
+    "completed": 3,
+    "simulated_deliveries": 0,
+    "confirmed_sends_with_memory": 0,
+    "decisions": {
+      "drop": 2,
+      "defer": 1
+    }
+  },
+  "saved_proactive_generation_memory_replay": {
+    "cases": 3,
+    "new_model_calls": 0,
+    "completed": 3,
+    "simulated_sends": 1,
+    "confirmed_sends_with_memory": 1,
+    "note": "Exact saved initial generations replayed once through corrected real temporary memory store; no new quality sample claimed."
+  },
+  "missing_draft_recovery": {
+    "attempted": 23,
+    "completed": 23,
+    "failure_types": {},
+    "reruns_per_case": 1,
+    "source": "same frozen main-series candidate",
+    "import": "journal single writer, temporary history only",
+    "assessed": 23,
+    "verdicts": {
+      "pass": 20,
+      "unknown": 3
+    }
+  },
+  "evaluator_context_audit": {
+    "demonstrable_missing_evidence": {
+      "reviewer_missing_channel": 1,
+      "reviewer_missing_trusted_relationship": 9
+    },
+    "raw_verdicts_changed": 0,
+    "note": "Raw failures include evaluator payload omissions; these are not all verified runtime faults. This does not validate other aspects of those replies."
+  }
+}

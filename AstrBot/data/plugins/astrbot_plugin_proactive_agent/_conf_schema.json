@@ -150,7 +150,7 @@
     "default": 360
   },
   "reply_review_enabled": {
-    "description": "可选AI二次审阅，变更后重载插件生效；关闭减少模型调用",
+    "description": "启用AI审阅；从下一条新任务生效，关闭不调用审阅或风险预测",
     "type": "bool",
     "default": false
   },
@@ -217,16 +217,16 @@
     "hint": "保存后后续调度读取新设置，已开始的任务继续完成；首次升级后需重载插件。"
   },
   "review_policy": {
-    "description": "启用可选二次审阅时的审查策略：all 全部审查，speed_first 速度优先；不改变 reply_review_enabled 开关",
+    "description": "可选审阅模式：all 完整审阅，speed_first 预测分流，与延迟优化开关独立",
     "type": "string",
-    "default": "all",
+    "default": "speed_first",
     "options": [
       "all",
       "speed_first"
     ]
   },
   "reply_prediction_enabled": {
-    "description": "启用回复预测，供延迟优化调度使用",
+    "description": "旧版兼容字段；明确关闭且开启审阅时映射完整审阅，面板选择模式后由模式统一管理",
     "type": "bool",
     "default": true
   },
@@ -276,7 +276,7 @@
     "description": "智能压缩长聊天上下文",
     "type": "bool",
     "default": false,
-    "hint": "只压缩送给模型的视图，完整聊天仍保留。近期完整轮次与当前任务不拆开，旧话题提供摘录并在空闲时生成摘要；明确追问旧事时恢复完整上下文。"
+    "hint": "只压缩送给模型的视图，完整聊天仍保留。近期完整轮次与当前任务不拆开，旧话题提供摘录并在空闲时生成摘要；明确追问旧事时检索本地相关原文；旧图片继续按原图回看规则处理。"
   },
   "context_recent_turns": {
     "description": "近期完整对话最多保留轮数",
@@ -314,7 +314,7 @@
   "history_recall_enabled": {
     "type": "bool",
     "default": true,
-    "description": "追问旧事时从当前会话本地原始文本检索相关片段，避免重新发送全部历史"
+    "description": "追问旧事或明确要求查聊天记录时检索本会话保留的本地原文，不依赖压缩阈值，不跨会话，不增加模型调用"
   },
   "meme_understanding_enabled": {
     "type": "bool",
@@ -390,5 +390,17 @@
     "type": "bool",
     "default": true,
     "description": "每小时空闲时一致备份配置、数据库和图片资料；保留24个小时点及最近7个每日点，前台聊天到来时延期"
+  },
+  "wiki_update_enabled": {
+    "description": "梗百科每日自动更新",
+    "type": "bool",
+    "default": true,
+    "hint": "仅在空闲时抓取，失败或取消继续使用旧词库"
+  },
+  "wiki_update_time": {
+    "description": "梗百科自动更新时间（香港时间）",
+    "type": "string",
+    "default": "04:00",
+    "hint": "HH:MM；错过的每日更新只补一次"
   }
 }

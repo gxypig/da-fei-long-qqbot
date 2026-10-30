@@ -12,6 +12,11 @@ class DrainTests(unittest.IsolatedAsyncioTestCase):
     async def test_success_requires_positive_persistence_results(self):
         p=self.plugin();p._learning=SimpleNamespace(_persistence=SimpleNamespace(flush=AsyncMock(return_value=True)))
         r=await drain_project(p,1);self.assertTrue(r['drained'],r);self.assertTrue(r['durable'])
+    async def test_dictionary_writer_is_joined_before_stop_and_errors_block_shutdown(self):
+        p=self.plugin();p._wiki_updates=SimpleNamespace(close=AsyncMock())
+        r=await drain_project(p,1);self.assertTrue(r['drained']);p._wiki_updates.close.assert_awaited_once()
+        p._wiki_updates.close=AsyncMock(side_effect=OSError('checkpoint failed'))
+        r=await drain_project(p,1);self.assertFalse(r['drained']);self.assertTrue(r['errors'])
     async def test_false_checkpoint_is_not_ignored(self):
         p=self.plugin();p._learning=SimpleNamespace(_persistence=SimpleNamespace(flush=AsyncMock(return_value=False)))
         r=await drain_project(p,.01);self.assertFalse(r['drained']);self.assertFalse(r['durable'])

@@ -66,6 +66,7 @@ class MemeMemory:
             except (OSError, ValueError, AttributeError):
                 # Do not overwrite a broken store and silently lose all previous learning.
                 raise RuntimeError("梗记忆文件无法读取，请从备份恢复")
+        self._local_index,self._index_key=self.rebuild_local_index()
 
     def fresh(self, row):
         return row.get('provenance') == 'custom' or time.time() - float(row.get("verified_at", 0)) < self.ttl
@@ -118,19 +119,33 @@ class MemeMemory:
     def match(self,text):
         return self._retrieve(text,direct_only=True)
 
-    def _retrieve(self,text,recent=(),direct_only=False):
+    def rebuild_local_index(self):
         from .meme_index import MemeIndex,fold
-        if self.wiki:self.wiki.refresh()
         signature=(id(self.entries),len(self.entries),self._index_generation,self.wiki.signature if self.wiki else None)
-        if self._local_index is None or self._index_key!=signature:
-            rows=[]
-            for previous in self.entries.values():
-                primary=self.wiki.local_entries.get(fold(previous['phrase'])) if self.wiki and previous.get('provenance')!='custom' else None
-                row=self._with_understanding(primary or previous)
-                if primary or self.fresh(row):rows.append(row)
-            self._local_index=MemeIndex(rows);self._index_key=signature
+        rows=[]
+        for previous in list(self.entries.values()):
+            primary=self.wiki.local_entries.get(fold(previous['phrase'])) if self.wiki and previous.get('provenance')!='custom' else None
+            row=self._with_understanding(primary or previous)
+            if primary or self.fresh(row):rows.append(row)
+        return MemeIndex(rows),signature
+
+    def _retrieve(self,text,recent=(),direct_only=False):
+        # Mutations/startup prepare this small index. A chat query never builds
+        # either dictionary or understanding indexes.
+        if self._local_index is None:
+            from .meme_index import MemeIndex
+            self._local_index=MemeIndex([])
         local=self._local_index.search(text,recent,limit=6,direct_only=direct_only)
-        primary=(self.wiki.index.search(text,recent,limit=6,direct_only=direct_only,exclude=self._local_index.rows)
+        from .meme_index import fold
+        def valid(row):
+            current=self.entries.get(row['phrase'].casefold(),row)
+            if row.get('provenance')=='memewiki' and self.wiki:
+                public=self.wiki.local_entries.get(fold(row['phrase'])) or getattr(self.wiki,'by_slug',{}).get(row.get('wiki_slug'))
+                return row.get('source_hash')==public.get('source_hash') if public else self.fresh(current)
+            return self.fresh(current)
+        local=[row for row in local if valid(row)]
+        excluded={fold(r['phrase']) for r in local}|{fold(r['phrase']) for r in self.entries.values() if r.get('provenance')=='custom'}
+        primary=(self.wiki.index.search(text,recent,limit=6,direct_only=direct_only,exclude=excluded)
             if self.wiki and self.wiki.index else [])
         rows=local+primary
         rows.sort(key=lambda r:(r['retrieval_kind']=='direct',r.get('provenance')=='custom',r['retrieval_score'],len(r['phrase'])),reverse=True)
@@ -139,7 +154,8 @@ class MemeMemory:
     def _with_understanding(self,row):
         from .meme_index import strings
         previous=self.entries.get(row['phrase'].casefold(),{})
-        if row.get('provenance')=='memewiki' and previous.get('provenance')!='custom':
+        if (row.get('provenance')=='memewiki' and previous.get('provenance')!='custom'
+                and row.get('source_hash') and previous.get('understood_source_hash')==row.get('source_hash')):
             row={**row,**{k:v for k,v in previous.items() if k in {'intent','avoid','adaptations','triggers','understood_at'}},
                 **{k:list(dict.fromkeys(strings(row.get(k))+strings(previous.get(k)))) for k in ('aliases','tags')}}
         return row
@@ -148,7 +164,7 @@ class MemeMemory:
         key=row['phrase'].casefold();old=self.entries.get(key)
         if old and old.get('provenance')=='custom':return old
         row=self._with_understanding(row)
-        if old and self.fresh(old) and all(old.get(k)==row.get(k) for k in ('meaning','usage','provenance')):
+        if old and self.fresh(old) and all(old.get(k)==row.get(k) for k in ('meaning','usage','provenance','source_hash')) and (not old.get('intent') or old.get('understood_source_hash')==row.get('source_hash')):
             return old
         previous=dict(self.entries)
         if key not in self.entries and len(self.entries)>=500:
@@ -184,6 +200,7 @@ class MemeMemory:
         os.replace(staged, self.path)
         self._usage_cache.clear()
         self._index_generation+=1
+        self._local_index,self._index_key=self.rebuild_local_index()
 
     def contextual(self,text,recent=()):
         """One local index contract across dictionary, custom and learned entries."""
@@ -193,6 +210,10 @@ class MemeMemory:
         key = normalize(phrase).casefold()
         async with self._key_lock('lookup:'+key):
             row = self.entries.get(key)
+            if self.wiki and row and row.get('provenance')=='memewiki':
+                current=self.wiki.exact(row['phrase'])
+                if current and row.get('understood_source_hash')!=current.get('source_hash'):
+                    row=self._remember_wiki(current)
             if not row or row.get('intent') or not self.fresh(row):
                 return row
             before = dict(row)
@@ -212,8 +233,11 @@ class MemeMemory:
             # Import/forget can change the entry while the idle model is awaiting.
             if self.entries.get(key) != before:
                 return self.entries.get(key)
+            if self.wiki and row.get('provenance')=='memewiki':
+                current=self.wiki.exact(row['phrase'])
+                if not current or current.get('source_hash')!=before.get('source_hash'):return None
             previous = dict(self.entries)
-            self.entries[key] = {**row,**extra,'understood_at':time.time()}
+            self.entries[key] = {**row,**extra,'understood_at':time.time(),'understood_source_hash':row.get('source_hash')}
             try:
                 self._save()
             except OSError:

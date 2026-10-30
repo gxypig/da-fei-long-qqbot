@@ -79,9 +79,11 @@ class ProactiveVariety:
         state = (request_scope(origin) or {}).get('character', {})
         content = casual_punctuation(limit_father_address(limit_emoji(content, state, mode), state, mode), mode)
         reviewer = getattr(p, '_reviewer', None)
-        if p._cfg('reply_review_enabled', True) and reviewer:
+        from .review_modes import current
+        if current(p._cfg)['enabled'] and reviewer:
             content = await reviewer.review(content, origin=origin, mode=mode,
                 recent=p.review_context(origin), prior_replies=self.history(origin), character=state)
+            approve_once(origin,content,policy_version=p.review_policy_version() if hasattr(p,'review_policy_version') else None)
         return content
 
     async def duplicate(self, origin, content):

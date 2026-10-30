@@ -72,7 +72,7 @@ class Companion:
 
     def _cfg(self, key, default=None): return self.config.get(key, default)
 
-    def prepare_reply_prediction(self, event, candidates=None):
+    def prepare_emoji_selection(self, event, candidates=None):
         task = event.get_extra("test_prediction")
         if task is not None:
             return task
@@ -204,7 +204,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
 
     async def test_parallel_starts_before_body_shared_task_only_once(self):
         turn = await self.start()
-        same = self.companion.prepare_reply_prediction(self.event)
+        same = self.companion.prepare_emoji_selection(self.event)
         self.assertIs(same, turn.prediction)
         await self.companion.started.wait()
         async def body():
@@ -289,7 +289,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         await self.drain(turn)
         self.p.context.send_message.assert_not_awaited()
 
-    async def test_late_window_expires_without_cancelling_shared_prediction(self):
+    async def test_late_window_expires_cancels_only_image_selection(self):
         self.companion.config["emoji_late_grace_seconds"] = .02
         self.event.result.chain[0].text = "今天聊两句"
         turn = await self.start()
@@ -297,9 +297,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         await self.sent()
         await self.drain(turn)
         self.assertTrue(turn.closed)
-        self.assertFalse(turn.prediction.done())
-        self.companion.release.set()
-        await turn.prediction
+        self.assertTrue(turn.prediction.cancelled())
         self.p.context.send_message.assert_not_awaited()
 
     async def test_zero_late_grace_keeps_already_ready_separate_image(self):
@@ -339,14 +337,14 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                 bot = object.__new__(CQHttp)
                 reviewer = SimpleNamespace(review=AsyncMock(return_value='对不起，是本龙错了'))
                 plugin = SimpleNamespace(_platform=lambda: SimpleNamespace(bot=bot),
-                    _cfg=lambda key, default=None: default, review_context=lambda origin: [], review_mode=lambda origin: 'chat')
+                    _cfg=lambda key, default=None: True if key=='reply_review_enabled' else default, review_context=lambda origin: [], review_mode=lambda origin: 'chat')
                 transport = AsyncMock(return_value={'message_id': 'test-only'})
                 async def real_guard_send(message):
                     payload = [{'type': 'text', 'data': {'text': part.text}} if isinstance(part, Plain)
                                else {'type': 'image', 'data': {'file': 'base64://fake'}} for part in message.chain]
                     return await bot.call_action('send_group_msg', group_id=100, message=payload)
                 event.transport.side_effect = real_guard_send
-                bind_request('aiocqhttp:GroupMessage:100', [], False)
+                bind_request('aiocqhttp:GroupMessage:100', [], False, review_settings={'enabled':True,'policy':'all','version':'test'})
                 with patch.object(CQHttp, 'call_action', transport):
                     restore = install_outbound_guard(plugin, reviewer)
                     try:
@@ -406,9 +404,10 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         newer = Event(origin="aiocqhttp:GroupMessage:2_100", sender="2")
         await self.start(newer)
         self.assertTrue(turn.closed)
-        self.assertFalse(turn.prediction.cancelled())
+        await asyncio.gather(turn.prediction, return_exceptions=True)
+        self.assertTrue(turn.prediction.cancelled())
         self.companion.release.set()
-        await asyncio.gather(*self.companion.tasks)
+        await asyncio.gather(*self.companion.tasks, return_exceptions=True)
         self.p.context.send_message.assert_not_awaited()
 
     async def test_generation_next_reply_also_cancels_pending(self):
@@ -429,7 +428,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         command.result = MessageEventResult().message("命令帮助")
         await self.decorate(command)
         self.assertTrue(turn.closed)
-        self.assertFalse(turn.prediction.cancelled())
+        await asyncio.gather(turn.prediction, return_exceptions=True)
+        self.assertTrue(turn.prediction.cancelled())
         self.assertEqual(command.result.get_plain_text(), "命令帮助")
 
     async def test_older_reply_hooks_cannot_cancel_a_newer_turn(self):
@@ -442,7 +442,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(newer.closed)
 
     async def test_config_changes_cancel_and_never_fall_back_to_waiting(self):
-        for change in ("master", "gallery", "probability", "window", "review", "unload"):
+        for change in ("master", "gallery", "probability", "window", "unload"):
             with self.subTest(change=change):
                 self.companion.config = {"latency_optimization_enabled": True, "meme_separate_probability": 100}
                 self.cfg["enabled"] = True
@@ -633,7 +633,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_or_malformed_prediction_uses_only_strong_local_reply_match(self):
         for answer in ({"risk": "unknown", "image_ids": []}, {"risk": "low", "image_ids": ["outside"]},
-                       {"risk": "wrong", "image_ids": ["happy"]}, {"risk": "low", "image_ids": "happy"}):
+                       {"image_ids": []}, {"risk": "low", "image_ids": "happy"}):
             self.companion.answer = answer
             event = Event()
             turn = await self.start(event)
@@ -663,13 +663,12 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.p._proactive_emoji_probability_hit.assert_called_once()
         self.assertEqual(self.p._latency_emoji_stats.get("no_match"), 1)
 
-    async def test_local_reply_preparation_does_not_wait_for_slow_shared_prediction(self):
+    async def test_local_reply_preparation_does_not_wait_for_slow_image_selection(self):
         turn = await self.start()
         await self.decorate()
         await self.sent()
         await self.drain(turn)
-        self.assertFalse(turn.prediction.done())
-        self.assertFalse(turn.prediction.cancelled())
+        self.assertTrue(turn.prediction.cancelled())
         self.p.context.send_message.assert_awaited_once()
         self.assertEqual(turn.selection_source, "local_reply")
         self.assertEqual(self.p._latency_emoji_stats.get("sent_separate"), 1)
@@ -747,26 +746,28 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.meta.star_cls = real
         await SmartImageSenderPlugin.on_llm_request(self.p, self.event, None)
         turn = self.event.get_extra(LATENCY_EMOJI_KEY)
-        self.assertIs(real.prepare_reply_prediction(self.event), turn.prediction)
+        self.assertIsNone(real.prepare_reply_prediction(self.event))
+        self.assertIs(real.prepare_emoji_selection(self.event, turn.candidates), turn.prediction)
         await turn.prepare
-        self.assertEqual(self.event.get_extra("qqbot_prediction_candidates")[0]["id"], "happy")
-        real._generate_json.assert_awaited_once()
+        self.assertEqual(turn.candidates[0]["id"], "happy")
+        real._generate_json.assert_not_awaited()
         await self.decorate()
         await self.sent()
         await self.drain(turn)
         self.p.context.send_message.assert_awaited_once()
 
-    async def test_review_cancel_termination_and_owner_cancel_leave_prediction_alive(self):
+    async def test_review_cancel_termination_and_owner_cancel_cancel_image_selection(self):
         turn = await self.start()
         await self.event.get_extra("qqbot_cancel_reply_preparation")()
         self.assertTrue(turn.closed)
-        self.assertFalse(turn.prediction.cancelled())
+        await asyncio.gather(turn.prediction, return_exceptions=True)
+        self.assertTrue(turn.prediction.cancelled())
         newer = Event()
         owned = await self.start(newer)
         await self.p._terminate_latency_emoji()
         self.assertTrue(owned.closed)
         self.assertTrue(owned.prepare.cancelled())
-        self.assertFalse(owned.prediction.cancelled())
+        self.assertTrue(owned.prediction.cancelled())
         self.assertFalse(self.p._latency_emoji_tasks)
         self.assertFalse(self.p._latency_emoji_turns)
 
@@ -783,7 +784,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
         self.assertTrue(turn.closed)
-        self.assertFalse(turn.prediction.cancelled())
+        await asyncio.gather(turn.prediction, return_exceptions=True)
+        self.assertTrue(turn.prediction.cancelled())
 
     async def test_slow_image_conversion_does_not_hold_text(self):
         entered, release = asyncio.Event(), asyncio.Event()

@@ -53,6 +53,7 @@ from .fullchain_panel import register_fullchain_panel
 from .ai_profiles import AIProfiles
 from .image_memory import ImageMemory
 from .async_audit import AuditWriter
+from .version import VERSION
 from .chain_metrics import operation as metric_operation,timed as metric_timed
 from datetime import datetime
 from datetime import time as dt_time
@@ -98,7 +99,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._sent_memory = SentMemory(self._data_dir / 'sent-memory.sqlite3',buffered=True)
         self._live_journal = LiveJournal(self._data_dir / 'live-messages.sqlite3')
         self._restore_live = self._restore_chat_lane = self._restore_context_window = None
-        self._reviewer = ReplyReviewer(self._generate_json, self._audit, enabled=lambda:self._cfg('reply_review_enabled',True))
+        self._reviewer = ReplyReviewer(self._generate_json, self._audit, enabled=lambda:self.review_settings()['enabled'])
         from .memewiki_engine import MemeWikiEngine
         self._memory = MemeMemory(self._data_dir / "meme_memory.json", self._generate_json, self._search_meme, self._audit,
                                   wiki=MemeWikiEngine(self._data_dir/'memewiki'/'memes.db'))
@@ -171,6 +172,11 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._restore_work = install_work_runtime(self)
         self._restore_fullchain = install_fullchain(self)
         await self._learning.start()
+        from .wiki_update import WikiUpdater
+        self._wiki_updates=WikiUpdater(self)
+        try:await self._wiki_updates.start()
+        except Exception as exc:
+            self.logger.error('词库更新服务启动失败，已保留原词库：%s',type(exc).__name__)
         self.context.register_web_api("/astrbot_plugin_proactive_agent/health", self.health_api, ["GET"], "只读链路和功能健康检查")
         self.context.register_web_api("/astrbot_plugin_proactive_agent/status", self.status_api, ["GET"], "主动行为运行状态")
         self.context.register_web_api("/astrbot_plugin_proactive_agent/preview", self.preview_api, ["POST"], "只预览主动决策，不发送")
@@ -179,10 +185,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._fixed_task = asyncio.create_task(self._fixed_loop(), name="fixed-proactive-agent")
         from .data_backup import HourlyBackup
         self._backups=HourlyBackup(self);await self._backups.start()
-        self.logger.info("主动插件 v1.19.1 已加载：梗语境理解、本地旧话检索、随机定时；梗记忆=%s 条；间隔=%s 分钟", len(self._memory.entries), self._cfg("interval_minutes", 30))
+        self.logger.info("主动插件 v%s 已加载；梗记忆=%s 条；间隔=%s 分钟", VERSION, len(self._memory.entries), self._cfg("interval_minutes", 30))
 
     async def health_api(self):
-        checks = {"reply_review": not self._cfg("reply_review_enabled", True) or self._restore_review is not None,
+        checks = {"reply_review": not self.review_settings()['enabled'] or self._restore_review is not None,
                   "image_compat": not self._cfg("image_fallback", True) or self._restore_images is not None,
                   "group_wake": self._restore_group_wake is not None,
                   "group_flow": self._restore_group_flow is not None,
@@ -208,7 +214,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         delivery=runtime_health(self)
         checks['necessary_delivery']=delivery['ordinary_delivery_ok']
         checks['reply_backlog']=not delivery['backlog_delayed']
-        return jsonify({"status": "ok", "data": {"version": "1.20.0", "checks": checks,
+        return jsonify({"status": "ok", "data": {"version": VERSION, "checks": checks,
             "performance": self.performance_status(),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
@@ -217,7 +223,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             'delivery':delivery,'targets':self._targets.snapshot()}})
 
     async def status_api(self):
-        return jsonify({"status": "ok", "data": {"version": "1.20.0", "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self._cfg("reply_review_enabled", True) and self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
+        return jsonify({"status": "ok", "data": {"version": VERSION, "performance": self.performance_status(), "image_compat": self._restore_images is not None, "reply_review": self.review_settings()['enabled'] and self._restore_review is not None, "review_stats": self._reviewer.stats, "meme_stats": self._memory.stats, "latency": self._latency_summary(), "meme_memories": len(self._memory.entries), "loop_running": bool(self._task and not self._task.done()), "busy": self._busy, "quiet_now": self._quiet_now(), "state": await self.get_kv_data("proactive_state", {}), "history": await self._history(), "last_qzone_ts": await self.get_kv_data("last_qzone_ts", 0)}})
 
     async def preview_api(self):
         return jsonify({"status": "ok", "data": await self._decide("面板预览", dry_run=True)})
@@ -240,6 +246,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
 
     async def terminate(self) -> None:
+        if getattr(self,'_wiki_updates',None):await self._wiki_updates.close()
         if getattr(self,'_backups',None):await self._backups.close()
         # Stop producers before draining consumers or closing their fact stores.
         producers=[t for t in (self._task,self._fixed_task) if t and not t.done()]
@@ -310,7 +317,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
     async def _generate_json(self, system, payload, origin, *, timeout=40):
         prediction = system.startswith(PREDICTION_SYSTEM)
-        provider_id = self._cfg('prediction_provider_id', '') if prediction else ''
+        provider_id = self.review_settings()['prediction_provider_id'] if prediction else ''
         provider = self.context.get_provider_by_id(provider_id) if provider_id else await self.context.get_using_provider_async(umo=None if origin == "qzone" else origin)
         if provider is None:
             from .work_scheduler import ModelNotReady
@@ -319,7 +326,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             from .provider_deadline import with_deadline
             provider=with_deadline(provider,timeout)
         from .persona_authority import REVIEW_FUNCTIONAL
-        stage = "review_model" if system.startswith((REVIEW_SYSTEM,REVIEW_FUNCTIONAL)) else "prediction_model" if prediction else {DETECT_SYSTEM: "detect_model", LEARN_SYSTEM: "learn_model"}.get(system, "aux_model")
+        from .reply_pipeline import EMOJI_SELECTION_SYSTEM
+        stage = "review_model" if system.startswith((REVIEW_SYSTEM,REVIEW_FUNCTIONAL)) else "prediction_model" if prediction else "emoji_selection_model" if system==EMOJI_SELECTION_SYSTEM else {DETECT_SYSTEM: "detect_model", LEARN_SYSTEM: "learn_model"}.get(system, "aux_model")
         started, ok = time.monotonic(), False
         try:
             lane = getattr(self, '_auxiliary_lane', None)
@@ -867,6 +875,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             bind_route(event.unified_msg_origin, event.get_sender_id(),
                        getattr(getattr(event, 'message_obj', None), 'message_id', ''), bool(getattr(event, 'get_group_id', lambda: '')()))
             text = (event.get_message_str() or "").strip()
+            from .conversation_controls import explicit_quote_requested
+            if explicit_quote_requested(text):
+                event.set_extra('qqbot_explicit_quote',True)
             if not text or str(event.get_sender_id()) == str(event.get_self_id()):
                 return
             umo = event.unified_msg_origin
@@ -882,7 +893,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             if life and not command:
                 life.observe(umo,str(getattr(event.message_obj,'message_id','')),text,str(event.get_sender_id()))
             from .speaker_context import recent_speakers
-            bind_request(umo, recent_speakers([r for r in rows if time.time()-r['time']<7200][-6:],bool(getattr(event,'get_group_id',lambda:'')())),rows[-1]['management'])
+            bind_request(umo, recent_speakers([r for r in rows if time.time()-r['time']<7200][-6:],bool(getattr(event,'get_group_id',lambda:'')())),rows[-1]['management'],review_settings=self.review_settings(event))
             snapshot = [dict(r) for r in rows if time.time() - r["time"] < 7200]
             event.set_extra("qqbot_meme_recent", snapshot)
             if (not command and getattr(event, "is_at_or_wake_command", False)
@@ -926,13 +937,20 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     @metric_timed('context_prepare_ms')
     async def enrich_conversation(self, event: AstrMessageEvent, req) -> None:
         event.set_extra('qqbot_agent_final_done', False)
+        # Keep the invariant role/rules before per-message IDs and timestamps.
+        # Providers can reuse the prompt prefix without changing any rule, tool,
+        # reasoning setting or conversation fact.
+        from .persona_authority import bind_persona,PRIORITY,FUNCTIONAL_STYLE,generation_example
+        state = self.character_context(event)
+        await bind_persona(self,event,req,state)
+        req.system_prompt=(req.system_prompt or '')+'\n'+FUNCTIONAL_STYLE+'\n'+PUNCTUATION_RULE+PRIORITY
         profiles=getattr(self,'_ai_profiles',None)
         if profiles:
             req.system_prompt=(req.system_prompt or '')+profiles.reply_note(event.get_platform_id(),str(event.get_sender_id()))
             if not event.get_extra('qqbot_probe_prepared'):
                 event.set_extra('qqbot_probe_prepared',True)
                 probe=await profiles.prepare_probe(event.get_platform_id(),str(event.get_sender_id()),
-                    str(getattr(event.message_obj,'message_id','')),event.unified_msg_origin)
+                    str(getattr(event.message_obj,'message_id','')),event.unified_msg_origin,text=event.get_message_str())
                 event.set_extra('qqbot_ai_probe',probe)
                 if probe:req.system_prompt+='\n这次原本就在回复对方，可在自然接话时顺口问一句：'+probe['question']+' 不必额外单独发消息；场景不合适则不问'
         ledger=getattr(self,'_delivery',None)
@@ -950,16 +968,19 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         images=getattr(self,'_image_memory',None)
         if images:await images.enrich(event,req)
         text = str(req.prompt or "")
-        state = self.character_context(event)
-        from .persona_authority import bind_persona,PRIORITY,FUNCTIONAL_STYLE
-        await bind_persona(self,event,req,state)
+        from .send_checks import verbatim_request,banned_tics
+        state['self_banned_phrases']=banned_tics(state.get('persona_prompt',''))
+        if state['self_banned_phrases']:
+            req.system_prompt+='\n当前人格已禁止自用的口癖：'+json.dumps(state['self_banned_phrases'],ensure_ascii=False)+'。不要跟随用户或旧回复使用这些口癖；逐字引用仍保留原文。'
+        exact=verbatim_request(event.get_message_str() or '')
+        if exact is not None:state['verbatim_text']=exact
         from .voice_memory import prepare_voice_state,voice_note
         await prepare_voice_state(self,event,state)
         if ledger and state.get('voice_capability'):
             state['voice_receipts']=ledger.voice_context(event.unified_msg_origin,getattr(getattr(req,'conversation',None),'cid',None),event.get_sender_id())
         optimized = self._cfg('latency_optimization_enabled', False)
+        self.prepare_reply_prediction(event)
         if optimized:
-            self.prepare_reply_prediction(event)
             work = getattr(self, '_work', None)
             if work: work.mark(event, 'preparing')
             if self._cfg('reply_hedge_after_seconds', 15) and casual_tail_allowed(event, state):
@@ -979,15 +1000,20 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                           + json.dumps(batch, ensure_ascii=False) + '\n当前最后一条：' + str(req.prompt or ''))
         from .speaker_context import attribute_request
         attribute_request(event,req,state)
+        from .history_recall import enrich as enrich_archive
+        await enrich_archive(self,event,req)
         if hasattr(self, '_group_flow'):
             req.system_prompt = (req.system_prompt or '') + self._group_flow.note(event)
-        req.system_prompt = (req.system_prompt or "") + "\n" + FUNCTIONAL_STYLE + "\n" + PUNCTUATION_RULE + character_note(state) + generation_note(state["visual_intent"],state)
-        req.system_prompt += PRIORITY
+        req.system_prompt = (req.system_prompt or "") + character_note(state) + generation_note(state["visual_intent"],state)
+        req.system_prompt += generation_example(event.get_message_str() or '')
+        event.set_extra('qqbot_generation_request',req)
         life=getattr(self,'_life',None)
         if life:req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())
-        req.system_prompt += ('\n当前这一轮只回复真实发送者，群里其他成员的话是背景，不要把其他人的问题当成当前人的问题。'
-                              '真实发送者QQ：' + str(event.get_sender_id()) + '；当前消息：'
-                              + json.dumps(event.get_message_str() or '', ensure_ascii=False))
+        # Group attribution is already persisted in req.prompt + speaker_note.
+        # Do not repeat the entire current message in the system prompt: it is
+        # supplied verbatim as the final user turn by the native runner.
+        if not state.get('group_speaker'):
+            req.system_prompt += '\n当前真实发送者QQ：'+str(event.get_sender_id())+'；回复本轮用户消息，历史仅作背景。'
         if hasattr(self, '_sent_memory'):
             cid = getattr(getattr(req, 'conversation', None), 'cid', None)
             cid = cid or await conversation_id(self, event.unified_msg_origin)
@@ -1027,7 +1053,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 from .conversation_review import request_scope
                 scope=request_scope(event.unified_msg_origin)
                 if scope:scope['character']=state
-                req.system_prompt+=USAGE_RULE
+                if selected:req.system_prompt+=USAGE_RULE
             if notes:
                 req.system_prompt += MEME_RULE + "\n梗记忆候选：\n" + json.dumps([{ 'status':n.get('status'), 'entry':{k:v for k,v in n.get('entry',{}).items() if k in {'phrase','meaning','usage','examples','provenance','intent','avoid','adaptations','aliases','sources','applicable','retrieval_reason','retrieval_kind'}}} for n in notes[:3]], ensure_ascii=False, separators=(',',':'))
         req.system_prompt+=voice_note(state)
@@ -1067,30 +1093,30 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         chain = response.result_chain
         has_image = bool(chain and any(isinstance(p, Image) for p in chain.chain))
         state["generated_image"] = has_image and bool(getattr(response, "qqbot_generated_image", False))
-        if state.get("generated_image") and state.get("visual_intent") in {"selfie", "scene"} and not (response.completion_text or '').strip():
-            caption = photo_caption(state["visual_intent"], state.get("father_address_allowed"),state)
-            response.completion_text = caption
-            plains = [p for p in chain.chain if isinstance(p, Plain)]
-            for i, part in enumerate(plains):
-                part.text = caption if i == 0 else ""
-            if not plains:
-                chain.chain.insert(0, Plain(caption))
-        response.completion_text = casual_punctuation(limit_father_address(limit_emoji(response.completion_text or "", state, mode), state, mode), mode)
+        from .send_checks import own_style,issues
+        raw=response.completion_text or ''
+        response.completion_text = own_style(raw,state,mode)
+        media=sum(type(p).__name__ not in {'Plain','At','Reply'} for p in chain.chain) if chain else 0
+        problems=issues(response.completion_text,state=state,mode=mode,media=media)
+        if problems:
+            response.completion_text=await self.repair_local_output(event,response.completion_text,problems,media=media,messages=getattr(run_context,'messages',()))
+        if response.completion_text!=raw and event.get_extra('qqbot_send_path')!='template_receipt':event.set_extra('qqbot_send_path','local_repair')
         if response.result_chain:
-            for part in response.result_chain.chain:
-                if isinstance(part, Plain):
-                    part.text = casual_punctuation(limit_father_address(limit_emoji(part.text, state, mode), state, mode), mode)
+            plains=[part for part in response.result_chain.chain if isinstance(part,Plain)]
+            for i,part in enumerate(plains):part.text=response.completion_text if i==0 else ''
+            if not plains and response.completion_text:response.result_chain.chain.insert(0,Plain(response.completion_text))
         # Keep history correct even when optional model review is disabled.
         messages = getattr(run_context, "messages", [])
         if messages and messages[-1].role == "assistant":
             from astrbot.core.agent.message import TextPart
             parts = messages[-1].content
             messages[-1].content = ([p for p in parts if not isinstance(p, TextPart)] if isinstance(parts, list) else []) + [TextPart(text=response.completion_text)]
-        if not self._cfg('reply_review_enabled', True):
+        if not self.review_settings(event)['enabled']:
+            if not event.get_extra('qqbot_send_path'):event.set_extra('qqbot_send_path','review_off')
             event.set_extra('qqbot_agent_final_done', getattr(response, 'role', 'assistant') == 'assistant'
                             and bool((response.completion_text or '').strip()))
+            event.set_extra('qqbot_final_text', response.completion_text)
             if getattr(self, '_work', None):
-                event.set_extra('qqbot_final_text', response.completion_text)
                 self._work.mark(event, 'final_ready')
 
     @filter.on_agent_done(priority=-1000)
@@ -1099,7 +1125,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         usage=getattr(self,'_meme_usage',None)
         if usage and response and not getattr(response,'tools_call_name',None):
             usage.stage(event,'draft',getattr(response,'completion_text',''))
-        if not self._cfg("reply_review_enabled", True):
+        if not self.review_settings(event)['enabled']:
             if usage:usage.stage(event,'review',getattr(response,'completion_text',''),reason='review_disabled')
             return
         if response is None or getattr(response, "tools_call_name", None):
@@ -1113,26 +1139,20 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         origin = event.unified_msg_origin
         prior_replies = []
         messages = getattr(run_context, "messages", [])
-        previous = messages[:-1] if messages and messages[-1].role == "assistant" else messages
-        for message in previous:
-            if message.role != "assistant":
-                continue
-            if deferred_tool_message(run_context, message):
-                continue
-            content = message.content
-            if isinstance(content, str):
-                prior_replies.append(content)
-            elif isinstance(content, list):
-                text = " ".join(p.text for p in content if isinstance(p, TextPart))
-                if text:
-                    prior_replies.append(text)
+        # Runner assistant messages include unsent drafts and tool preambles.
+        # Only receipt-backed replies can be presented as something already said.
+        ledger=getattr(self,'_delivery',None)
+        from .reply_jobs import current_job
+        job=current_job.get()
+        if ledger and job:
+            prior_replies=[r['text'] for r in ledger.recent(origin,job.cid,include_history=True) if r.get('text')]
         try:
             latest = self._group_flow.note(event) if hasattr(self, '_group_flow') else ''
             recent = self.review_context(origin) + ([latest] if latest else [])
             mode = self.review_mode(origin)
             state = event.get_extra('qqbot_character') or {}
             media = sum(not isinstance(p, Plain) and type(p).__name__ not in {'At', 'Reply'} for p in chain.chain) if chain else 0
-            speed = self._cfg('latency_optimization_enabled', False) and self._cfg('review_policy', 'all') == 'speed_first'
+            speed = self.review_settings(event)['mode'] == 'speed_first'
             used_tools=current_turn_used_tools(messages) or has_deferred_prelude(run_context)
             reasons = fast_path_issues(draft, event.get_message_str() or '', mode=mode, media=media,
                 state=state, used_tools=used_tools, prediction=self.reply_prediction(event)) if speed else ['full_policy']
@@ -1144,28 +1164,36 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 if getattr(self, '_work', None): self._work.mark(event, 'review_done')
             if fast:
                 self._prediction_stats['fast_passed'] += 1
-                self._audit('review_fast_path', {'status': 'local_checked'})
+                event.set_extra('qqbot_send_path','prediction_direct')
+                self._audit('review_fast_path', {'status': 'prediction_direct','final_body_reviewed':False})
                 group = event.get_group_id()
                 route = f"{event.get_platform_id()}:{'GroupMessage' if group else 'FriendMessage'}:{group or event.get_sender_id()}"
                 event.set_extra('qqbot_pending_style_sample', {'route': route, 'text': checked,
                     'recent': recent[-6:], 'state': dict(state)})
             else:
+                event.set_extra('qqbot_send_path','full_review')
                 if hasattr(self, '_prediction_stats'): self._prediction_stats['full_reviewed'] += 1
                 if getattr(self, '_learning', None) and checked != draft and mode == 'chat':
                     self._learning.enqueue_review(draft, recent, origin, state, force=True, corrected=checked)
         except (Exception, asyncio.CancelledError) as exc:
-            # Framework hooks log exceptions and keep going; explicitly stop instead of leaking a draft.
-            getattr(event, 'set_extra', lambda *args: None)('qqbot_agent_final_done', False)
-            event.stop_event()
-            response.completion_text = ""
-            if chain:
-                chain.chain.clear()
             cleanup = getattr(event, "get_extra", lambda key: None)("qqbot_cancel_reply_preparation")
             if callable(cleanup):
                 await cleanup()
             if isinstance(exc, asyncio.CancelledError):
+                getattr(event,'set_extra',lambda *args:None)('qqbot_agent_final_done',False)
+                event.stop_event();response.completion_text=''
+                if chain:chain.chain.clear()
                 raise
-            return
+            from .persona_authority import fallback_text
+            state=event.get_extra('qqbot_character') or {}
+            if state.get('proactive') and not state.get('required'):
+                event.stop_event();response.completion_text=''
+                if chain:chain.chain.clear()
+                return
+            checked=fallback_text('reply_failure',state)
+            event.set_extra('qqbot_send_path','template_receipt')
+            if job:job.execution_result='failed';job.reply_purpose='error_notification'
+            self._audit('review_failure_receipt',{'error':type(exc).__name__})
         if await self.drop_stale_reply(event, response):
             return
         response.completion_text = checked
@@ -1184,11 +1212,11 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         group = event.get_group_id()
         target = group or event.get_sender_id()
         route = f"{event.get_platform_id()}:{'GroupMessage' if group else 'FriendMessage'}:{target}"
-        approve_once(route, checked, policy_version=self.review_policy_version() if self._cfg('latency_optimization_enabled', False) else None)
+        approve_once(route, checked, policy_version=self.review_policy_version())
         getattr(event, 'set_extra', lambda *args: None)('qqbot_agent_final_done',
             getattr(response, 'role', 'assistant') == 'assistant' and bool(checked.strip()))
+        event.set_extra('qqbot_final_text', checked)
         if getattr(self, '_work', None):
-            event.set_extra('qqbot_final_text', checked)
             self._work.mark(event, 'final_ready')
 
     async def drop_stale_reply(self, event, response):

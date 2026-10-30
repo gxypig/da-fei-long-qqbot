@@ -75,7 +75,7 @@ class FastAuxiliary(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_parts_reuse_exact_review_once_but_real_edits_still_review(self):
         reviewer = SimpleNamespace(review=AsyncMock(return_value='重新审查过的文字'))
-        plugin = SimpleNamespace(_cfg=lambda k,d:d, review_context=lambda o:[], review_mode=lambda o:'chat')
+        plugin = SimpleNamespace(_cfg=lambda k,d:True if k=='reply_review_enabled' else d, review_context=lambda o:[], review_mode=lambda o:'chat')
         guard = OutboundGuard(plugin, reviewer)
         origin = 'aiocqhttp:FriendMessage:20'
         params = {'user_id':20, 'message':[{'type':'text','data':{'text':'已审过的正文'}},

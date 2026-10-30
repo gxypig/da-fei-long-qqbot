@@ -64,7 +64,8 @@ class ReviewControl(unittest.IsolatedAsyncioTestCase):
         p=SimpleNamespace(_cfg=cfg.get,review_context=lambda _:[],review_mode=lambda _:'management')
         payload={'user_id':123,'message':'查看状态'}
         self.assertEqual(await reviewer.review('原稿',origin='x'),'原稿')
-        self.assertIs(await OutboundGuard(p,reviewer).prepare('send_private_msg',payload),payload)
+        result=await OutboundGuard(p,reviewer).prepare('send_private_msg',payload)
+        self.assertEqual(result['message'][0]['data']['text'],'查看状态')
         generate.assert_not_awaited();cfg['reply_review_enabled']=True
         await OutboundGuard(p,reviewer).prepare('send_private_msg',payload);generate.assert_awaited_once()
 

@@ -9,8 +9,8 @@ SEND_ACTIONS = {'send_msg', 'send_private_msg', 'send_group_msg', 'send_group_fo
                 'send_private_forward_msg', 'send_forward_msg'}
 
 
-def bind_route(origin, sender='', message_id='', group=False):
-    _route.set({'origin': origin, 'sender': str(sender), 'message_id': str(message_id or ''), 'group': group})
+def bind_route(origin, sender='', message_id='', group=False,*,explicit_quote=False):
+    _route.set({'origin': origin, 'sender': str(sender), 'message_id': str(message_id or ''), 'group': group,**({'explicit_quote':True} if explicit_quote else {})})
 
 
 @contextmanager
@@ -84,10 +84,11 @@ def install_route_guard(plugin):
                 if isinstance(message, str):
                     message = ([{'type': 'text', 'data': {'text': message}}] if params.get('auto_escape') else list(Message(message)))
                 if isinstance(message, list):
-                    enabled = plugin._cfg('auto_quote_enabled', False)
+                    explicit=scope.get('explicit_quote') or bool(job and job.event and job.event.get_extra('qqbot_explicit_quote'))
+                    enabled = plugin._cfg('auto_quote_enabled', False) or explicit
                     # This switch owns only the automatic quote of the triggering
                     # message; retain deliberate references to other messages.
-                    message = [p for p in message if not (isinstance(p, dict) and p.get('type') == 'reply'
+                    message = [p for p in message if not (not explicit and isinstance(p, dict) and p.get('type') == 'reply'
                                and str(p.get('data', {}).get('id')) == scope['message_id'])]
                     if (enabled and not scope.get('quoted') and not any(p.get('type') == 'reply' for p in message)
                             and any(p.get('type') == 'text' and p.get('data', {}).get('text', '').strip() for p in message)):

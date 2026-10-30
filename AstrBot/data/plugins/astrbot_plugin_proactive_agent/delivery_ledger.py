@@ -112,7 +112,7 @@ class DeliveryLedger:
         if target not in self.store.rows:self.store.put(target,{'origin':origin,'consecutive_failures':0,'pause_until':0})
         id_=uuid.uuid4().hex
         row={'id':id_,'job_id':job.id if job else None,'origin':origin,'cid':cid,'source_id':job.source_id if job else '',
-            'sender':job.sender if job else '', 'generation':job.generation if job else self.scope(origin,cid),
+            'sender':job.sender if job else '', 'source_text':job.text if job else '', 'generation':job.generation if job else self.scope(origin,cid),
             'at':time.time(),'state':'preparing' if prepared else 'sending','text':text,'attachments':attachments,'history_saved':False,
             'purpose':current_purpose(),'submission_state':'not_submitted' if prepared else 'submitted',
             'optional':bool(optional_delivery.get() or job and job.state in {'confirmed','partial'} and not text.strip()),'reason':''}
@@ -120,6 +120,9 @@ class DeliveryLedger:
             plan=job.event.get_extra('qqbot_meme_plan')
             if plan:row['meme_plan']=plan
         operation=(delivery_scope.get() or {}).get('external_operation')
+        from .send_checks import snapshot
+        check=snapshot(origin,text)
+        if check:row['send_check']={**check,'segment_id':id_,'submission_state':row['submission_state'],'delivery_state':row['state']}
         if isinstance(operation,dict):row['external_operation']={k:str(operation[k])[:100] for k in ('plugin','reservation','token') if k in operation}
         self.store.put(id_,row)
         if job:job.sends.append(id_)
@@ -128,7 +131,11 @@ class DeliveryLedger:
     def result(self,id_,state,message_id=None,reason=''):
         row=self.store.rows[id_]
         result='not_sent' if state=='failed' and row.get('submission_state')=='not_submitted' else state
-        self.store.put(id_,{**row,'state':state,'delivery_result':result,'message_id':message_id,'reason':reason,'result_at':time.time(),'confirmed_at':time.time() if state=='confirmed' else None})
+        updated={**row,'state':state,'delivery_result':result,'message_id':message_id,'reason':reason,'result_at':time.time(),'confirmed_at':time.time() if state=='confirmed' else None}
+        if row.get('send_check'):updated['send_check']={**row['send_check'],'submission_state':row['submission_state'],'delivery_state':state,'delivery_result':result}
+        self.store.put(id_,updated)
+        if getattr(self,'controls',None):self.controls.delivered(updated)
+        if getattr(self,'reply_queue',None):self.reply_queue.reconcile_echo(row.get('job_id'),state)
         job=current_job.get()
         if job and job.id==row.get('job_id'):
             job.delivery_result=result

@@ -5,6 +5,13 @@ import re
 def generation_kind(text):
     text = str(text or "").strip().lower()
     text = re.sub(r"(?:不要|别|不用|不需要)(?:再|给我|帮我)?(?:生成|画|绘制|创作|制作|拍|给我看)[^，,。；;]*", "", text)
+    # Narrating a completed picture is not asking for another. Remove only that
+    # clause, so a later explicit request ("画过猫，再画张狗") still works.
+    def drop_past(clause):
+        if re.search(r"^(?:@\d+\s*)*(?:请|帮我|帮忙|麻烦|替我|给我|你(?:再|也|先))|(?:现在|这次|重新|接着|再).{0,8}(?:画|绘制|生成|拍)",clause):return clause
+        past=re.search(r"(?:以前|之前|上次|刚才|曾经|已经|早就|刚刚|刚|我|你|他|她|本.{1,6}|^给.{1,8}).{0,18}(?:画|绘制|生成|拍)(?:过(?!年|节|期)|了|完|好)",clause)
+        return "" if past else clause
+    text=''.join(drop_past(part) for part in re.split(r"([，,。；;！!？?\n])",text))
     # Questions about tools and requests to inspect supplied material aren't creation.
     if re.search(r"为什么.{0,10}(?:生成|画|拍)|(?:怎么|如何).{0,8}(?:生成|画图|拍照)|(?:解释|分析|识别|描述|评价|看看|看下|看一下).{0,10}(?:这张|这个|这幅|我发的|附件|代码|报错|日志|配置|链接|文章|题目|作业|答案)", text):
         return "none"

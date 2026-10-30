@@ -16,13 +16,12 @@ from quart import Quart
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "AstrBot/data/plugins/astrbot_plugin_proactive_agent"
-SPEC = importlib.util.spec_from_file_location("performance_panel_under_test", PLUGIN / "panel.py")
-panel = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(panel)
+import test_maintenance
+from data.plugins.astrbot_plugin_proactive_agent import panel
 
 DEFAULTS = {
     "latency_optimization_enabled": False,
-    "review_policy": "all",
+    "review_policy": "speed_first",
     "reply_prediction_enabled": True,
     "prediction_provider_id": "",
     "idle_learning_enabled": False,
@@ -153,6 +152,7 @@ class PerformancePanelAPITests(unittest.IsolatedAsyncioTestCase):
             PREFIX + "learning_content": ["GET"],
             PREFIX + "meme_repository": ["GET", "POST"],
             PREFIX + "meme_wiki": ["GET", "POST"],
+            PREFIX + "meme_wiki_update": ["GET", "POST"],
             PREFIX + "panel_review_metrics": ["GET"],
             PREFIX + "panel_capabilities": ["GET"],
         })
@@ -167,7 +167,7 @@ class PerformancePanelAPITests(unittest.IsolatedAsyncioTestCase):
         body["values"].update(
             latency_optimization_enabled=True, review_policy="speed_first",
             idle_learning_enabled=True, style_learning_enabled=True,
-            reply_prediction_enabled=False, prediction_provider_id="predictor",
+            reply_prediction_enabled=True, prediction_provider_id="predictor",
             model_concurrency=4, reply_audit_sample_percent=100,
             emoji_late_grace_seconds=0, reply_latency_target_seconds=5,
         )
@@ -320,7 +320,7 @@ class NativePageTests(unittest.TestCase):
         # Execute the shipped script with a DOM/bridge double; never contact the bot.
         html = (PLUGIN / "pages/control/index.html").read_text(encoding="utf-8")
         elements = {id_: tag for tag, id_ in re.findall(r'<(\w+)[^>]*\bid="([^"]+)"', html)}
-        self.assertTrue(set(panel.FIELDS).issubset(elements))
+        self.assertTrue((set(panel.FIELDS)-{'reply_prediction_enabled'}).issubset(elements))
         script = r"""
 const assert=require('node:assert/strict'), vm=require('node:vm'), fs=require('node:fs');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
@@ -375,7 +375,7 @@ const current=()=>({performance:{enabled:false,review_policy:'all',target_second
 (async()=>{
   await new Promise(setImmediate);
   assert.equal(nodes.save.disabled,false);
-  assert.equal(nodes.reply_prediction_enabled.checked,true);
+  assert.equal(nodes.reply_review_enabled.checked,false);
   assert.equal(nodes.reply_hedge_after_seconds.value,'15');
   nodes.reply_hedge_after_seconds.value='0';
   nodes.model_concurrency.value='4';nodes.settings.handlers.input({target:nodes.model_concurrency});
@@ -423,7 +423,7 @@ const current=()=>({performance:{enabled:false,review_policy:'all',target_second
   assert.equal(nodes.reply_hedge_after_seconds.value,'0');
   assert.equal(posts[1].body.values.review_policy,'speed_first');
   assert.equal(posts[1].body.values.prediction_provider_id,'predictor');
-  assert.deepEqual(Object.keys(posts[1].body.values).sort(),Object.keys(input.values).sort());
+  assert.deepEqual(Object.keys(posts[1].body.values).sort(),Object.keys(input.values).filter(k=>k!=='reply_prediction_enabled').sort());
   assert.equal(nodes['save-state'].textContent,'已与当前配置同步');
   delete settings.reply_hedge_after_seconds;await click('reload');await new Promise(setImmediate);
   assert.equal(nodes.save.disabled,true);assert.match(nodes.notice.textContent,/刷新/);

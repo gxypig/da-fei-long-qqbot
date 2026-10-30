@@ -66,6 +66,18 @@ class IdleTests(unittest.IsolatedAsyncioTestCase):
             try:self.assertEqual(self.s.style_note('根据你的需求，开始吧'),'')
             finally:_bound.reset(token)
 
+    async def test_rollback_switches_only_target_persona_and_zero_disables_all(self):
+        with self.s._db:
+            for pid,version,rule in [('dragon','v1','plain'),('elf','v2','concrete'),('dragon','v1','no_template')]:
+                self.s._db.execute('INSERT INTO versions(rules,published,evidence) VALUES(?,?,?)',
+                    (json.dumps([rule]),time.time(),json.dumps({'persona':{'persona_id':pid,'persona_version':version}})))
+        dragon={'persona_id':'dragon','persona_version':'v1'};elf={'persona_id':'elf','persona_version':'v2'}
+        self.assertEqual(self.s._active_rules(dragon),['no_template'])
+        await self.s.rollback(1)
+        self.assertEqual(self.s._active_rules(dragon),['plain']);self.assertEqual(self.s._active_rules(elf),['concrete'])
+        await self.s.rollback(0)
+        self.assertEqual(self.s._active_rules(dragon),[]);self.assertEqual(self.s._active_rules(elf),[])
+
     async def asyncSetUp(self):
         self.temp = TemporaryDirectory(prefix="idle-learning-tests-")
         self.root = Path(self.temp.name)

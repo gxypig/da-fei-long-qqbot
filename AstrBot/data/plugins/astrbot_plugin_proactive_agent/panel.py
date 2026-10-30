@@ -30,7 +30,7 @@ FIELDS = {
     "history_recall_enabled": True,
     "meme_understanding_enabled": True,
     "fixed_qzone_enabled": False, "fixed_qzone_interval_minutes": 360,
-    "latency_optimization_enabled": False, "review_policy": "all",
+    "latency_optimization_enabled": False, "review_policy": "speed_first",
     "reply_prediction_enabled": True, "prediction_provider_id": "",
     "idle_learning_enabled": False, "style_learning_enabled": False,
     "reply_audit_sample_percent": 10, "emoji_late_grace_seconds": 3,
@@ -63,6 +63,8 @@ def section_settings(plugin):
 
 def settings(plugin):
     values = {key: plugin._cfg(key, default) for key, default in FIELDS.items()}
+    from .review_modes import configured
+    values['review_policy']=configured(plugin._cfg)['policy']
     revision = hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return values, revision
 
@@ -201,6 +203,7 @@ class PanelMixin:
             ('meme_repository', self.meme_repository_api, ['GET','POST']),
             ('panel_review_metrics',self.panel_review_metrics_api,['GET']),
             ('meme_wiki',self.meme_wiki_api,['GET','POST']),
+            ('meme_wiki_update',self.meme_wiki_update_api,['GET','POST']),
             ('panel_capabilities',self.panel_capabilities_api,['GET']),
         ]:
             self.context.register_web_api("/astrbot_plugin_proactive_agent/" + name, handler, methods, "大肥龙控制面板")
@@ -217,11 +220,15 @@ class PanelMixin:
         from .wiki_panel import wiki_api
         return await wiki_api(self)
 
+    async def meme_wiki_update_api(self):
+        from .wiki_update_api import api
+        return await api(self)
+
     async def panel_review_metrics_api(self):
         from .review_metrics import review_metrics
         data=await asyncio.to_thread(review_metrics,self._data_dir)
-        data['enabled']=self._cfg('reply_review_enabled',True)
-        data['policy']=self._cfg('review_policy','all')
+        from .review_modes import configured
+        data.update(configured(self._cfg))
         return jsonify(status='ok',data=data)
 
     async def learning_content_api(self):
@@ -347,6 +354,8 @@ class PanelMixin:
                     expected=revision
                 if body.get("revision") != expected:
                     return jsonify({"status": "error", "message": "设置已在其他地方变更，请刷新后再保存"}), 409
+                # The mode control supersedes the retired prediction toggle.
+                if 'review_policy' in incoming:incoming={**incoming,'reply_prediction_enabled':True}
                 values=validate({**current,**incoming});updates={k:values[k] for k in incoming}
                 previous={k:self.config.get(k) for k in updates};missing=set(updates)-set(self.config)
                 try:

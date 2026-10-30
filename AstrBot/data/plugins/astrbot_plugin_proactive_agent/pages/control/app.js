@@ -2,10 +2,10 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let bridge, values, revision, groups = [], friends = [], dirty = false, polling = false;
-  let sections={},settingsRequest=0,memeRequest=0;
+  let sections={},settingsRequest=0,memeRequest=0,saving=false;
   let statusRequest, learningBusy = false, learningRollbackAvailable = false;
   let emojiRevision, emojiWritable = false, emojiDirty = false, emojiBusy = false;
-  const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','reply_prediction_enabled','idle_learning_enabled','style_learning_enabled'];
+  const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
   booleans.push('proactive_life_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
@@ -67,11 +67,11 @@
   async function loadGroups() {try{groups=await api('panel_groups');renderGroups();}catch(e){notice(e.message,true);renderGroups();}}
   async function loadSettings(discard=false) {const serial=++settingsRequest;let connected=false;try{const data=await api('panel_settings');connected=true;if(serial!==settingsRequest)return;fill(data,{discard});$('connection').textContent='面板已连接';}catch(e){if(serial===settingsRequest){notice(e.message,true);$('connection').textContent=connected?'已连接 · 功能版本需更新':'设置暂不可读取';}}}
   async function save(event) {
-    event.preventDefault();if(!values)return;
+    event.preventDefault();if(!values||saving)return;
     const section=$('rule-editor')?.open?'proactive':document.querySelector?.('nav .active')?.dataset.tab;
     const keys=sections[section]?.keys||(Object.keys(sections).length?[]:[...booleans,...numbers,...strings]);if(!keys.length){notice('当前页面没有需要保存的设置');return;}
     const next=Object.fromEntries(keys.filter(k=>$(k)).map(k=>[k,fieldValue(k)]));
-    $('save').disabled=true;
+    saving=true;$('save').disabled=true;
     try{
       const serial=++settingsRequest;const result=await api('panel_settings',{values:next,revision:sections[section]?.revision||revision,...(sections[section]?{section}:{})});
       if(serial===settingsRequest)fill(result,{saved:next});
@@ -79,7 +79,7 @@
       const available=await refreshPerformance();
       notice('当前区域已保存，其他区域的草稿继续保留；定时规则约10秒内生效。'+(available?'':'性能状态暂不可用，请刷新查看。'));
     }
-    catch(e){notice(e.message,true);if($('rule-save-status'))$('rule-save-status').textContent=e.message;}finally{$('save').disabled=!values;}
+    catch(e){notice(e.message,true);if($('rule-save-status'))$('rule-save-status').textContent=e.message;}finally{saving=false;$('save').disabled=!values;}
   }
   function emojiControls() {
     $('emoji-probability-percent').disabled=emojiBusy||!emojiWritable;
@@ -126,7 +126,7 @@
     todo:'待办', todos:'待办', status:'状态', count:'次数', total:'总计', hits:'命中', misses:'未命中',
     cancelled:'已取消', skipped:'已跳过', error:'错误', last_error:'最近错误',
     target_seconds:'目标（秒）', concurrency:'并发数', model_concurrency:'模型并发数',
-    projected:'已压缩请求', recall_full:'旧事查询恢复完整历史', summary_used:'摘要命中',
+    archive_searches:'本地原文检索', archive_hits:'检索命中', archive_incomplete:'检索未完成', projected:'已压缩请求', recall_full:'旧事查询恢复完整历史', summary_used:'摘要命中',
     summarized:'已整理摘要', summary_failed:'摘要生成失败', summary_paused:'摘要让出聊天名额',
     foreground:'前台任务', background:'后台任务', learning:'学习', prediction:'预测', scheduler:'模型调度',
     reply:'正文回复', chat:'聊天', tool:'工具任务', tools:'工具任务',
@@ -207,7 +207,7 @@
     const performance=isRecord(data?.performance)?data.performance:null;
     const available=performance!==null && Object.keys(performance).length>0;
     const mode=performance?.enabled===true?'延迟优化已开启':performance?.enabled===false?'延迟优化已关闭':'调度开关尚未提供';
-    const policy=performance?.review_policy==='all'?'全部审查':performance?.review_policy==='speed_first'?'速度优先':'审查策略尚未提供';
+    const policy=performance?.review_settings?.label||(performance?.review_policy==='all'?'完整审阅':performance?.review_policy==='speed_first'?'预测分流':'审阅模式尚未提供');
     const target=Number.isFinite(performance?.target_seconds)?` · 正文目标 ${performance.target_seconds} 秒`:'';
     $('performance-status').textContent=available?`${mode} · ${policy}${target} · 运行状态已刷新`:'当前运行实例尚未提供性能状态，请确认插件已升级并重载后刷新';
     renderSnapshot('performance-work',performance?.work,'尚未提供调度状态');

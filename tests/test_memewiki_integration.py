@@ -80,13 +80,13 @@ class MemeWikiIntegration(unittest.IsolatedAsyncioTestCase):
         self.memory.import_entries([{'phrase':'自造词','meaning':'已有定义','usage':'已有场景'}])
         self.db.write_bytes(b'broken SQLite')
         self.assertEqual(self.memory.contextual('自造词')[0]['meaning'],'已有定义')
-        self.assertFalse(self.wiki.stats['snapshot_ready'])
+        self.assertTrue(self.wiki.stats['snapshot_ready'])  # Last validated in-memory snapshot still serves chat.
         self.assertEqual(self.memory.repository()['total'],1)
 
     async def test_dictionary_removed_after_index_load_remains_optional(self):
         self.db.unlink()
-        self.assertIsNone(self.wiki._read('绷不住了'))
-        self.assertEqual(self.wiki.match('绷不住了'),[])
+        self.assertTrue(self.wiki._read('绷不住了'))
+        self.assertTrue(self.wiki.match('绷不住了'))
         self.assertEqual(self.wiki.catalog()['total'],0)
 
     async def test_catalog_search_uses_primary_definition_with_old_understanding(self):
@@ -94,4 +94,4 @@ class MemeWikiIntegration(unittest.IsolatedAsyncioTestCase):
                                       'intent':'情绪反应','verified_at':1}
         page=self.memory.repository('无法控制笑')
         self.assertEqual(page['total'],1)
-        self.assertEqual(page['rows'][0]['intent'],'情绪反应')
+        self.assertNotIn('intent',page['rows'][0])  # Unbound old interpretation cannot attach to new source text.

@@ -44,7 +44,7 @@ class SemanticProfiles(ProfileTests):
     async def test_restart_recovers_confirmed_probe_from_exact_delivery_without_extending_ttl(self):
         from types import SimpleNamespace
         from data.plugins.astrbot_plugin_proactive_agent.ai_profiles import AIProfiles
-        await self.seed_suspect();p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        await self.seed_suspect();p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的程序自动回复')
         path=self.service.store.path;cfg=self.service.cfg;await self.service.close();sent_at=self.now+1;self.now+=100
         rows={'confirmed':{'id':'confirmed','state':'confirmed','origin':p['origin'],'source_id':'trigger','sender':'123',
             'at':sent_at,'confirmed_at':sent_at,'message_id':'qq-1','text':'你是手动打字还是程序自动回的？'},
@@ -65,7 +65,7 @@ class SemanticProfiles(ProfileTests):
         await ledger.close()
 
     async def test_final_rewrite_attachment_cross_group_and_ttl(self):
-        await self.seed_suspect();p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        await self.seed_suspect();p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的程序自动回复')
         self.service.delivery(p,'你是手动回的还是程序在回？','confirmed','send-1','qq-1')
         self.service.delivery(p,'','confirmed','attachment','qq-2');self.service.end_turn(p)
         self.assertTrue(self.service.store.rows[self.key]['outstanding']['sent'])
@@ -73,7 +73,7 @@ class SemanticProfiles(ProfileTests):
         self.assertIsNone(self.service.store.rows[self.key]['observations'][-1]['probe'])
         self.observe('我是机器人','qq:GroupMessage:1')
         self.assertEqual(self.service.store.rows[self.key]['observations'][-1]['probe'],p['id'])
-        p=await self.service.prepare_probe('qq','123','next','qq:GroupMessage:1')
+        p=await self.service.prepare_probe('qq','123','next','qq:GroupMessage:1',text='我这个号的程序自动回复')
         self.service.delivery(p,p['question'],'confirmed');self.now+=601
         self.observe('我是机器人');self.assertIsNone(self.service.store.rows[self.key]['observations'][-1]['probe'])
 
@@ -113,13 +113,13 @@ class SemanticProfiles(ProfileTests):
 
     async def test_concurrent_probe_reservation_is_one_and_durable(self):
         await self.seed_suspect()
-        probes=await asyncio.gather(*(self.service.prepare_probe('qq','123',str(i),'qq:GroupMessage:'+str(i)) for i in range(8)))
+        probes=await asyncio.gather(*(self.service.prepare_probe('qq','123',str(i),'qq:GroupMessage:'+str(i),text='我这个号的程序自动回复') for i in range(8)))
         self.assertEqual(sum(p is not None for p in probes),1)
         self.assertEqual(self.service.store.rows[self.key]['probes'][self.service.day()],1)
 
     async def test_background_links_rewritten_question_without_clearing_pending(self):
         await self.seed_suspect();self.service.generate=AsyncMock()
-        p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        p=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的程序自动回复')
         final='你这号背后到底是谁在敲字呢？'
         self.service.delivery(p,final,'confirmed','delivery-final','platform-final');self.service.end_turn(p)
         self.assertIsNotNone(self.service.store.rows[self.key]['outstanding'])

@@ -713,7 +713,11 @@ class IdleLearning:
     def _active_rules(self,persona=None):
         if persona and 'persona_version' in persona:
             if persona.get('persona_status') not in {None,'selected'}:return []
-            for row in self._db.execute('SELECT rules,evidence FROM versions ORDER BY id DESC'):
+            selections=self._meta('persona_policy_versions',{})
+            selected=selections.get(str(persona.get('persona_id')))
+            if selected==0:return []
+            for row in self._db.execute('SELECT id,rules,evidence FROM versions ORDER BY id DESC'):
+                if selected is not None and row['id']!=selected:continue
                 evidence=json.loads(row['evidence']);bound=evidence.get('persona',{})
                 if (bound.get('persona_id'),bound.get('persona_version'))==(persona.get('persona_id'),persona.get('persona_version')):
                     return json.loads(row['rules'])
@@ -882,6 +886,10 @@ class IdleLearning:
             version = self._db.execute("INSERT INTO versions(rules,published,evidence) VALUES(?,?,?)",
                                        (_json(progress["rules"]), now, _json(evidence))).lastrowid
             self._set_meta("active_version", version)
+            selected=self._meta('persona_policy_versions',{})
+            if payload.get('persona',{}).get('persona_id'):
+                selected[str(payload['persona']['persona_id'])]=version
+                self._set_meta('persona_policy_versions',selected)
             self._set_meta("last_publish", now)
             self._db.execute("DELETE FROM versions WHERE id NOT IN (SELECT id FROM (SELECT id,row_number() OVER (PARTITION BY COALESCE(json_extract(evidence,'$.persona.persona_id'),'legacy') ORDER BY id DESC) n FROM versions) WHERE n<=5)")
             # Atomic with activation, so a crash before _run_job's cleanup never
@@ -1066,6 +1074,14 @@ class IdleLearning:
                     self._db.execute("DELETE FROM jobs WHERE kind='validate'")
                     self._set_meta("style_epoch", self._meta("style_epoch") + 1)
                     self._set_meta("active_version", version)
+                    selections=self._meta('persona_policy_versions',{})
+                    targets=self._db.execute('SELECT evidence FROM versions'+(' WHERE id=?' if version else ''),(version,) if version else ()).fetchall()
+                    for row in targets:
+                        pid=json.loads(row['evidence']).get('persona',{}).get('persona_id')
+                        if pid:selections[str(pid)]=version
+                    if not version:
+                        for pid in selections:selections[pid]=0
+                    self._set_meta('persona_policy_versions',selections)
                     self._set_meta("evidence_after", time.time())
                 await self._cancel_active()
                 self._idle_since = None

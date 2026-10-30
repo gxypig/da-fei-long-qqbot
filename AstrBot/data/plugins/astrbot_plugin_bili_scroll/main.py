@@ -181,11 +181,21 @@ class Main(star.Star):
     async def review_account_text(self, text, recent=None):
         meta = self.context.get_registered_star('astrbot_plugin_proactive_agent')
         plugin = meta.star_cls if meta and meta.activated else None
-        if plugin and plugin.config.get('reply_review_enabled', False):
-            from data.plugins.astrbot_plugin_proactive_agent.persona_authority import current_binding
-            text = await plugin._reviewer.review(text, origin='bilibili:' + self.account.identity()[0],
-                                                 recent=recent or [], mode='chat',character=current_binding())
-        return text
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import current_binding
+        from data.plugins.astrbot_plugin_proactive_agent.review_modes import current
+        from data.plugins.astrbot_plugin_proactive_agent.send_checks import normalize,issues,record,snapshot
+        from data.plugins.astrbot_plugin_proactive_agent.stage_budgets import separate_stage
+        origin='bilibili:'+self.account.identity()[0];state=current_binding()
+        settings=current(getattr(plugin,'_cfg',{}.get))
+        previous=snapshot(origin,text)
+        if previous and previous['mode_snapshot']==settings:return text
+        checked=normalize(text,state);problems=issues(checked,state=state)
+        if problems:raise BiliUnavailable('本地文案检查未通过，本轮不发表')
+        if plugin and settings['enabled']:
+            async with separate_stage('review',265):
+                checked=await plugin._reviewer.review(checked,origin=origin,recent=recent or [],mode='chat',character=state)
+        record(origin,checked,settings,state=state,recent=recent or [],path='full_review' if settings['enabled'] else 'review_off',reviewed=bool(plugin and settings['enabled']))
+        return checked
 
     async def settings_api(self):
         if request.method == 'POST':
@@ -316,6 +326,12 @@ class Main(star.Star):
 
     async def share(self, origin, keyword='', event=None, final_check=None, mode=None):
         completion={}
+        from data.plugins.astrbot_plugin_proactive_agent.review_modes import begin,end
+        from data.plugins.astrbot_plugin_proactive_agent.reply_jobs import current_job
+        context=getattr(self,'context',None)
+        meta=context.get_registered_star('astrbot_plugin_proactive_agent') if hasattr(context,'get_registered_star') else None
+        companion=meta.star_cls if meta and meta.activated else None
+        token=begin(getattr(companion,'_cfg',{}.get),event,fresh=current_job.get() is None)
         try:
             async with total_budget(50):
                 return await self._share(origin,keyword,event,final_check,mode,completion)
@@ -323,6 +339,7 @@ class Main(star.Star):
             if completion.get('confirmed'):
                 return '已向当前会话分享了视频链接；不要再发送一次，也不要复述文案'
             raise
+        finally:end(token)
 
     async def _share(self, origin, keyword='', event=None, final_check=None, mode=None, completion=None):
         from data.plugins.astrbot_plugin_proactive_agent.session_mute import pin_recipient
@@ -394,6 +411,9 @@ class Main(star.Star):
                 if store and reservation in store.rows:
                     state='failed' if attempt['state'] in {'preparing','failed'} or receipts and all(r['state']=='failed' for r in receipts) else 'unknown'
                     store.put(reservation,{**store.rows[reservation],'state':state,'receipts':receipts})
+                    if state=='unknown':
+                        if not hasattr(self,'_share_recovery'):self._share_recovery=set()
+                        self._share_recovery.add(reservation)
                 raise
             finally:delivery_scope.reset(token)
             actual = sent_text(origin, text)
@@ -518,6 +538,10 @@ class Main(star.Star):
             if result['state']=='confirmed':
                 self.life_event(row['origin'],{'bvid':row['bvid'],'url':row.get('url') or 'https://www.bilibili.com/video/'+row['bvid'],
                     'title':row.get('title','')},'share_confirmed','根据已确认回执恢复分享成功事实')
+                receipts=await ledger.store.fetch(keys)
+                for receipt in receipts:
+                    if receipt.get('state')=='confirmed' and receipt.get('text'):
+                        await remember_sent(companion,row['origin'],receipt.get('cid'),receipt['text'],'bilibili')
             if result['state']!='unknown' or not row.get('attempt_id'):pending.discard(id_)
 
     async def loop(self):

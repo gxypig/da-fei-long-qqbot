@@ -67,9 +67,10 @@ class Sending(unittest.IsolatedAsyncioTestCase):
         self.transport = AsyncMock(return_value={"message_id": 1})
         self.bot._api = SimpleNamespace(call_action=self.transport)
         self.plugin = SimpleNamespace(_platform=lambda: SimpleNamespace(bot=self.bot),
-            _cfg=lambda k, d: d, review_context=lambda origin: ["当前聊天"], review_mode=lambda origin: "chat")
+            _cfg=lambda k, d: True if k=='reply_review_enabled' else d, review_context=lambda origin: ["当前聊天"], review_mode=lambda origin: "chat")
         self.generate = AsyncMock(side_effect=lambda *a: encoded(True))
         self.reviewer = ReplyReviewer(self.generate, lambda *a: None)
+        self.bot.self_id='3'
         self.restore = install_outbound_guard(self.plugin, self.reviewer)
 
     async def asyncTearDown(self):
@@ -147,11 +148,13 @@ class ConversationHistory(unittest.IsolatedAsyncioTestCase):
         from astrbot.core.provider.entities import LLMResponse
         from astrbot.core.agent.message import Message, TextPart
         plugin = object.__new__(Main)
+        plugin.config={"reply_review_enabled":True,"review_policy":"all"}
+        plugin._audit=lambda *a:None
         plugin._reviewer = ReplyReviewer(AsyncMock(side_effect=[encoded(False, "短句"), encoded(True)]), lambda *a: None)
         plugin.review_context = lambda origin: ["你好"]
         plugin.review_mode = lambda origin: "chat"
         event = SimpleNamespace(unified_msg_origin="aiocqhttp:FriendMessage:1", get_group_id=lambda: "",
-            get_sender_id=lambda: "1", get_platform_id=lambda: "aiocqhttp", get_extra=lambda k:None, stop_event=lambda: self.fail("should pass"))
+            get_sender_id=lambda: "1", get_platform_id=lambda: "aiocqhttp", get_extra=lambda k:None, set_extra=lambda *a:None, get_message_str=lambda:"你好", stop_event=lambda: self.fail("should pass"))
         response = LLMResponse(role="assistant", completion_text="长篇", result_chain=MessageChain([Plain("长篇"), Image(file="https://example.org/image.png")]))
         context = SimpleNamespace(messages=[Message(role="assistant", content=[TextPart(text="长篇")])])
         await plugin.review_agent_reply(event, context, response)
@@ -159,22 +162,24 @@ class ConversationHistory(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.messages[-1].content[0].text, "短句")
         self.assertEqual(response.result_chain.chain[1].file, "https://example.org/image.png")
 
-    async def test_failed_hook_stops_event_instead_of_leaking_original(self):
+    async def test_failed_hook_sends_validated_failure_receipt_instead_of_original(self):
         from test_maintenance import Main
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
         from astrbot.core.provider.entities import LLMResponse
         plugin = object.__new__(Main)
+        plugin.config={"reply_review_enabled":True,"review_policy":"all"}
+        plugin._audit=lambda *a:None
         plugin._reviewer = ReplyReviewer(AsyncMock(side_effect=RuntimeError), lambda *a: None)
         plugin.review_context = lambda origin: []
         plugin.review_mode = lambda origin: "chat"
         stopped = []
-        event = SimpleNamespace(unified_msg_origin="chat", stop_event=lambda: stopped.append(True))
+        event = SimpleNamespace(unified_msg_origin="chat",get_extra=lambda *a:None,set_extra=lambda *a:None,get_message_str=lambda:"你好",get_group_id=lambda:"",get_sender_id=lambda:"1",get_platform_id=lambda:"aiocqhttp", stop_event=lambda: stopped.append(True))
         response = LLMResponse(role="assistant", completion_text="不该发送", result_chain=MessageChain([Plain("不该发送")]))
         await plugin.review_agent_reply(event, SimpleNamespace(messages=[]), response)
-        self.assertTrue(stopped)
-        self.assertEqual(response.completion_text, "")
-        self.assertEqual(response.result_chain.chain, [])
+        self.assertFalse(stopped)
+        self.assertEqual(response.completion_text,"这条没整理好，等会儿再试")
+        self.assertEqual(response.result_chain.chain[0].text,response.completion_text)
 
 
 class Memories(unittest.IsolatedAsyncioTestCase):

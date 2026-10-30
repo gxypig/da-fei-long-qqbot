@@ -457,7 +457,8 @@ class ModelScheduler:
             return
         now = self.clock()
         for key in self._sources:
-            self.adaptive.touch(key,sum(j.key==key for j in self._active),self._limit(key))
+            self.adaptive.touch(key,sum(j.key==key for j in self._active),self._limit(key),
+                queued=any(j.key==key and j.kind in {'interactive','review','scheduled'} for j in self._waiting))
         if self.busy():
             self._idle_since = None
             for job in tuple(self._active):
@@ -607,7 +608,8 @@ class ModelScheduler:
                 model_completed(self.clock()-job.started,(job.started-job.queued)*1000,job.kind)
             self.adaptive.finish(job.key,job.started-job.queued,self.clock()-job.started,
                 status=job.status_code,timed_out=job.timed_out,
-                necessary=job.kind in {'interactive','review','scheduled'} and outcome in {'ok','failed'},already_down=job.rate_limit_reported)
+                necessary=job.kind in {'interactive','review','scheduled'} and outcome in {'ok','failed'},
+                already_down=job.rate_limit_reported,outcome=outcome)
         if self.audit:
             try:
                 fields = {

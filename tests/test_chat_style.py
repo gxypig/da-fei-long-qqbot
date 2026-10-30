@@ -17,33 +17,22 @@ class ReviewContract(unittest.IsolatedAsyncioTestCase):
         rows = payload["同一会话最近机器人回复（避免重复句式）"]
         self.assertEqual(rows, [text[:200] for text in previous[-3:]])
 
-    async def test_model_false_pass_cannot_send_observed_powershell(self):
-        draft = "可以，运行这行：\n```powershell\nGet-ChildItem '*.zip' | Rename-Item -NewName { $_.BaseName }\n```"
-        generate = AsyncMock(side_effect=[encoded(True), encoded(False, "怎么聊着聊着还给我派上活了。"), encoded(True)])
-        reviewer = ReplyReviewer(generate, lambda *a: None)
-        text = await reviewer.review(draft, origin="p", recent=["写一个改文件名的脚本代码"])
-        self.assertNotIn("Get-ChildItem", text)
-        self.assertEqual(generate.await_count, 3)
-        self.assertIn("code_block", generate.call_args_list[1].args[1]["必须修正的问题"])
-        self.assertEqual(generate.call_args_list[2].args[1]["待发文字"], text)
+    async def test_persona_review_can_correct_technical_reply_without_keyword_ban(self):
+        draft='这个脚本可以改文件名'
+        generate=AsyncMock(side_effect=[encoded(False,'这个忙得先看你的文件规则'),encoded(True)])
+        result=await ReplyReviewer(generate,lambda *a:None).review(draft,origin='p',character={'persona_status':'selected'})
+        self.assertEqual(result,'这个忙得先看你的文件规则');self.assertEqual(generate.await_count,2)
 
-    async def test_repeated_false_pass_fails_closed(self):
-        generate = AsyncMock(return_value=encoded(True))
-        reviewer = ReplyReviewer(generate, lambda *a: None)
-        with self.assertRaises(ReviewUnavailable):
-            await reviewer.review("```python\nprint(1)\n```", origin="p")
-        self.assertEqual(generate.await_count, 3)
-        self.assertEqual(reviewer.stats["guard_rejections"], 3)
+    async def test_repeated_rejection_fails_closed(self):
+        generate=AsyncMock(return_value=encoded(False,'仍然不合适'))
+        reviewer=ReplyReviewer(generate,lambda *a:None)
+        with self.assertRaises(ReviewUnavailable):await reviewer.review('原稿',origin='p')
+        self.assertEqual(generate.await_count,3)
 
-    async def test_compact_math_solution_and_technical_followup_cannot_pass(self):
-        for incoming, draft, issue in [
-            ("甲乙各有四张卡片，四轮后甲得分不小于2的概率为多少", "答案是1/2，24种排列里有12种符合。", "math_solution"),
-            ("给我写一个脚本代码", "把文件夹路径发我，我给你写一行。", "technical_followup"),
-        ]:
-            self.assertIn(issue, output_issues(draft, recent=[incoming]))
-            reviewer = ReplyReviewer(AsyncMock(return_value=encoded(True)), lambda *a: None)
-            with self.assertRaises(ReviewUnavailable):
-                await reviewer.review(draft, origin="p", recent=[incoming])
+    async def test_approved_necessary_help_is_not_overridden_by_legacy_regex(self):
+        for draft in ['答案是1/2，24种排列里有12种符合','把文件路径发来才能检查','```python\nprint(1)\n```']:
+            reviewer=ReplyReviewer(AsyncMock(return_value=encoded(True)),lambda *a:None)
+            self.assertEqual(await reviewer.review(draft,origin='p',character={'persona_status':'selected'}),draft)
 
     async def test_missing_or_negative_quality_judgement_cannot_be_pass(self):
         for verdict in ({"pass": True}, {"pass": True, "natural": "true", "chat_fit": True}):

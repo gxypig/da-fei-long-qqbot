@@ -11,6 +11,17 @@ from data.plugins.astrbot_plugin_proactive_agent.reply_jobs import QueueConflict
 
 
 class ProfileTests(unittest.IsolatedAsyncioTestCase):
+    async def test_expiry_notifies_learning_even_if_effective_label_already_expired(self):
+        from unittest.mock import AsyncMock
+        self.observe('你好');self.action('confirm')
+        self.service.on_change=AsyncMock()
+        self.now+=8*86400
+        self.assertEqual(self.service.source_label('qq','123'),'unverified')
+        self.service.wake.set()
+        async with asyncio.timeout(2):
+            while not self.service.on_change.await_count:await asyncio.sleep(.01)
+        self.service.on_change.assert_awaited_with('qq','123','unverified')
+
     async def test_weak_style_and_speed_are_display_only_no_probe_or_learning_isolation(self):
         from unittest.mock import AsyncMock
         self.observe('分点说一下我今天的计划')
@@ -22,13 +33,13 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         current=self.service.store.rows[self.key]
         self.assertEqual(len(current['evidence']),2);self.assertFalse(current['probe_eligible'])
         self.assertEqual(self.service.source_label('qq','123'),'unverified')
-        self.assertIsNone(await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1'))
+        self.assertIsNone(await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的自动回复最近出错了'))
 
     async def test_semantic_probe_closes_as_not_asked_when_final_text_contains_no_question(self):
         from unittest.mock import AsyncMock
         await self.seed_suspect()
         self.service.generate=AsyncMock(return_value=json.dumps({'judgement_type':'insufficient','evidence':[],'counterevidence':[], 'probe_links':[]}))
-        probe=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        probe=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的自动回复最近出错了')
         self.service.delivery(probe,'今天先聊这个吧','confirmed','delivered','message')
         await self.service.analyze(self.key,probe['epoch'])
         row=self.service.store.rows[self.key]
@@ -56,7 +67,7 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assess();self.assertEqual(self.service.store.rows[self.key]['state'],'suspected')
 
     async def probe_answer(self,text):
-        probe=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1')
+        probe=await self.service.prepare_probe('qq','123','trigger','qq:GroupMessage:1',text='我这个号的自动回复最近出错了')
         self.assertIsNotNone(probe)
         self.service.delivery(probe,probe['question'],'confirmed');self.now+=2
         self.observe(text);self.assess();return probe
@@ -87,20 +98,20 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
     async def test_quota_cross_session_restart_revoke_natural_day(self):
         await self.seed_suspect()
         for i in range(3):
-            p=await self.service.prepare_probe('qq','123','x'+str(i),'qq:FriendMessage:123' if i%2 else 'qq:GroupMessage:1')
+            p=await self.service.prepare_probe('qq','123','x'+str(i),'qq:FriendMessage:123' if i%2 else 'qq:GroupMessage:1',text='我这个号的自动回复最近出错了')
             self.assertIsNotNone(p)
-            self.assertIsNone(await self.service.prepare_probe('qq','123','other','qq:GroupMessage:2'))
+            self.assertIsNone(await self.service.prepare_probe('qq','123','other','qq:GroupMessage:2',text='我这个号的自动回复最近出错了'))
             self.service.delivery(p,p['question'],'unknown');self.service.end_turn(p)
             self.now+=601 # Unknown delivery cannot be retried as if it never happened.
-        self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2'))
+        self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2',text='我这个号的自动回复最近出错了'))
         self.action('revoke');self.observe('我是AI机器人');self.assess()
-        self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2'))
+        self.assertIsNone(await self.service.prepare_probe('qq','123','x','qq:GroupMessage:2',text='我这个号的自动回复最近出错了'))
         await self.service.close()
         restored=AIProfiles(Path(self.temp.name)/'profiles.db',self.cfg.get,busy=lambda:True,clock=lambda:self.now)
         await restored.start();self.addAsyncCleanup(restored.close)
         self.assertEqual(restored.snapshot()['rows'][0]['today_probes'],3)
         self.now+=86400
-        self.assertIsNotNone(await restored.prepare_probe('qq','123','next-day','qq:GroupMessage:3'))
+        self.assertIsNotNone(await restored.prepare_probe('qq','123','next-day','qq:GroupMessage:3',text='我这个号的自动回复最近出错了'))
 
     async def test_revoke_and_expiry_reject_late_evidence_without_resetting_quota(self):
         await self.seed_suspect();epoch=self.service.store.rows[self.key]['epoch']

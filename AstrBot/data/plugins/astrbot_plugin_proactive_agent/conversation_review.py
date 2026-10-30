@@ -88,16 +88,28 @@ def attachment_policy(check):
         _attachment_check.reset(token)
 
 
-def bind_request(origin, recent, management, character=None):
+def bind_request(origin, recent, management, character=None, review_settings=None):
+    from .review_modes import bind,snapshot
+    if review_settings is not None:bind(review_settings)
     _receipt.set(None)
     _approved.set(None)
     _request_scope.set({"origin": origin, "recent": list(recent), "management": management,
-                        "character": character or {}, "request_id": uuid.uuid4().hex})
+                        "character": character or {}, "request_id": uuid.uuid4().hex,
+                        "review_settings":review_settings or snapshot()})
 
 
 def request_scope(origin):
     scope = _request_scope.get()
-    return scope if scope and scope["origin"] == origin else None
+    if not scope:return None
+    if scope['origin']==origin:return scope
+    from .reply_jobs import current_job
+    from .route_guard import canonical
+    job=current_job.get()
+    if job and scope['origin']==job.origin:
+        try:
+            if canonical(job.origin)==canonical(origin):return scope
+        except ValueError:pass
+    return None
 
 
 @contextmanager
@@ -148,95 +160,89 @@ class ReplyReviewer:
         if not self.enabled() or not text.strip():return text
         from .reply_jobs import current_job
         job=current_job.get();queue=getattr(job,'queue',None)
-        # Park the owner BEFORE waiting for the review semaphore. Parking only
-        # the model request permits a capacity cycle: semaphore holders wait to
-        # resume execution while execution holders wait for that semaphore.
-        # Release the review semaphore/deadline before reacquiring execution.
         parking=(queue.parked(job,'review_slot_or_model_wait')
                  if queue and job.owner is asyncio.current_task() else nullcontext())
+        scope=request_scope(origin) or {}
+        from .review_modes import snapshot
+        key=hashlib.sha256(json.dumps([scope.get('request_id') or getattr(job,'id',None) or id(asyncio.current_task()),
+            origin,text,list(recent),mode,media,list(prior_replies),character or scope.get('character'),snapshot()],
+            sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+        if not hasattr(self,'_inflight'):self._inflight={}
         async with parking:
-            return await self._review(text,origin=origin,recent=recent,mode=mode,media=media,
-                prior_replies=prior_replies,character=character,on_verdict=on_verdict)
+            shared=self._inflight.get(key)
+            if shared is None:
+                task=asyncio.create_task(self._review(text,origin=origin,recent=recent,mode=mode,media=media,
+                    prior_replies=prior_replies,character=character,on_verdict=on_verdict),name='qqbot-full-review')
+                shared={'task':task,'waiters':0};self._inflight[key]=shared
+            shared['waiters']+=1
+            try:return await asyncio.shield(shared['task'])
+            finally:
+                shared['waiters']-=1
+                if not shared['waiters']:
+                    self._inflight.pop(key,None)
+                    if not shared['task'].done():shared['task'].cancel()
+                    await asyncio.gather(shared['task'],return_exceptions=True)
 
     async def _review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None, on_verdict=None):
-        if not self.enabled():return text
-        if not text.strip():
-            return text
-        started = time.monotonic()
+        if not text.strip():return text
+        from .send_checks import own_style,issues as hard_issues
+        started=time.monotonic();acquired=False
         try:
-            # A single deadline bounds queueing + judgement + rechecks.
-            async with asyncio.timeout(self.timeout):
-                async with self._slots:
-                    state = character if character is not None else (request_scope(origin) or {}).get("character", {})
-                    candidate = casual_punctuation(limit_father_address(limit_emoji(text, state, mode), state, mode), mode)
-                    formatted=candidate
-                    feedback = []
-                    for attempt in range(3):
-                        issues = ([] if 'persona_status' in state else output_issues(candidate, mode, recent)) + speech_issues(candidate, state, mode)
-                        if mode == 'chat':
-                            issues += voice_issues(candidate,state)
-                        video_links = re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', text)
-                        if video_links and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}', candidate) != video_links:
-                            issues.append('必须逐字保留原稿B站视频网址：' + ' '.join(video_links))
-                        self.stats["model_calls"] += 1
-                        from .work_scheduler import review_verdict_observer
-                        # Provider admission/hedge cleanup may outlive receipt of
-                        # the raw verdict. Notify at that earlier boundary too,
-                        # so a late prediction cannot discard an existing reject.
-                        with review_verdict_observer(on_verdict) as verdict_arrived:
-                            raw = await self.generate(
-                                (REVIEW_FUNCTIONAL if 'persona_status' in state else REVIEW_SYSTEM) + "\n" + PUNCTUATION_RULE + ('' if 'persona_status' in state else BRIEF_RULE) + (character_note(state) if state else "")
-                                + (voice_note(state) if mode=='chat' else '')
-                                + (speaker_note(state) if mode=='chat' else '')
-                                + (review_persona(state) if mode!='management' else '')
-                                + ('\n这是主动开启话题，旧用户消息只是兴趣背景。必须检查与机器人近期主动消息是否语义重复：换同义词、换称呼、换相似例子也算重复。重复则不通过并改成完全不同的具体话题；不要改成回答旧消息。' if state.get('proactive') else ''),
-                                {"mode": mode, "同一会话近期消息": list(recent)[-6:],
-                                 "同一会话最近机器人回复（避免重复句式）": [str(x)[:200] for x in list(prior_replies)[-(24 if state.get('proactive') else 3):]],
-                                 "待发文字": candidate, "附件数": media, "审阅轮次": attempt + 1,
-                                 "必须修正的问题": list(dict.fromkeys(issues + feedback))}, origin,
-                            )
-                            verdict_arrived()
-                        data = json_object(raw)
-                        if any(type(data.get(key)) is not bool for key in ("pass", "natural", "chat_fit")):
-                            raise ValueError("Missing explicit review judgements")
-                        accepted = data["pass"] and data["natural"] and data["chat_fit"] and not issues
-                        if accepted:
-                            self.stats["checked"] += 1
-                            self.stats["rewritten"] += int(candidate != text)
-                            self.audit("review", {"status": "rewritten" if candidate != text else "passed",
-                                "rounds": attempt + 1, "mode": mode,
-                                "model_rewritten":candidate!=formatted,"format_changed":formatted!=text,
-                                "elapsed_ms": int((time.monotonic() - started) * 1000)})
-                            return candidate
-                        if issues:
-                            self.stats["guard_rejections"] += 1
-                            self.audit("review_guard", {"mode": mode, "issues": issues, "round": attempt + 1})
-                        feedback = issues or [str(data.get("reason") or "文字或回应方式仍不符合自然聊天约定")[:120]]
-                        # Operational data is never silently rewritten into a false receipt.
-                        replacement = data.get("replacement")
-                        if mode == "management":
-                            raise ValueError("No safe review replacement")
-                        if not isinstance(replacement, str) or not replacement.strip():
-                            # An erroneous pass from the model cannot bypass local guards.
-                            # Ask for an actual rewrite, then independently review it.
-                            continue
-                        # Keep the verified video URL outside prose rewriting. The
-                        # restored candidate still goes through independent review.
-                        if video_links:
-                            replacement = re.sub(r'https?://[^\s<>]+', '', replacement).strip()
-                            replacement += '\n' + '\n'.join(video_links)
-                        candidate = casual_punctuation(limit_father_address(limit_emoji(replacement.strip(), state, mode), state, mode), mode)
-                        feedback = []
-                        if len(candidate) > 1200:
-                            raise ValueError("Review replacement too long")
-                    raise ValueError("Review did not converge")
+            # Queueing never consumes the actual review/rewrite budget.
+            async with asyncio.timeout(180):await self._slots.acquire()
+            acquired=True;execution=time.monotonic()
+            state=character if character is not None else (request_scope(origin) or {}).get('character',{})
+            candidate=own_style(text,state,mode)
+            formatted=candidate;feedback=[];extended=False
+            urls=re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',text)
+            async with asyncio.timeout_at(execution+self.timeout) as budget:
+                for attempt in range(3):
+                    issues=hard_issues(candidate,state=state,mode=mode,media=media)
+                    if mode=='chat':issues+=voice_issues(candidate,state)
+                    if urls and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',candidate)!=urls:
+                        issues.append('必须逐字保留原稿B站网址')
+                    self.stats['model_calls']+=1
+                    from .work_scheduler import review_verdict_observer
+                    with review_verdict_observer(on_verdict) as arrived:
+                        raw=await self.generate(REVIEW_FUNCTIONAL+"\n"+PUNCTUATION_RULE+
+                            (voice_note(state)+speaker_note(state) if mode=='chat' else '')+
+                            (review_persona(state) if mode!='management' else '')+
+                            ('\n主动联系只能依据已有生活事件或待办；没有合适话题允许放弃，不编造新话题填满机会。' if state.get('proactive') else ''),
+                            {'mode':mode,'同一会话近期消息':list(recent)[-6:],
+                             '同一会话最近机器人回复（避免重复句式）':[str(x)[:200] for x in list(prior_replies)[-3:]],
+                             '原稿':text,'待发文字':candidate,'附件数':media,'审阅轮次':attempt+1,
+                             '不可改变的事实':{'网址':urls,'工具':state.get('tool_facts',[]),
+                                 '原样文本':state.get('verbatim_text'),'语音记录':state.get('voice_receipts','')},
+                             '必须修正的问题':list(dict.fromkeys(issues+feedback))},origin)
+                        arrived()
+                    data=json_object(raw)
+                    if any(type(data.get(k)) is not bool for k in ('pass','natural','chat_fit')):raise ValueError('Missing review judgements')
+                    if data['pass'] and data['natural'] and data['chat_fit'] and not issues:
+                        self.stats['checked']+=1;self.stats['rewritten']+=int(candidate!=text)
+                        self.audit('review',{'status':'rewritten' if candidate!=text else 'passed','rounds':attempt+1,'mode':mode,
+                            'model_rewritten':candidate!=formatted,'format_changed':formatted!=text,
+                            'queue_ms':round((execution-started)*1000),'extended':extended,
+                            'elapsed_ms':round((time.monotonic()-started)*1000)})
+                        return candidate
+                    if issues:self.stats['guard_rejections']+=1
+                    feedback=list(dict.fromkeys(feedback+issues+[str(data.get('reason') or '措辞或回应方式未通过')[:160]]))
+                    if mode=='management' or attempt==2:raise ValueError('No approved replacement')
+                    replacement=data.get('replacement')
+                    if not isinstance(replacement,str) or not replacement.strip():raise ValueError('Missing correction')
+                    if attempt==1:
+                        budget.reschedule(execution+self.timeout+30);extended=True
+                    if urls:
+                        replacement=re.sub(r'https?://[^\s<>]+','',replacement).strip()+'\n'+'\n'.join(urls)
+                    candidate=own_style(replacement,state,mode)
+                    if len(candidate)>1200:raise ValueError('Review replacement too long')
         except Exception as exc:
-            self.stats["failed"] += 1
-            self.audit("review", {"status": "blocked", "mode": mode, "error": type(exc).__name__,"elapsed_ms":int((time.monotonic()-started)*1000)})
-            raise ReviewUnavailable("发送前审阅暂不可用，原稿未发送") from exc
+            self.stats['failed']+=1
+            self.audit('review',{'status':'blocked','mode':mode,'error':type(exc).__name__,'elapsed_ms':round((time.monotonic()-started)*1000)})
+            raise ReviewUnavailable('发送前审阅暂不可用，原稿未发送') from exc
+        finally:
+            if acquired:self._slots.release()
 
-
-def text_slots(message):
+def text_slots(message,*,author_id=None,authored_only=False):
     """Return mutable text fields, including authored forward nodes; never touch media."""
     if not isinstance(message, list):
         return []
@@ -250,11 +256,13 @@ def text_slots(message):
         if segment.get("type") == "text" and isinstance(data.get("text"), str):
             slots.append((data, "text"))
         elif segment.get("type") == "node":
+            if authored_only and (author_id is None or str(data.get('uin',data.get('user_id','')))!=str(author_id)):
+                continue
             content = data.get("content")
             if isinstance(content, str):
                 content = list(Message(content))
                 data["content"] = content
-            slots.extend(text_slots(content))
+            slots.extend(text_slots(content,author_id=author_id,authored_only=authored_only))
     return slots
 
 
@@ -262,8 +270,7 @@ class OutboundGuard:
     def __init__(self, plugin, reviewer):
         self.plugin, self.reviewer = plugin, reviewer
 
-    async def prepare(self, action, params):
-        if not self.plugin._cfg('reply_review_enabled',True):return params
+    async def prepare(self, action, params,*,bot=None):
         base_action = action.removesuffix("_async")
         if base_action not in {"send_msg", "send_private_msg", "send_group_msg", "send_group_forward_msg",
                                "send_private_forward_msg", "send_forward_msg", "send_qzone_msg"}:
@@ -285,10 +292,11 @@ class OutboundGuard:
                 message = ([{"type": "text", "data": {"text": message}}]
                            if payload.get("auto_escape") else list(Message(message)))
                 payload[key] = message
-            slots = text_slots(message)
+            from .reply_jobs import current_job
+            job=current_job.get()
+            author=getattr(getattr(job,'event',None),'get_self_id',lambda:None)() or getattr(bot,'self_id',None)
+            slots = text_slots(message,author_id=author,authored_only=True)
             media = sum(s.get("type") in {"image", "video", "record", "file"} for s in message if isinstance(s, dict))
-        if not slots:
-            return payload
         # The agent hook merges the reviewed text into the first Plain component
         # and clears the rest. Empty components have no visible text; including
         # them here adds spurious newlines and needlessly invalidates its receipt.
@@ -299,10 +307,50 @@ class OutboundGuard:
             state=await bind_origin(self.plugin,origin,purpose='qzone' if qzone else 'chat')
             if scope:scope['character']={**scope.get('character',{}),**state}
             else:bind_request(origin,recent,mode=='management',state)
-        version = (self.plugin.review_policy_version()
-                   if self.plugin._cfg('latency_optimization_enabled', False)
-                   and hasattr(self.plugin, 'review_policy_version') else None)
-        checked = text if consume_approval(origin, text, policy_version=version) else await self.reviewer.review(text, origin=origin, recent=recent, mode=mode, media=media)
+        scope=request_scope(origin) or {}
+        from .review_modes import current
+        if scope and not qzone:recent=scope.get('recent',recent)
+        settings=scope.get('review_settings') or current(self.plugin._cfg)
+        state=scope.get('character',{})
+        version=self.plugin.review_policy_version() if hasattr(self.plugin,'review_policy_version') else None
+        from .send_checks import normalize,issues,record
+        from .reply_jobs import current_job
+        job=current_job.get();event=getattr(job,'event',None)
+        if slots and state.get('verbatim_text') is not None:
+            expected=state['verbatim_text'];ledger=getattr(self.plugin,'_delivery',None)
+            prior=''.join(ledger.store.rows.get(id_,{}).get('text','') for id_ in job.sends
+                if ledger.store.rows.get(id_,{}).get('state')=='confirmed') if ledger and job else ''
+            if not expected.startswith(prior+text):raise ReviewUnavailable('原样复述片段与原文不一致')
+            state={**state,'verbatim_text':text}
+        controls=getattr(getattr(self.plugin,'_reply_queue',None),'controls',None)
+        if controls and controls.duplicate_answer(job,text,media):
+            from .reply_jobs import ReplyCancelled
+            raise ReplyCancelled('本请求已确认完整回答，不再发送第二份总结')
+        path=event.get_extra('qqbot_send_path') if event else None
+        # Own generated audio already passed the text boundary before synthesis.
+        if not text and not qzone and bot is not None:
+            from .voice_memory import spoken_text
+            text=spoken_text(message,bot,origin)
+        checked=normalize(text,state,mode) if slots else text
+        problems=issues(checked,state=state,mode=mode,media=media)
+        # Foreign forward nodes and genuine media-only messages are not empty replies.
+        if not slots and not text:
+            record(origin,'',settings,state=state,recent=recent,path='attachment_only',local=(),reviewed=False)
+            return payload
+        if problems:
+            if event and hasattr(self.plugin,'repair_local_output') and slots:
+                checked=await self.plugin.repair_local_output(event,checked,problems,media=media)
+                path=event.get_extra('qqbot_send_path') or 'local_repair'
+            else:raise ReviewUnavailable('本地发送检查未通过：'+','.join(problems))
+        approved=consume_approval(origin,checked,policy_version=version) if settings['enabled'] else False
+        if settings['enabled'] and not approved:
+            revised=await self.reviewer.review(checked,origin=origin,recent=recent,mode=mode,media=media,character=state)
+            if not slots and revised!=checked:raise ReviewUnavailable('音频原文已变化，需重新合成后再发送')
+            checked=revised;path='full_review'
+        elif not settings['enabled'] and path not in {'local_repair','template_receipt'}:
+            path='local_repair' if checked!=text else 'review_off'
+        record(origin,checked,settings,state=state,recent=recent,path=path,
+               local=problems,reviewed=settings['enabled'] and path not in {'prediction_direct','template_receipt'})
         if checked != text:
             # Preserve all recipients, at/reply/image segments and forward node metadata.
             for i, (container, key) in enumerate(slots):
@@ -322,14 +370,27 @@ def install_outbound_guard(plugin, reviewer):
         platform = plugin._platform()
         if platform is not None and getattr(platform, "bot", None) is bot:
             original = copy.deepcopy(params)
-            params = await guard.prepare(action, params)
+            from .stage_budgets import separate_stage
+            from .review_modes import current
+            if current(plugin._cfg)['enabled']:
+                async with separate_stage('review',265):params=await guard.prepare(action,params,bot=bot)
+            else:params=await guard.prepare(action,params,bot=bot)
             attachment_check = _attachment_check.get()
             if attachment_check:
                 attachment_check(action, params)
             check = _delivery_check.get()
             if check and action.removesuffix("_async") in {"send_msg", "send_private_msg", "send_group_msg", "send_qzone_msg"}:
                 await check()
-            result = await previous(bot, action, **params)
+            send_action=action.removesuffix('_async') in {'send_msg','send_private_msg','send_group_msg','send_qzone_msg','send_group_forward_msg','send_private_forward_msg','send_forward_msg'}
+            if action.removesuffix('_async')=='send_qzone_msg' and getattr(plugin,'_delivery',None):
+                from .external_delivery import deliver,qzone_receipt
+                async def submit():return await previous(bot,action,**params)
+                async with separate_stage('receipt',25):
+                    result=await deliver(plugin._delivery,'qzone',params.get('content',''),
+                        [{'kind':'image','semantic_status':'unknown'} for _ in params.get('images',[])],submit,qzone_receipt)
+            elif send_action:
+                async with separate_stage('receipt',25):result=await previous(bot,action,**params)
+            else:result=await previous(bot,action,**params)
             if action.removesuffix("_async") == "send_qzone_msg":
                 _receipt.set({"origin": "qzone", "original": original.get("content", ""), "text": params.get("content", "")})
             elif action.removesuffix("_async") in {"send_msg", "send_private_msg", "send_group_msg"}:

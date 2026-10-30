@@ -248,12 +248,13 @@ class EmojiConcurrency(unittest.IsolatedAsyncioTestCase):
 class CommandReview(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_review_stops_framework_and_cancels_matching(self):
         plugin = object.__new__(Main)
+        plugin.config={"reply_review_enabled":True,"review_policy":"all"}
         plugin._reviewer = SimpleNamespace(review=AsyncMock(side_effect=asyncio.CancelledError))
         plugin.review_context = lambda origin: []
         plugin.review_mode = lambda origin: "chat"
         cleanup = AsyncMock()
         event = SimpleNamespace(unified_msg_origin="private:1", stop_event=Mock(),
-                                get_extra=lambda key: cleanup)
+                                get_extra=lambda key: cleanup if key=="qqbot_cancel_reply_preparation" else None, set_extra=lambda *a:None,get_message_str=lambda:"你好")
         response = SimpleNamespace(result_chain=None, completion_text="不能发送的原稿")
         with self.assertRaises(asyncio.CancelledError):
             await plugin.review_agent_reply(event, None, response)

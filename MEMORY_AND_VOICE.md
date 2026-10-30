@@ -4,7 +4,7 @@
 
 ## 公共梗库安装
 
-`bootstrap.py --install` 与 Docker 首次启动会安装固定版本的公共字典，并验证 SHA256 和 SQLite 完整性。已存在的数据库不覆盖。`bootstrap.py --check` 只检查配置，不联网下载。安装失败会明确报错，不能把缺少字典说成已经完成部署。
+`bootstrap.py --install` 与 Docker 首次启动从 cnmeme.wiki 公共 API 分页安装标题、摘要和标签目录，校验分页和 SQLite 完整性，记录来源及下载时间；完整正文在后台更新时补齐。已有数据库不覆盖。`bootstrap.py --check` 只检查配置，不联网下载。安装失败会明确报错，不能把缺少字典说成已经完成部署。
 
 已有部署升级时，在仓库根目录使用项目解释器执行：
 
@@ -14,13 +14,15 @@
 
 Linux/Docker 对应为 `python tools/install_memewiki.py`。原来的学习与导入文件都保留；不要删除 `plugin_data`。
 
-下载受限时，让部署 agent 获取以下**固定版本公开文件**，不要换成任意网上同名数据库：
+旧版 GitHub 固定下载链接已失效，不要继续重试该链接。已有下面这份历史快照时仍可离线安装，或由受信任的数据提供者提供数据库与校验值：
 
-- 来源：[memewiki 386dd63 的 memes.db](https://raw.githubusercontent.com/in1t1a1/astrbot_plugin_memewiki/386dd63ed889251253576d44066c6de8d476f4f7/data/memes.db)
+- 历史来源：memewiki 提交 `386dd63ed889251253576d44066c6de8d476f4f7` 的 `data/memes.db`（不保证该旧地址继续可下载）
 - SHA256：`05d902ff642dbb894fe2fa61b7623ca9c094cc2e6d26d2f818986296cdacdef3`
 - 词条数：6,668；上游版本 1.5.2
 
-离线安装：`python tools/install_memewiki.py --source /path/to/memes.db`。目标固定在 `AstrBot/data/plugin_data/astrbot_plugin_proactive_agent/memewiki/memes.db`。安装器拒绝哈希不符或数据库损坏的文件。已有文件损坏时，先单独备份该文件，再移走损坏文件并重装；不要删除整个记忆目录。
+离线安装：`python tools/install_memewiki.py --source /path/to/memes.db`，也支持 `.db.gz`。其他可信版本加 `--sha256 <解压后数据库的可信SHA256>`；默认校验上面的历史快照。目标固定在 `AstrBot/data/plugin_data/astrbot_plugin_proactive_agent/memewiki/memes.db`。安装器拒绝哈希不符或数据库损坏的文件。已有文件损坏时，先单独备份该文件，再移走损坏文件并重装；不要删除整个记忆目录。
+
+安装后的更新入口是“学习与记忆 → 梗百科 → 词库更新与回退”。默认每日香港时间04:00检查，已有关闭选择保留；支持立即更新、取消、重试、最近三个成功版本回退和离线导入。首次补齐数千条正文可能需要数小时，繁忙时还会暂停；页面显示真实已处理条数，不估造百分比。网络失败继续使用旧库，公共正文变更后对应旧理解会失效并按需重学，自定义词条不会被覆盖。完整规则与回退步骤见 [ROUND7.md](ROUND7.md)。
 
 词条来自 cnmeme.wiki 与贡献者，不把上游代码的 MIT 许可当作所有词条内容的授权，详见 [来源说明](THIRD_PARTY_NOTICES.md)。仓库不上传数据库、私人学习片段和聊天记录。
 

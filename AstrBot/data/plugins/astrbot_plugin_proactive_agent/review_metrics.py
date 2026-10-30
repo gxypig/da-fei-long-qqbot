@@ -25,6 +25,8 @@ def review_metrics(root,hours=24):
             'legacy_rewrite_estimate':any('model_rewritten' not in r for r in checked),
             'format_only':sum(r.get('format_changed',False) and not r.get('model_rewritten',False) for r in checked),
             'local_passes':sum(r.get('kind')=='review_fast_path' for r in rows),
+            'prediction_direct':sum(r.get('kind')=='review_fast_path' and r.get('status')=='prediction_direct' for r in rows),
+            'legacy_fast_path_unclassified':sum(r.get('kind')=='review_fast_path' and r.get('status')!='prediction_direct' for r in rows),
             'model_calls':sum(r.get('kind')=='review_model' for r in rows),
             'median_ms':statistics.median(times) if times else None,
             'p95_ms':times[min(len(times)-1,int(len(times)*.95))] if times else None,

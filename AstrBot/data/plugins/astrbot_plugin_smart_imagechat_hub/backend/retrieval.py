@@ -329,6 +329,13 @@ class RetrievalMixin(LatencyEmojiMixin):
         }
 
     async def _maybe_append_proactive_emoji(self, event: AstrMessageEvent) -> None:
+        from data.plugins.astrbot_plugin_proactive_agent.conversation_controls import image_stop
+        getter=getattr(getattr(self,'context',None),'get_registered_star',None)
+        meta=getter('astrbot_plugin_proactive_agent') if getter else None
+        companion=meta.star_cls if meta and meta.activated else None
+        controls=getattr(getattr(companion,'_reply_queue',None),'controls',None)
+        if image_stop(getattr(event,'get_message_str',lambda:'')()) or controls and not controls.optional_image_allowed(event.unified_msg_origin,event.get_sender_id()):
+            event.set_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY,True)
         if self._decorate_latency_emoji(event):
             return
         if event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False):

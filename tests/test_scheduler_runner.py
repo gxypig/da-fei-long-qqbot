@@ -289,15 +289,10 @@ class PredictionAdmissionTests(unittest.IsolatedAsyncioTestCase):
 
 class EmojiStatusTests(unittest.TestCase):
     def setUp(self):
-        # Compile only this read-only method. Importing the whole plugin would
-        # initialize AstrBot paths, which this isolated status test does not need.
-        path = ROOT / 'AstrBot/data/plugins/astrbot_plugin_proactive_agent/reply_pipeline.py'
-        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
-        method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'performance_status')
-        ns = {'deepcopy': copy.deepcopy}
-        exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), 'exec'), ns)
-        self.status = ns['performance_status']
-        self.plugin = SimpleNamespace(_cfg={}.get, _latency_summary=lambda: {})
+        import test_maintenance
+        from data.plugins.astrbot_plugin_proactive_agent.reply_pipeline import ReplyPipelineMixin
+        self.status=ReplyPipelineMixin.performance_status
+        self.plugin=SimpleNamespace(_cfg={}.get,_latency_summary=lambda:{})
 
     def test_missing_or_inactive_hub_is_safe_empty_and_not_read(self):
         self.assertEqual(self.status(self.plugin)['emoji'], {})

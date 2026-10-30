@@ -22,6 +22,10 @@ def is_generation_request(text: str) -> bool:
 
 
 def is_library_request(text: str) -> bool:
+    try:
+        from data.plugins.astrbot_plugin_proactive_agent.conversation_controls import image_stop
+        if image_stop(text):return False
+    except ImportError:pass
     if is_generation_request(text):
         return False
     text = str(text or "").strip().lower()

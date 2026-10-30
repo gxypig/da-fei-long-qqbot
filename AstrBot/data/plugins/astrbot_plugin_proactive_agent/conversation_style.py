@@ -45,6 +45,7 @@ class MemeHints:
 
 
 def context_note(recent: list[dict], hints: list[list[str]]) -> str:
+    if not recent and not hints:return ''
     data = {"同一会话近期消息": [{"说话人QQ": x.get("sender", "未知"), "角色": x.get("role", "user"), "时间戳": x.get("time"), "发言": x["text"][:180]} for x in recent[-6:]]}
     if hints:
         data["图库中相关梗的候选标签（不代表一定适用）"] = hints

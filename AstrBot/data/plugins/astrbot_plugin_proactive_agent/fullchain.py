@@ -29,6 +29,9 @@ def install_fullchain(plugin):
     from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
     from .chain_metrics import operation,stage as metric_stage,add as metric_add
     queue=plugin._reply_queue;ledger=plugin._delivery
+    from .conversation_controls import ConversationControls
+    controls=ConversationControls(ledger);queue.controls=controls;ledger.controls=controls;ledger.reply_queue=queue
+    queue.restore_echoes(ledger)
     old_convert=AiocqhttpAdapter.convert_message;old_execute=PipelineScheduler.execute
     old_process=ProcessStage.process;old_action=CQHttp.call_action
     old_agent=AgentRequestSubStage.process
@@ -54,13 +57,15 @@ def install_fullchain(plugin):
             async for result in old_tool(tool,run_context,**arguments):yield result
             return
         metric_stage('tool');started=time.monotonic();iterator=old_tool(tool,run_context,**arguments)
+        from .stage_budgets import total_budget
         try:
-            while True:
-                try:
-                    async with queue.parked(current_job.get(),'等待工具返回'):
-                        result=await anext(iterator)
-                except StopAsyncIteration:break
-                yield result
+            async with total_budget(50):
+                while True:
+                    try:
+                        async with queue.parked(current_job.get(),'等待工具返回'):
+                            result=await anext(iterator)
+                    except StopAsyncIteration:break
+                    yield result
         finally:
             try:await iterator.aclose()
             finally:metric_add('tool_ms',(time.monotonic()-started)*1000)
@@ -117,6 +122,8 @@ def install_fullchain(plugin):
         token=current_job.set(job)
         from .persona_authority import begin_task,end_task
         persona_token=begin_task()
+        from .review_modes import begin as begin_review,end as end_review
+        review_token=begin_review(plugin._cfg,event)
         try:return await old_execute(scheduler,event)
         except asyncio.CancelledError:
             job.execution_result='cancelled'
@@ -143,6 +150,7 @@ def install_fullchain(plugin):
                 'stages_ms':{k:round(v,2) for k,v in job.timings.items() if k.endswith('_ms')}})
             current_job.reset(token)
             end_task(persona_token)
+            end_review(review_token)
 
     @asynccontextmanager
     async def admit(event,job,reason):
@@ -152,6 +160,7 @@ def install_fullchain(plugin):
             except ReplyCancelled:
                 queue.finish(job,'cancelled','会话静默，未进入执行队列');event.stop_event();yield False;return
         command=is_command(event)
+        if not command and not queue.precheck(job):event.stop_event();yield False;return
         work=getattr(plugin,'_work',None)
         with work.reply_work(event) if work else nullcontext():
             entered=time.monotonic()
@@ -160,7 +169,7 @@ def install_fullchain(plugin):
             if plugin._cfg('reply_queue_enabled',False):
                 try:
                     queue.submit(job,mergeable=not command and mergeable(event),probability=event.get_extra('qqbot_group_wake')=='probability')
-                    await queue.wait(job)
+                    async with asyncio.timeout(180):await queue.wait(job)
                 except ReplyCancelled:
                     event.stop_event();yield False;return
                 event.set_extra('qqbot_unified_admitted',True)

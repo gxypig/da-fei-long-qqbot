@@ -509,10 +509,13 @@ class RealRunner(unittest.IsolatedAsyncioTestCase):
         runner, event, _ = await self.make([response('先看看网页', ['read']), response('有效结论')])
         self.reject = True
         await self.drive(runner, event)
-        self.assertTrue(event.is_stopped())
-        self.assertEqual(self.sends, [])
-        self.assertEqual(runner.get_final_llm_resp().completion_text, '')
-        self.assertFalse(event.get_extra('qqbot_agent_final_done'))
+        self.assertFalse(event.is_stopped())
+        self.assertEqual(len(self.sends), 1)
+        text=self.sent_texts()[0]
+        self.assertNotIn('先看看网页',text)
+        self.assertNotIn('有效结论',text)
+        self.assertEqual(text,runner.get_final_llm_resp().completion_text)
+        self.assertEqual(event.get_extra('qqbot_send_path'),'template_receipt')
 
     async def test_cancel_final_review_stops_event_clears_draft_and_pending(self):
         runner, event, _ = await self.make([response('先看看网页', ['read']), response('有效结论')])

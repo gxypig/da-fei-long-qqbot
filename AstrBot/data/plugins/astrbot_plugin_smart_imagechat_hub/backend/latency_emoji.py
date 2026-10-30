@@ -22,8 +22,6 @@ LATE_GRACE_DEFAULT = 3.0
 _COMPANION_FIELDS = {
     "latency_optimization_enabled": False, "meme_separate_probability": 50,
     "emoji_late_grace_seconds": LATE_GRACE_DEFAULT,
-    "reply_review_enabled": True, "review_policy": "all",
-    "reply_prediction_enabled": True, "prediction_provider_id": "",
     "father_qq": "", "father_address_probability": 20, "emoji_probability": 18,
 }
 _TONES = {
@@ -221,6 +219,10 @@ class LatencyEmojiMixin:
         companion = self._latency_companion()
         if companion is None:
             return False
+        from data.plugins.astrbot_plugin_proactive_agent.conversation_controls import image_stop
+        controls=getattr(getattr(companion,'_reply_queue',None),'controls',None)
+        if image_stop(user_message) or controls and not controls.optional_image_allowed(event.unified_msg_origin,event.get_sender_id()):
+            event.set_extra(LATENCY_EMOJI_KEY,False);return True
         # A marker prevents re-entering the old serial path after a config edit.
         event.set_extra(LATENCY_EMOJI_KEY, False)
         if not hasattr(self, "_latency_emoji_tasks"):
@@ -230,7 +232,7 @@ class LatencyEmojiMixin:
                 or event.get_extra(SKIP_PROACTIVE_EMOJI_EXTRA_KEY, False)
                 or is_library_request(user_message) or is_generation_request(user_message)):
             return True
-        if not all(callable(getattr(companion, name, None)) for name in ("prepare_reply_prediction", "reply_prediction")):
+        if not callable(getattr(companion,"prepare_emoji_selection",None)):
             return True
         if not self._proactive_emoji_probability_hit(cfg):
             self._record_latency_emoji("probability_skipped", companion)
@@ -279,9 +281,8 @@ class LatencyEmojiMixin:
         if turn.owner:
             turn.owner.add_done_callback(owner_done)
         try:
-            # This synchronous call runs at priority 20, before the companion's
-            # priority -100 hook, and supplies candidates to the ONE shared task.
-            turn.prediction = companion.prepare_reply_prediction(event, candidates=copy.deepcopy(candidates))
+            # Image selection is independent of optional risk/review models.
+            turn.prediction = companion.prepare_emoji_selection(event, candidates=copy.deepcopy(candidates))
             if turn.prediction is None:
                 self._finish_latency_turn(turn)
             else:
@@ -292,6 +293,8 @@ class LatencyEmojiMixin:
         return True
 
     def _valid_latency_turn(self, turn):
+        controls=getattr(getattr(turn.companion,'_reply_queue',None),'controls',None)
+        if controls and not controls.optional_image_allowed(turn.origin,turn.snapshot.get_sender_id()):return False
         return (not turn.closed and not self._latency_emoji_closed
                 and self._latency_emoji_turns.get(turn.route) is turn
                 and self._latency_companion() is turn.companion
@@ -334,9 +337,10 @@ class LatencyEmojiMixin:
             turn.preview_ready.set()
 
     def _choose_latency_image(self, turn):
-        prediction = turn.companion.reply_prediction(turn.event)
+        prediction = (turn.prediction.result() if turn.prediction is not None
+                      and turn.prediction.done() and not turn.prediction.cancelled() else None)
         text = turn.text or turn.preview_text
-        if isinstance(prediction, dict) and prediction.get("risk") in {"low", "high", "unknown"}:
+        if isinstance(prediction, dict):
             ids = prediction.get("image_ids", [])
             if isinstance(ids, list):
                 for image_id in ids:
@@ -355,7 +359,7 @@ class LatencyEmojiMixin:
         return None, ""
 
     async def _prepare_latency_emoji(self, turn):
-        # Shield the shared review prediction; only our waiter is cancellable.
+        # Selection is owned by this gallery turn, independent of risk prediction.
         prediction_wait = asyncio.shield(turn.prediction)
         preview_wait = asyncio.create_task(turn.preview_ready.wait())
         final_wait = asyncio.create_task(turn.final_ready.wait())
@@ -620,7 +624,7 @@ class LatencyEmojiMixin:
             self._record_latency_emoji(reason, turn.companion)
         turn.closed = True
         current = asyncio.current_task()
-        for task in (turn.prepare, turn.delivery):
+        for task in (turn.prepare, turn.delivery, turn.prediction):
             if task and task is not current and not task.done():
                 task.cancel()
         if turn.restore_send:

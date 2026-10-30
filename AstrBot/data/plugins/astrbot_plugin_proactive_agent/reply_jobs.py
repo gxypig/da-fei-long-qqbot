@@ -23,13 +23,20 @@ class ReplyCancelled(Exception):
     pass
 
 
+_REJECTION_PREFIX=re.compile(r'^The prompt could not be submitted\. The prompt contains sensitive words that violate Google',re.I)
+_REJECTION_TAIL=re.compile(r'^se policy\]\(https://policies\.google\.com/terms/generative-ai/use-policy\)\. Try rephrasing the prompt\.',re.I)
+_REJECTION_KEY=hashlib.sha256(b'google-generative-prompt-rejection').hexdigest()
+_ERROR_HELP=re.compile(r'[?？]|怎么办|为什么|帮我|如何|我(?:改|试|换|发现)|但是|另外|补充|\b(?:why|how|help me|can you)\b',re.I)
+
 def error_fingerprint(text):
     """Only machine error envelopes, not general questions or conversational tone."""
-    if not re.search(r'(?:HTTP\s*[45]\d\d|API(?:Error|\s*错误)|(?:错误|error|retcode|status_code)\s*[:：=]|rate_limit|insufficient_quota|Traceback \(most recent call)', text, re.I):
+    known_rejection=bool(_REJECTION_PREFIX.match(text.strip()))
+    if not known_rejection and not re.search(r'(?:HTTP\s*[45]\d\d|API(?:Error|\s*错误)|(?:错误|error|retcode|status_code)\s*[:：=]|rate_limit|insufficient_quota|Traceback \(most recent call)', text, re.I):
         return None
     # A question/new detail must still receive a normal reply.
-    if re.search(r'[?？]|怎么办|为什么|帮我|如何|我(?:改|试|换|发现)|但是|另外|补充', text):
+    if _ERROR_HELP.search(text):
         return None
+    if known_rejection:return _REJECTION_KEY
     normalized=re.sub(r'(?i)((?:request|trace|req)[_-]?id\s*[=:：]\s*)[\w-]+',r'\1<ID>',text)
     normalized=re.sub(r'\b[0-9a-f]{8}-[0-9a-f-]{27,}\b','<ID>',normalized,flags=re.I)
     return hashlib.sha256(normalized.strip().encode()).hexdigest()
@@ -110,7 +117,8 @@ class ReplyQueue:
         # map. Give the new execution an independent map and job identity.
         if existing and hasattr(event,'_extras'):
             event._extras=dict(event._extras)
-            for key in ('qqbot_reply_job','_qqbot_work_state','qqbot_character','qqbot_native_persona','qqbot_unified_admitted','qqbot_flow_started','qqbot_model_started'):
+            for key in ('qqbot_reply_job','_qqbot_work_state','qqbot_character','qqbot_native_persona','qqbot_unified_admitted','qqbot_flow_started','qqbot_model_started',
+                        'qqbot_review_settings','qqbot_reply_prediction','qqbot_prediction_version','qqbot_prediction_persona','qqbot_send_path','qqbot_emoji_selection','qqbot_generation_request','qqbot_local_repair_used'):
                 event._extras.pop(key,None)
         job=ReplyJob(str(event.unified_msg_origin),str(event.get_sender_id()),
             str(getattr(getattr(event,'message_obj',None),'message_id','') or ''),event.get_message_str() or '',event,
@@ -130,16 +138,7 @@ class ReplyQueue:
         job.owner=asyncio.current_task();job.passive=bool(probability and mergeable)
         if len(self.pending)>=500:
             self.finish(job,'cancelled','queue_capacity');return job
-        fingerprint=error_fingerprint(job.text)
-        key=(job.origin,job.sender,fingerprint)
-        if fingerprint:
-            previous=self.echoes.get(key)
-            self.echoes[key]=(self.clock(),(previous[1]+1 if previous else 1))
-            self.echoes.move_to_end(key)
-            while len(self.echoes)>1000:self.echoes.popitem(last=False)
-            if previous and self.clock()-previous[0]<120:
-                self.finish(job,'merged','重复接口错误已归并；原文保留在接收记录')
-                return job
+        if not self.precheck(job):return job
         if mergeable:
             candidates=[self.jobs[x] for x in self.pending if self.jobs[x].origin==job.origin]
             old=candidates[-1] if candidates else None
@@ -157,6 +156,63 @@ class ReplyQueue:
         job.state='pending';job.stage='reply_queue';self.pending.append(job.id)
         self.changed('queued',job);self.pump()
         return job
+
+    def precheck(self,job):
+        if getattr(job,'conversation_checked',False):return job.state not in TERMINAL
+        job.conversation_checked=True
+        controls=getattr(self,'controls',None)
+        reason=controls.before(job) if controls else None
+        if reason:self.finish(job,'ignored',reason);return False
+        parts=getattr(job.event,'get_messages',lambda:[])() if job.event else []
+        empty_mention=bool(parts) and any(type(p).__name__=='At' for p in parts) and all(type(p).__name__ in {'At','Plain'} for p in parts)
+        if not job.text.strip() and empty_mention:
+            previous=next((old for old in reversed(list(self.jobs.values())) if old.id!=job.id and old.object_key==job.object_key
+                and old.sender==job.sender and old.text.strip() and 0<=job.received-old.received<=30
+                and old.state not in {'failed','cancelled','ignored','merged'}),None)
+            if previous:
+                job.linked_job=previous.id;self.finish(job,'merged','空@关联原问题:'+previous.id);return False
+        fingerprint=error_fingerprint(job.text)
+        # A known split error tail is linked only if this same sender/session
+        # already has its head. An isolated fragment is not silently swallowed.
+        if not fingerprint and _REJECTION_TAIL.match(job.text.strip()) and not _ERROR_HELP.search(job.text):
+            previous=self.echoes.get((job.origin,job.sender,_REJECTION_KEY))
+            if previous and (previous['state'] in {'pending','unknown'} or previous['state']=='confirmed' and self.clock()-previous['at']<120):fingerprint=_REJECTION_KEY
+        key=(job.origin,job.sender,fingerprint)
+        if fingerprint:
+            previous=self.echoes.get(key)
+            active=previous and (previous['state'] in {'pending','unknown'} or previous['state']=='confirmed' and self.clock()-previous['at']<120)
+            if active:
+                previous['count']+=1
+                job.linked_job=previous['job']
+                self.finish(job,'merged','重复接口错误已归并；原文保留在接收记录')
+                return False
+            self.echoes[key]={'at':self.clock(),'count':1,'job':job.id,'state':'pending'}
+            self.echoes.move_to_end(key);job.error_key=key
+            while len(self.echoes)>1000:self.echoes.popitem(last=False)
+        return True
+
+    def reconcile_echo(self,job_id,state):
+        for key,row in list(self.echoes.items()):
+            if row['job']!=job_id:continue
+            if state in {'confirmed','partial'}:
+                if row['state']!='confirmed':row.update(state='confirmed',at=self.clock())
+            elif state=='unknown':row['state']='unknown'
+            elif state in TERMINAL:self.echoes.pop(key,None)
+
+    def restore_echoes(self,ledger,wall_clock=time.time):
+        """Unknown deliveries survive restart; acknowledged TTL never restarts."""
+        now=wall_clock()
+        for row in sorted(ledger.store.rows.values(),key=lambda r:r.get('at',0)):
+            if not row.get('job_id') or row.get('optional'):continue
+            fingerprint=error_fingerprint(row.get('source_text',''))
+            if not fingerprint:continue
+            state=row.get('state');at=row.get('confirmed_at',row.get('result_at',row.get('at',0)))
+            if state=='confirmed' and now-at>=120:continue
+            if state not in {'unknown','submitted','sending','confirmed'}:continue
+            key=(row['origin'],str(row.get('sender','')),fingerprint)
+            self.echoes[key]={'at':self.clock()-max(0,now-at),'count':1,'job':row['job_id'],
+                              'state':'confirmed' if state=='confirmed' else 'unknown'}
+        while len(self.echoes)>1000:self.echoes.popitem(last=False)
 
     def pump(self):
         if self.closed:return
@@ -217,6 +273,7 @@ class ReplyQueue:
     def finish(self,job,state,reason='',*,pump=True):
         if job.state in TERMINAL:return
         assert state in TERMINAL
+        self.reconcile_echo(job.id,state)
         passive_only=(state=='ignored' and job.state=='received' and not job.sends)
         occupied=job.id in self.active or job.id in self.pending or job.id in self.inflight
         if job.id in self.pending:self.pending.remove(job.id)
@@ -276,7 +333,7 @@ class ReplyQueue:
         offset=max(0,int(offset));limit=max(1,min(100,int(limit)));now=self.clock()
         return {**common,'unchanged':False,'offset':offset,'total':len(self.pending),'echo_groups':len(self.echoes),
             'first_pending':self.pending[0] if self.pending else None,
-            'echo_merged':sum(max(0,count-1) for _,count in self.echoes.values()),
+            'echo_merged':sum(max(0,row['count']-1) for row in self.echoes.values()),
             'pending':[{**self.jobs[x].public(now),'position':i,'previous_id':self.pending[i-1] if i else None,
                         'after_next_id':self.pending[i+2] if i+2<len(self.pending) else None}
                        for i,x in enumerate(self.pending[offset:offset+limit],offset)],

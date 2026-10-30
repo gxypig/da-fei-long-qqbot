@@ -4,26 +4,15 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 import time
 
-deadline=ContextVar('bili_tool_deadline',default=None)
-
-def remaining(cap=45,reserve=0):
-    end=deadline.get()
-    return max(.01,min(cap,end-time.monotonic()-reserve)) if end is not None else cap
-
-@asynccontextmanager
-async def total_budget(seconds):
-    previous=deadline.get();end=time.monotonic()+seconds
-    token=deadline.set(min(end,previous) if previous is not None else end)
-    try:
-        async with asyncio.timeout(remaining(seconds)):yield
-    finally:deadline.reset(token)
+from data.plugins.astrbot_plugin_proactive_agent.stage_budgets import deadline,remaining,total_budget,separate_stage
 
 class SessionLock:
     def __init__(self):self.lock=asyncio.Lock();self.users=0
     def locked(self):return self.users>0 or self.lock.locked()
     async def __aenter__(self):
         self.users+=1
-        try:await self.lock.acquire()
+        try:
+            async with separate_stage('queue',180):await self.lock.acquire()
         except BaseException:self.users-=1;raise
         return self
     async def __aexit__(self,*args):self.lock.release();self.users-=1

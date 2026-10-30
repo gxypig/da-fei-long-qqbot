@@ -9,6 +9,7 @@ import asyncio
 from collections import OrderedDict
 from contextlib import closing
 import html
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -20,7 +21,9 @@ import aiohttp
 
 UPSTREAM='https://github.com/in1t1a1/astrbot_plugin_memewiki'
 REVISION='386dd63ed889251253576d44066c6de8d476f4f7'
-SNAPSHOT_URL=f'https://raw.githubusercontent.com/in1t1a1/astrbot_plugin_memewiki/{REVISION}/data/memes.db'
+# The former upstream snapshot URL now returns 404. Bootstrap uses the public
+# API updater or a checksum-verified offline package, never an unchecked mirror.
+SNAPSHOT_URL=''
 SNAPSHOT_SHA256='05d902ff642dbb894fe2fa61b7623ca9c094cc2e6d26d2f818986296cdacdef3'
 API_BASE='https://cnmeme.wiki/api/v1/public/memes'
 
@@ -36,7 +39,7 @@ def plain_html(value):
 class MemeWikiEngine:
     def __init__(self,path):
         self.path=Path(path);self.titles={};self.cache=OrderedDict();self.signature=None
-        self.local_entries={};self.index=None
+        self.local_entries={};self.by_slug={};self.index=None
         self.stats={'local_hits':0,'remote_hits':0,'snapshot_ready':False}
 
     async def start(self):
@@ -47,9 +50,7 @@ class MemeWikiEngine:
         try:
             stat=self.path.stat();signature=(stat.st_mtime_ns,stat.st_size)
         except OSError as exc:
-            self.titles={};self.cache.clear();self.signature=None
-            self.local_entries={};self.index=None
-            self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
+            self.stats.update(last_error=type(exc).__name__)
             return False
         if signature==self.signature:return self.stats['snapshot_ready']
         try:
@@ -61,12 +62,10 @@ class MemeWikiEngine:
                 from .meme_index import MemeIndex
                 index=MemeIndex(entries.values())
         except (OSError,sqlite3.Error) as exc:
-            self.titles={};self.cache.clear();self.signature=signature
-            self.local_entries={};self.index=None
-            self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
+            self.stats.update(last_error=type(exc).__name__)
             return False
         self.titles=dict(sorted(titles.items(),key=lambda item:-len(item[0])))
-        self.local_entries=entries;self.index=index
+        self.local_entries=entries;self.by_slug={r['wiki_slug']:r for r in entries.values() if r.get('wiki_slug')};self.index=index
         self.cache.clear();self.signature=signature;self.stats['snapshot_ready']=True
         return True
 
@@ -79,7 +78,8 @@ class MemeWikiEngine:
         url='https://cnmeme.wiki/词条/'+quote(str(data.get('slug') or title),safe='')
         result={'phrase':title,'meaning':plain_html(meaning)[:300],'usage':plain_html(usage)[:240],
                 'examples':[],'sources':[{'title':title+' · cnmeme.wiki','url':url}],
-                'provenance':'memewiki','verified_at':time.time(),'wiki_slug':data.get('slug','')}
+                'provenance':'memewiki','verified_at':time.time(),'wiki_slug':data.get('slug',''),
+                'source_hash':hashlib.sha256(json.dumps({k:data.get(k) for k in ('title','slug','summary','origin','usage','other','tags')},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()}
         for key in ('aliases','tags'):
             value=data.get(key,[])
             if isinstance(value,str):
@@ -89,7 +89,7 @@ class MemeWikiEngine:
         return result
 
     def _read(self,title):
-        if not self.refresh():return None
+        if not self.stats['snapshot_ready']:return None
         if folded(title) in self.local_entries:return dict(self.local_entries[folded(title)])
         if title in self.cache:
             self.cache.move_to_end(title);return dict(self.cache[title])
@@ -98,7 +98,7 @@ class MemeWikiEngine:
                 db.row_factory=sqlite3.Row
                 row=db.execute('SELECT * FROM memes WHERE title=?',(title,)).fetchone()
         except (OSError,sqlite3.Error) as exc:
-            self.signature=None;self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
+            self.stats.update(last_error=type(exc).__name__)
             return None
         entry=self.entry(dict(row)) if row else None
         if entry:
@@ -107,13 +107,13 @@ class MemeWikiEngine:
         return dict(entry) if entry else None
 
     def match(self,text,limit=3):
-        if not self.refresh():return []
+        if not self.stats['snapshot_ready']:return []
         result=self.index.search(text,limit=limit,direct_only=True) if self.index else []
         self.stats['local_hits']+=bool(result)
         return result
 
     def exact(self,phrase):
-        if not self.refresh():return None
+        if not self.stats['snapshot_ready']:return None
         title=self.titles.get(folded(phrase))
         return self._read(title) if title else None
 
@@ -144,7 +144,7 @@ class MemeWikiEngine:
             return row
 
     def catalog(self,query='',exclude=(),offset=0,limit=30):
-        if not self.refresh():return {'total':0,'rows':[]}
+        if not self.stats['snapshot_ready']:return {'total':0,'rows':[]}
         excluded={folded(x) for x in exclude}
         # SQL restricts the search; only the selected page is materialized as entries.
         where='';args=[]
@@ -155,7 +155,7 @@ class MemeWikiEngine:
             with closing(sqlite3.connect(self.path.as_uri()+'?mode=ro',uri=True)) as db:
                 titles=[r[0] for r in db.execute('SELECT title FROM memes'+where+' ORDER BY title',args) if folded(r[0]) not in excluded]
         except (OSError,sqlite3.Error) as exc:
-            self.signature=None;self.stats.update(snapshot_ready=False,last_error=type(exc).__name__)
+            self.stats.update(last_error=type(exc).__name__)
             return {'total':0,'rows':[]}
         rows=[row for title in titles[offset:offset+limit] if (row:=self._read(title))]
         return {'total':len(titles),'rows':rows}
@@ -165,7 +165,7 @@ class MemeWikiEngine:
                 'mode':'local_dictionary_and_idle_learning'}
 
     def detail(self,phrase):
-        if not self.refresh():return None
+        if not self.stats['snapshot_ready']:return None
         title=self.titles.get(folded(phrase))
         if not title:return None
         try:

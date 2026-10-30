@@ -32,95 +32,35 @@ class LatePrediction(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(job.state,'running')
         finally:current_job.reset(token);queue.finish(job,'confirmed')
 
-    async def setup_race(self, *, risk='low', reasons=None, review=None):
-        self.p=plugin();self.e=event('下班买杯奶茶')
-        self.e.set_extra('qqbot_character',{})
-        self.started=asyncio.Event();self.finish=asyncio.Event();self.predict=asyncio.Event()
-        self.cancelled=False;self.parking=[]
-        @asynccontextmanager
-        async def parked():
-            self.parking.append('enter')
-            try:yield
-            finally:self.parking.append('exit')
-        self.p._work=SimpleNamespace(parked_model=parked)
-        async def default_review(*args,**kwargs):
-            self.started.set()
-            try:await self.finish.wait()
-            except asyncio.CancelledError:self.cancelled=True;raise
-            if kwargs.get('on_verdict'):kwargs['on_verdict']()
-            return '完整审阅'
-        self.p._reviewer.review=AsyncMock(side_effect=review or default_review)
-        async def prediction():
-            await self.predict.wait()
-            if risk=='failed':raise RuntimeError('prediction unavailable')
-            return {'risk':risk,'image_ids':[]}
-        self.prediction=asyncio.create_task(prediction())
-        self.e.set_extra('qqbot_reply_prediction',self.prediction)
-        self.e.set_extra('qqbot_prediction_version',self.p.review_policy_version())
-        bind_request(self.e.unified_msg_origin,['下班买杯奶茶'],False,{})
-        self.task=asyncio.create_task(self.p.review_with_pending_prediction(self.e,'奶茶店先笑了',
-            reasons=reasons or ['prediction_unavailable'],recent=['下班买杯奶茶'],mode='chat',media=0,
-            prior_replies=[],state={},used_tools=False))
-        await asyncio.wait_for(self.started.wait(),.5)
+    async def test_late_prediction_does_not_start_a_parallel_reviewer(self):
+        p=plugin();e=event('今天喝奶茶');e.set_extra('qqbot_character',{})
+        gate=asyncio.Event()
+        async def predict(*_):await gate.wait();return '{"risk":"low"}'
+        p._generate_json=predict;p.prepare_reply_prediction(e)
+        task=asyncio.create_task(p.review_with_pending_prediction(e,'好喝',reasons=['prediction_unavailable'],recent=[],mode='chat',media=0,prior_replies=[],state={},used_tools=False))
+        await asyncio.sleep(.02);p._reviewer.review.assert_not_awaited();gate.set()
+        self.assertEqual(await task,('好喝',True));p._reviewer.review.assert_not_awaited()
+        await p._close_reply_pipeline()
 
-    async def asyncTearDown(self):
-        tasks=[getattr(self,name,None) for name in ('task','prediction')]
-        for task in tasks:
-            if task and not task.done():task.cancel()
-        await asyncio.gather(*(t for t in tasks if t),return_exceptions=True)
+    async def test_mandatory_tool_reply_never_waits_for_prediction(self):
+        p=plugin();e=event('今天喝奶茶');e.set_extra('qqbot_character',{})
+        gate=asyncio.Event();p._generate_json=AsyncMock(side_effect=gate.wait)
+        prediction=p.prepare_reply_prediction(e)
+        result=await asyncio.wait_for(p.review_with_pending_prediction(e,'查到了',reasons=['tool_or_media'],recent=[],mode='chat',media=0,prior_replies=[],state={},used_tools=True),.1)
+        self.assertFalse(result[1]);p._reviewer.review.assert_awaited_once();await p._close_reply_pipeline()
 
-    async def test_low_prediction_reuses_checks_and_joins_cancelled_review(self):
-        await self.setup_race();self.predict.set()
-        self.assertEqual(await self.task,('奶茶店先笑了',True))
-        self.assertTrue(self.cancelled);self.assertEqual(self.parking,['enter','exit'])
-
-    async def test_unknown_high_cancelled_or_failed_prediction_waits_full_review(self):
-        for risk in ('unknown','high','cancelled','failed'):
-            await self.setup_race(risk=risk)
-            if risk=='cancelled':self.prediction.cancel()
-            else:self.predict.set()
-            await asyncio.sleep(.01);self.assertFalse(self.task.done())
-            self.finish.set();self.assertEqual(await self.task,('完整审阅',False))
-
-    async def test_completed_review_wins_simultaneous_prediction(self):
-        await self.setup_race();self.finish.set();self.predict.set()
-        self.assertEqual(await self.task,('完整审阅',False))
-
-    async def test_prior_rejection_cannot_be_overridden_while_rewrite_waits(self):
-        async def reviewing(*args,**kwargs):
-            kwargs['on_verdict']();self.started.set()
-            await self.finish.wait();return '修正并复核后'
-        await self.setup_race(review=reviewing);self.predict.set()
-        await asyncio.sleep(.01);self.assertFalse(self.task.done())
-        self.finish.set();self.assertEqual(await self.task,('修正并复核后',False))
-
-    async def test_state_and_policy_changes_require_full_review(self):
-        for field in ('state','policy'):
-            await self.setup_race()
-            if field=='state':self.e.set_extra('qqbot_character',{'mood':'stop'})
-            else:self.p.config['emoji_probability']=.55
-            self.predict.set();await asyncio.sleep(.01);self.assertFalse(self.task.done())
-            self.finish.set();self.assertEqual(await self.task,('完整审阅',False))
-
-    async def test_other_mandatory_reason_never_races(self):
-        await self.setup_race(reasons=['prediction_unavailable','tool_or_media'])
-        self.predict.set();await asyncio.sleep(.01);self.assertFalse(self.task.done())
-        self.finish.set();self.assertEqual(await self.task,('完整审阅',False))
-        self.assertEqual(self.parking,[])
-
-    async def test_parent_cancel_joins_child_without_cancelling_shared_prediction(self):
-        await self.setup_race();self.task.cancel()
-        with self.assertRaises(asyncio.CancelledError):await self.task
-        self.assertTrue(self.cancelled);self.assertFalse(self.prediction.done())
-        self.assertEqual(self.parking,['enter','exit'])
-
-    async def test_cancellation_resistant_review_verdict_wins(self):
-        async def resistant(*args,**kwargs):
-            self.started.set()
-            try:await self.finish.wait()
-            except asyncio.CancelledError:kwargs['on_verdict']();return '仍然要用完整审阅'
-        await self.setup_race(review=resistant);self.predict.set()
-        self.assertEqual(await self.task,('仍然要用完整审阅',False))
+    async def test_parent_cancel_joins_full_review_without_late_prediction_rescue(self):
+        p=plugin();e=event('今天喝奶茶');e.set_extra('qqbot_character',{})
+        entered=asyncio.Event();cancelled=[]
+        async def full(*a,**k):
+            entered.set()
+            try:await asyncio.Future()
+            except asyncio.CancelledError:cancelled.append(True);raise
+        p._reviewer.review=full
+        task=asyncio.create_task(p.review_with_pending_prediction(e,'好喝',reasons=['full_policy'],recent=[],mode='chat',media=0,prior_replies=[],state={},used_tools=False))
+        await entered.wait();task.cancel()
+        with self.assertRaises(asyncio.CancelledError):await task
+        self.assertTrue(cancelled)
 
     async def test_real_reviewer_marks_first_verdict_before_rewrite(self):
         sequence=[]
@@ -132,22 +72,3 @@ class LatePrediction(unittest.IsolatedAsyncioTestCase):
             on_verdict=lambda:sequence.append('verdict'))
         self.assertEqual(result,'奶茶店先笑了')
         self.assertEqual(sequence,['generate','verdict','generate','verdict'])
-
-    async def test_raw_verdict_before_provider_cleanup_blocks_late_prediction(self):
-        from data.plugins.astrbot_plugin_proactive_agent.work_scheduler import _review_verdict_observer
-        calls=[]
-        async def generate(*_):
-            calls.append(True)
-            if len(calls)==1:
-                # Mirrors a hedged request receiving a verdict while its losing
-                # request/admission is still being cleaned up.
-                _review_verdict_observer.get()()
-                self.started.set();await self.finish.wait()
-                return '{"pass":false,"natural":false,"chat_fit":true,"replacement":"钱包先替你心疼了"}'
-            return '{"pass":true,"natural":true,"chat_fit":true}'
-        reviewer=ReplyReviewer(generate,lambda *_:None)
-        await self.setup_race(review=reviewer.review)
-        self.predict.set();await asyncio.sleep(.01);self.assertFalse(self.task.done())
-        self.finish.set();checked,fast=await self.task
-        self.assertEqual(checked,'钱包先替你心疼了');self.assertFalse(fast)
-        self.assertEqual(len(calls),2);self.assertIsNone(_review_verdict_observer.get())

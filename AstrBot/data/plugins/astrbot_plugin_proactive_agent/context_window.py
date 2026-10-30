@@ -36,7 +36,7 @@ SUMMARY_SYSTEM = '''你整理聊天记忆，只返回JSON {"summary":"不超过1
 把重复闲聊/表情删掉，旧话题只留结论。图片仅保留可确认的主题/关键文字，不猜身份。
 区分用户说法、玩笑与已证实事实；保留否定和不确定性，后续更正覆盖旧结论。
 已有摘要仅是参考资料，结合新增历史更新，不编造没说过的内容。'''
-RECALL = re.compile(r'之前|以前|上次|先前|最早|昨天|前天|还记得|记不记得|回忆|历史|旧图|那张图|那幅|前面.*(?:图|说|提)|remember|earlier|previous|yesterday', re.I)
+RECALL = re.compile(r'之前|以前|上次|先前|最早|昨天|前天|还记得|记不记得|回忆|历史|聊天记录|查.{0,4}记录|翻.{0,4}记录|旧图|那张图|那幅|前面.*(?:图|说|提)|remember|earlier|previous|yesterday', re.I)
 IMPORTANT = re.compile(r'记住|忘记|喜欢|讨厌|不要|不能|名字|叫我|约好|答应|明天|下周|计划|已经|没找到|找到了|失败|成功|https?://|prefer|remember|promise', re.I)
 
 

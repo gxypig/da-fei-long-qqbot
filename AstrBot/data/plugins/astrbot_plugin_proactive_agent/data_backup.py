@@ -1,12 +1,39 @@
 """Local consistent data snapshots with shared immutable assets and explicit restore."""
 import asyncio,hashlib,json,os,shutil,sqlite3,threading,time,uuid
-from contextlib import ExitStack,closing
+from contextlib import ExitStack,closing,contextmanager
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 
 ZONE=timezone(timedelta(hours=8))
 SKIP={'plugins','logs','temp','__pycache__','.cache'}
 DATABASE={'.db','.sqlite','.sqlite3'}
+_LOCKS={};_LOCKS_GUARD=threading.Lock()
+
+@contextmanager
+def backup_lock(root):
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    with _LOCKS_GUARD:lock=_LOCKS.setdefault(str(root),threading.RLock())
+    with lock:
+        # Cross-process lock also protects an offline backup/GC run.
+        with (root/'.coordination.lock').open('a+b') as stream:
+            stream.seek(0);stream.write(b'0');stream.flush();stream.seek(0)
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(stream.fileno(),msvcrt.LK_LOCK,1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(),fcntl.LOCK_EX)
+            try:yield
+            finally:
+                stream.seek(0)
+                if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+                else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+
+def file_digest(path,check=lambda:None):
+    result=hashlib.sha256()
+    with path.open('rb') as stream:
+        while chunk:=stream.read(1024*1024):check();result.update(chunk)
+    return result.hexdigest()
 
 class SnapshotChanged(RuntimeError):pass
 
@@ -38,6 +65,9 @@ def remove_snapshot(path,root):
     shutil.rmtree(path)
 
 def retain(root):
+    with backup_lock(root):return _retain(root)
+
+def _retain(root):
     root=Path(root);items=[]
     for path in (root/'snapshots').glob('*/manifest.json'):
         try:
@@ -51,12 +81,23 @@ def retain(root):
     for _,path,_ in items:
         if path not in keep:remove_snapshot(path,root/'snapshots')
     # Blobs are immutable and shared by retained snapshots; no other files are touched.
-    referenced={v['sha256'] for _,p,m in items if p in keep for v in m['files'].values() if v.get('kind')=='blob'}
+    # Preserve references in incomplete manifests too. An unreadable manifest
+    # means references are unknown, so do not reclaim shared data this pass.
+    referenced=set()
+    for path in (root/'snapshots').glob('*/manifest.json'):
+        try:
+            m=json.loads(path.read_text('utf-8'))
+            if m.get('format')!='qqbot-data-snapshot-v1':return len(keep)
+            referenced.update(v['sha256'] for v in m['files'].values() if v.get('kind')=='blob')
+        except (OSError,ValueError,KeyError):return len(keep)
     for path in (root/'blobs').glob('*'):
         if len(path.name)==64 and all(c in '0123456789abcdef' for c in path.name) and path.name not in referenced and path.is_file() and not path.is_symlink():path.unlink()
     return len(keep)
 
 def snapshot(source,destination,*,cancel=None,clock=time.time,hook=None):
+    with backup_lock(destination):return _snapshot(source,destination,cancel=cancel,clock=clock,hook=hook)
+
+def _snapshot(source,destination,*,cancel=None,clock=time.time,hook=None):
     source=Path(source).resolve();destination=Path(destination).resolve();destination.mkdir(parents=True,exist_ok=True)
     cancel=cancel or threading.Event();started=clock();deadline=time.monotonic()+120
     def check():
@@ -96,14 +137,16 @@ def snapshot(source,destination,*,cancel=None,clock=time.time,hook=None):
                 else:
                     previous=cache.get(rel,{})
                     digest=previous.get('sha256') if previous.get('stamp')==list(identity) else None
-                    if not digest or not (blobs/digest).is_file():
+                    valid=bool(digest and (blobs/digest).is_file() and not (blobs/digest).is_symlink() and file_digest(blobs/digest,check)==digest)
+                    if not valid:
                         temp=blobs/('pending-'+uuid.uuid4().hex);hasher=hashlib.sha256()
                         try:
                             with path.open('rb') as src,temp.open('xb') as dst:
                                 while chunk:=src.read(1024*1024):check();hasher.update(chunk);dst.write(chunk)
                                 dst.flush();os.fsync(dst.fileno())
                             digest=hasher.hexdigest()
-                            if not (blobs/digest).exists():os.replace(temp,blobs/digest)
+                            # A pre-existing blob with this name may be corrupt.
+                            os.replace(temp,blobs/digest)
                         finally:temp.unlink(missing_ok=True)
                     newcache[rel]={'stamp':list(identity),'sha256':digest}
                     manifest['files'][rel]={'kind':'blob','sha256':digest,'size':identity[1]}
@@ -112,8 +155,11 @@ def snapshot(source,destination,*,cancel=None,clock=time.time,hook=None):
             current=inventory(source)
             if set(files)!=set(current) or any(identity!=current[rel][1] for rel,(_,identity) in files.items()):raise SnapshotChanged('备份期间数据文件发生变化')
             if any(db.execute('PRAGMA data_version').fetchone()[0]!=version for db,version in databases.values()):raise SnapshotChanged('备份期间数据库有新提交')
+        for item in manifest['files'].values():
+            if item['kind']=='blob' and file_digest(blobs/item['sha256'],check)!=item['sha256']:
+                raise SnapshotChanged('共享素材校验失败，快照未标记完成')
         manifest.update(complete=True,completed_at=clock());atomic_json(folder/'manifest.json',manifest)
-        atomic_json(cachefile,newcache);count=retain(destination)
+        atomic_json(cachefile,newcache);count=_retain(destination)
         return {'snapshot':name,'files':len(files),'retained':count,'at':started,'consistent':True}
     except BaseException:
         remove_snapshot(folder,destination/'snapshots');raise
@@ -138,7 +184,7 @@ class HourlyBackup:
     def __init__(self,plugin):
         self.plugin=plugin;self.source=plugin._data_dir.parent.parent
         self.destination=self.source.parent.parent/'backups'/'data-hourly'
-        self.task=None;self.io=None;self.cancel=threading.Event();self.state={'status':'waiting','last_success':0}
+        self.task=None;self.io=None;self.cancel=threading.Event();self.state={'status':'waiting','last_success':0,'first_started':time.time()}
         try:self.state.update(json.loads((self.destination/'state.json').read_text('utf-8')))
         except (OSError,ValueError):pass
     async def start(self):self.task=asyncio.create_task(self._worker(),name='hourly-consistent-backup')
@@ -165,10 +211,20 @@ class HourlyBackup:
         except Exception as exc:self.state.update(status='failed',error=type(exc).__name__)
         await asyncio.to_thread(atomic_json,self.destination/'state.json',self.state)
     async def _worker(self):
+        last_gc=0
         while True:
             await asyncio.sleep(30)
+            if time.time()-last_gc>=3600 and not self.plugin._work.busy():
+                await asyncio.to_thread(retain,self.destination);last_gc=time.time()
             if not self.plugin._cfg('hourly_data_backup_enabled',True) or self.plugin._work.busy():continue
             if time.time()-self.state.get('last_success',0)>=3600:await self.run_once()
+
+    def health(self):
+        now=time.time();last=self.state.get('last_success',0);first=self.state.get('first_started',now)
+        age=now-(last or first)
+        stopped=bool(self.task and self.task.done())
+        level='abnormal' if stopped or age>=21600 else 'warning' if age>=7200 else 'grace' if not last and age<5400 else 'observing' if not last else 'ok'
+        return {**self.state,'health':level,'age_seconds':age,'task_alive':bool(self.task and not self.task.done()),'auto_restart':False}
     async def close(self):
         self.cancel.set()
         if self.task:self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)

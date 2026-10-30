@@ -83,7 +83,8 @@ class AIProfiles:
         row={**row,'account_version':before.get('account_version',0)+1}
         self.store.put(key,row);self._control()
         current=self.source_label(row['platform'],row['account'])
-        if self.on_change and previous!=current:
+        expired=before.get('state') in {'auto_confirmed','manual_confirmed'} and row.get('state')=='expired'
+        if self.on_change and (previous!=current or expired):
             self.store.put(key,{**self.store.rows[key],'source_sync_pending':True})
             task=asyncio.create_task(self._sync_source(key))
             self.callbacks.add(task);task.add_done_callback(self.callbacks.discard)
@@ -255,10 +256,24 @@ class AIProfiles:
             if (row.get('outstanding') or {}).get('sent'):row['stage']='awaiting_answer'
         self._put(key,row)
 
+    def expire_due(self):
+        if self.clock()<getattr(self,'_next_expiry_sweep',0):return
+        self._next_expiry_sweep=self.clock()+30
+        for key,row in list(self.store.rows.items()):
+            if row.get('state') in {'auto_confirmed','manual_confirmed'} and self.effective(row)=='expired':
+                self._put(key,self._fresh(key,row))
+
     async def _worker(self):
         while True:
-            await self.wake.wait();self.wake.clear()
+            try:
+                async with asyncio.timeout(30):await self.wake.wait()
+            except TimeoutError:pass
+            self.wake.clear()
+            self.expire_due()
             while self.pending:
+                # A busy foreground can keep this inner loop alive indefinitely.
+                # Expiry and learning reclassification must still make progress.
+                self.expire_due()
                 if self.busy() or not self.cfg('ai_profiles_enabled',False):await asyncio.sleep(1);continue
                 key,epoch=self.pending.popitem(last=False)
                 row=self.store.rows.get(key,{})
@@ -288,11 +303,14 @@ class AIProfiles:
     def day(self):
         return datetime.fromtimestamp(self.clock(),timezone(timedelta(hours=8))).date().isoformat()
 
-    async def prepare_probe(self,platform,account,source_id,origin):
+    async def prepare_probe(self,platform,account,source_id,origin,text=None):
         if not self.cfg('ai_profiles_enabled',False) or not self.cfg('ai_probe_enabled',False):return None
         key=identity(platform,account);original=self.store.rows.get(key)
         if not original:return None
         row=self._fresh(key,original)
+        if text is None:text=next((x.get('text','') for x in reversed(row.get('observations',[])) if x.get('source_id')==str(source_id) and x.get('origin')==origin),'')
+        if not (PROBE_WORDS.search(text or '') and re.search(r'我|这(?:个)?号|自动回复|接入|程序',text or '') and not UNRELIABLE.search(text or '')):
+            return None  # Daily allowance is a ceiling, not a questionnaire quota.
         if self.effective(row) not in {'suspected','observing'} or not row.get('probe_eligible') or row.get('outstanding'):return None
         day=self.day();count=row.get('probes',{}).get(day,0)
         if count>=3:return None
