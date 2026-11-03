@@ -37,6 +37,7 @@ _kind = ContextVar('qqbot_model_work_kind', default=None)
 _lease = ContextVar('qqbot_model_work_lease', default=None)
 _reply = ContextVar('qqbot_reply_work', default=None)
 _prediction_turn = ContextVar('qqbot_prediction_admission', default=None)
+_decoration_turn = ContextVar('qqbot_decoration_admission', default=None)
 _provider_observation = ContextVar('qqbot_provider_observation', default=None)
 _review_verdict_observer = ContextVar('qqbot_review_verdict_observer', default=None)
 _DONE = object()
@@ -379,6 +380,7 @@ class _Job:
     trace_id: str | None = None
     trace: object = None
     after_primary: bool = False
+    decoration: bool = False
     started: float | None = None
     worker: asyncio.Task | None = None
     paused: bool = False
@@ -498,12 +500,11 @@ class ModelScheduler:
             if len(running) >= self._limit(job.key):
                 if job.kind in {'interactive','review','scheduled'}:
                     for duplicate in running:
-                        if (duplicate.after_primary and duplicate.kind=='auxiliary'
+                        if (duplicate.after_primary and not duplicate.decoration and duplicate.kind=='auxiliary'
                                 and not duplicate.paused
                                 and duplicate.worker is not None and not duplicate.worker.done()):
-                            # Only the optional shared risk/image prediction is
-                            # disposable. Its caller falls back to local image
-                            # matching and the normal final review contract.
+                            # Only risk prediction is disposable. Optional image
+                            # selection retains its existing completion contract.
                             duplicate.paused=True
                             duplicate.worker.cancel()
                             break
@@ -558,6 +559,9 @@ class ModelScheduler:
             job.trace_id = scope.trace.trace_id
             job.trace = scope.trace
         prediction = _prediction_turn.get()
+        decoration = _decoration_turn.get()
+        if prediction is None and decoration is not None:
+            prediction=decoration;job.decoration=True
         if (kind == 'auxiliary' and prediction is not None
                 and prediction.runtime.scheduler is self):
             job.trace = prediction
@@ -810,7 +814,9 @@ class ModelScheduler:
         return {'closed': self._closed, 'busy': self.busy(), 'foreground': self._foreground,
                 'idle_ms': None if self._idle_since is None else round((now - self._idle_since) * 1000),
                 'running': len(self._active), 'waiting': len(self._waiting), 'providers': providers,
-                'predictions_awaiting_primary': sum(job.after_primary and not job.trace.primary_admitted
+                'predictions_awaiting_primary': sum(job.after_primary and not job.decoration and not job.trace.primary_admitted
+                                                   for job in self._waiting),
+                'decorations_awaiting_primary': sum(job.after_primary and job.decoration and not job.trace.primary_admitted
                                                    for job in self._waiting)}
 
     async def close(self):
@@ -1078,6 +1084,22 @@ class WorkRuntime:
             yield
         finally:
             _prediction_turn.reset(token)
+
+    @contextmanager
+    def decoration_work(self,event):
+        """Queue optional selection after primary admission, without cancelling it.
+
+        The enrichment hook registers risk prediction before the gallery hook.
+        Both wait without owning a slot; prediction keeps the earlier queue
+        position instead of losing its deadline behind image selection.
+        """
+        state=_extra(event,_STATE_KEY)
+        if (not self.enabled or not isinstance(state,_Trace) or state.runtime is not self
+                or not state.live or state.reply_owner is None):
+            yield;return
+        token=_decoration_turn.set(state)
+        try:yield
+        finally:_decoration_turn.reset(token)
 
     def _hedge_seconds(self):
         value = _config_get(self.cfg, 'reply_hedge_after_seconds', 15)

@@ -3,7 +3,8 @@ import asyncio,re
 from pathlib import Path
 from quart import request, jsonify
 
-VIEWS = {'persona': ('persona_state', 'persona_action'), 'sessions': ('mute_state', 'mute_action')}
+VIEWS = {'persona': ('persona_state', 'persona_action'), 'sessions': ('mute_state', 'mute_action'),
+         'reviews': ('panel_review_history','panel_review_detail')}
 
 def bundled_view(name):
     if name not in VIEWS:

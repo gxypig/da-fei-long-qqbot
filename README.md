@@ -21,6 +21,7 @@
 | 连续生活、主动消息合并、学习与AI识别 | [SECOND_ROUND.md](SECOND_ROUND.md) |
 | 更新、备份、回滚 | [MAINTENANCE.md](MAINTENANCE.md) |
 | 回复提速、空闲学梗、表达学习 | [PERFORMANCE.md](PERFORMANCE.md) |
+| 自然接话与审阅对照（发布状态见更新日志） | [ROUND9.md](ROUND9.md) |
 
 ## 包含什么
 

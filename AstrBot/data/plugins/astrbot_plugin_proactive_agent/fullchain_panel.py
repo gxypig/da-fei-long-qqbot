@@ -10,6 +10,7 @@ FEATURES={'reply_queue_enabled':False,'reply_queue_concurrency':4,
           'ai_profiles_enabled':False,'ai_probe_enabled':False,'hourly_data_backup_enabled':True,
           'incoming_visual_enabled':True,'incoming_visual_burst_ms':650,
           'incoming_visual_context_seconds':45,'incoming_visual_detail_tiles':4}
+FEATURES.update(natural_exchange_enabled=True,persona_scene_projection_enabled=True)
 
 
 def feature_settings(plugin):

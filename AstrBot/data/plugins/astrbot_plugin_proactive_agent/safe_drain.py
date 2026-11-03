@@ -28,7 +28,7 @@ async def drain_project(plugin,timeout=8):
                 if task and not task.done():tasks.add(task)
         registry=getattr(owner,'_personas',None)
         if registry:tasks.update(t for t in registry.tasks.values() if not t.done())
-        for name in ('_delivery','_image_memory','_ai_profiles','_life','_meme_usage'):
+        for name in ('_delivery','_image_memory','_ai_profiles','_life','_meme_usage','_review_history'):
             store=getattr(getattr(owner,name,None),'store',None)
             if store:stores.append(store)
         share=getattr(owner,'_share_store',None)
@@ -49,6 +49,19 @@ async def drain_project(plugin,timeout=8):
     if receipts:
         _,left=await asyncio.wait(receipts,timeout=timeout)
         if left:errors.append('平台发送回执仍在途中')
+    # Evicted review rows are loaded asynchronously before a receipt update
+    # reaches the persistence queue. An empty queue alone is not durable yet.
+    histories=[getattr(owner,'_review_history',None) for owner in companions]
+    def history_links():
+        return {entry['task'] for history in histories
+            for entry in getattr(history,'cold',{}).values()
+            if entry.get('task') is not None and not entry['task'].done()}
+    deadline=asyncio.get_running_loop().time()+timeout
+    while links:=history_links():
+        _,left=await asyncio.wait(links,timeout=max(0,deadline-asyncio.get_running_loop().time()))
+        if left:
+            errors.append('审阅记录的发送关联尚未完成，停止已中止')
+            break
     async def flush_store(store):
         if store.closed:
             if store.pending:raise RuntimeError('持久化已关闭且仍有待写记录')
@@ -67,6 +80,9 @@ async def drain_project(plugin,timeout=8):
     if active:errors.append('仍有在途回复')
     count=sum(len(s.pending) for s in stores)
     if count:errors.append('投递等记录尚未写完')
+    pending_links=len(history_links())
+    if pending_links:errors.append('审阅记录的发送关联尚未完成，停止已中止')
     return {'drained':not errors,'durable':not errors,'replay':False,'pending_persistence':count,
+        'pending_history_links':pending_links,
         'pending_receipts':sum(not t.done() for t in getattr(ledger,'receipt_tasks',())),
         'errors':list(dict.fromkeys(errors)),'progress':'可以停止' if not errors else '停止中止，请查看未完成项后重试'}

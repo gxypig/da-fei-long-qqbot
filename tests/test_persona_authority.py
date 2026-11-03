@@ -13,14 +13,14 @@ from data.plugins.astrbot_plugin_proactive_agent.life_state import role_context
 class PersonaAuthorityTests(unittest.IsolatedAsyncioTestCase):
     def test_default_counterattack_does_not_force_apology(self):
         state=CharacterState().for_message('g','1','你再嘴欠试试，揍你',{}.get)
-        self.assertEqual(state['mood'],'cheeky');self.assertNotIn('apology_required',state)
+        self.assertEqual(state['mood'],'neutral');self.assertNotIn('apology_required',state)
         self.assertEqual(speech_issues('嗓门挺大，道理呢',state),[])
 
     def test_legacy_toggle_is_no_longer_an_input(self):
         cache=CharacterState()
         for enabled in (True,False):
             state=cache.for_message('g','1','揍你',{'counterattack_apology_enabled':enabled}.get)
-            self.assertEqual(state['mood'],'cheeky');self.assertNotIn('apology_required',state)
+            self.assertEqual(state['mood'],'neutral');self.assertNotIn('apology_required',state)
 
     async def test_selected_persona_is_live_and_session_scoped(self):
         resolve = AsyncMock(side_effect=[('one', {'prompt':'保留锋芒'}, None, None), ('two', {'prompt':'当前已修改的口吻'}, None, None)])

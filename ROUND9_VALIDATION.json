@@ -1,0 +1,602 @@
+{
+  "version": "1.22.0-rc1",
+  "at": 1793732791.2097805,
+  "checks_blocking_release": [],
+  "tests": {
+    "private-release-tests-final.log": {
+      "passed": true,
+      "tests": 1070,
+      "seconds": 711.568
+    },
+    "public-release-tests.log": {
+      "passed": true,
+      "tests": 1052,
+      "seconds": 684.563
+    },
+    "final-targeted-private.log": {
+      "passed": true,
+      "tests": 35,
+      "seconds": 5.689
+    },
+    "final-targeted-public.log": {
+      "passed": true,
+      "tests": 35,
+      "seconds": 5.648
+    },
+    "prediction-format-verified-tests.log": {
+      "passed": true,
+      "tests": 40,
+      "seconds": 19.295
+    },
+    "late-drain-private.log": {
+      "passed": true,
+      "tests": 10,
+      "seconds": 0.76
+    },
+    "late-drain-public.log": {
+      "passed": true,
+      "tests": 10,
+      "seconds": 0.777
+    },
+    "aux-order-private.log": {
+      "passed": true,
+      "tests": 164,
+      "seconds": 28.675
+    },
+    "aux-order-public.log": {
+      "passed": true,
+      "tests": 164,
+      "seconds": 28.556
+    }
+  },
+  "quality": {
+    "pairs": 156,
+    "original_cases": 26,
+    "variants_per_case": 2,
+    "repeats_per_variant": 3,
+    "candidate_wins": 56,
+    "baseline_wins": 30,
+    "ties": 70,
+    "candidate_below_4": 1,
+    "disputed_not_counted_as_passed": 1,
+    "remaining_finding": "One Bili invitation uses an unclear metaphorical object; retained as a language-quality dispute, not marked passed. The targeted repeated teaching-copy defect is absent in the 36 final handler samples.",
+    "bili_handler": {
+      "baseline_successes": 36,
+      "candidate_successes": 36,
+      "candidate_failed_attempts_retained": 1,
+      "teaching_expression_baseline": 26,
+      "teaching_expression_candidate": 0
+    },
+    "method": "Randomized blinded comparison with a separate evaluation prompt, followed by manual review. This is regression evidence, not a guarantee for open-ended conversation."
+  },
+  "identity": {
+    "off": {
+      "cases": 11,
+      "failures": 0,
+      "review_calls": 0,
+      "predictions": 0,
+      "approval_diagnostics_observed": 0,
+      "approval_misses": 0
+    },
+    "speed_first": {
+      "cases": 11,
+      "failures": 0,
+      "review_calls": 9,
+      "predictions": 4,
+      "approval_diagnostics_observed": 0,
+      "approval_misses": 0
+    },
+    "all": {
+      "cases": 11,
+      "failures": 0,
+      "review_calls": 12,
+      "predictions": 0,
+      "approval_diagnostics_observed": 0,
+      "approval_misses": 0
+    }
+  },
+  "exchange": {
+    "attempts": 74,
+    "all_retained_rows": 292,
+    "failed": [],
+    "skipped": 6,
+    "stats": {
+      "short": 14,
+      "cooldown": 0,
+      "model_skip": 6,
+      "new_question_preserved": 4
+    },
+    "no_real_sends": true
+  },
+  "performance": {
+    "phase": "optimized",
+    "mode": "speed_first",
+    "same_model_and_reasoning": true,
+    "baseline": {
+      "attempts": 50,
+      "failure_count": 1,
+      "external_failure_count": 1,
+      "application_failure_count": 0,
+      "first": {
+        "count": 50,
+        "median_ms": 6844,
+        "p95_ms": 19938,
+        "unconfirmed_as_infinite": 1
+      },
+      "all_required": {
+        "count": 50,
+        "median_ms": 6844,
+        "p95_ms": 19938,
+        "unconfirmed_as_infinite": 1
+      },
+      "complete": {
+        "count": 50,
+        "median_ms": 6860,
+        "p95_ms": 19953,
+        "unconfirmed_as_infinite": 1
+      },
+      "successful_only": {
+        "first": {
+          "count": 49,
+          "median_ms": 6813,
+          "p95_ms": 16235,
+          "unconfirmed_as_infinite": 0
+        },
+        "all_required": {
+          "count": 49,
+          "median_ms": 6813,
+          "p95_ms": 16235,
+          "unconfirmed_as_infinite": 0
+        }
+      },
+      "review_calls": 32,
+      "confirmed_attachments": 24,
+      "predictions_completed": 23,
+      "without_confirmed_necessary_reply": 1,
+      "exchange_skips": 0,
+      "confirmed_within_30s": 48,
+      "max_confirmed_ms": 36655.9999999954,
+      "request_hook_orders": [
+        [
+          "gallery",
+          "enrichment"
+        ]
+      ],
+      "reply_characters": {
+        "count": 49,
+        "unconfirmed_as_infinite": 0,
+        "median": 21,
+        "p95": 55
+      },
+      "input_tokens": {
+        "count": 49,
+        "unconfirmed_as_infinite": 0,
+        "median": 6004,
+        "p95": 8168
+      }
+    },
+    "candidate": {
+      "attempts": 50,
+      "failure_count": 0,
+      "external_failure_count": 0,
+      "application_failure_count": 0,
+      "first": {
+        "count": 50,
+        "median_ms": 4992,
+        "p95_ms": 11296,
+        "unconfirmed_as_infinite": 0
+      },
+      "all_required": {
+        "count": 50,
+        "median_ms": 4992,
+        "p95_ms": 11296,
+        "unconfirmed_as_infinite": 0
+      },
+      "complete": {
+        "count": 50,
+        "median_ms": 5008,
+        "p95_ms": 11312,
+        "unconfirmed_as_infinite": 0
+      },
+      "successful_only": {
+        "first": {
+          "count": 50,
+          "median_ms": 4992,
+          "p95_ms": 11296,
+          "unconfirmed_as_infinite": 0
+        },
+        "all_required": {
+          "count": 50,
+          "median_ms": 4992,
+          "p95_ms": 11296,
+          "unconfirmed_as_infinite": 0
+        }
+      },
+      "review_calls": 12,
+      "confirmed_attachments": 13,
+      "predictions_completed": 41,
+      "without_confirmed_necessary_reply": 0,
+      "exchange_skips": 0,
+      "confirmed_within_30s": 50,
+      "max_confirmed_ms": 22625.0,
+      "request_hook_orders": [
+        [
+          "enrichment",
+          "gallery"
+        ]
+      ],
+      "reply_characters": {
+        "count": 50,
+        "unconfirmed_as_infinite": 0,
+        "median": 20,
+        "p95": 64
+      },
+      "input_tokens": {
+        "count": 50,
+        "unconfirmed_as_infinite": 0,
+        "median": 5629,
+        "p95": 7817
+      }
+    },
+    "change_percent": {
+      "first": {
+        "median_ms": -27.06,
+        "p95_ms": -43.34
+      },
+      "all_required": {
+        "median_ms": -27.06,
+        "p95_ms": -43.34
+      },
+      "complete": {
+        "median_ms": -27.0,
+        "p95_ms": -43.31
+      }
+    },
+    "runs": [
+      {
+        "run": 1,
+        "change_percent_successful_only": {
+          "first": {
+            "median_ms": -26.73,
+            "p95_ms": -30.42
+          },
+          "all_required": {
+            "median_ms": -26.73,
+            "p95_ms": -30.42
+          },
+          "complete": {
+            "median_ms": -26.67,
+            "p95_ms": -30.39
+          }
+        },
+        "baseline": {
+          "attempts": 50,
+          "failures": 1,
+          "all_required_successful_only": {
+            "count": 49,
+            "median_ms": 6813,
+            "p95_ms": 16235,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 6844,
+            "p95_ms": 19938,
+            "unconfirmed_as_infinite": 1
+          }
+        },
+        "candidate": {
+          "attempts": 50,
+          "failures": 0,
+          "all_required_successful_only": {
+            "count": 50,
+            "median_ms": 4992,
+            "p95_ms": 11296,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 4992,
+            "p95_ms": 11296,
+            "unconfirmed_as_infinite": 0
+          }
+        }
+      }
+    ],
+    "aggregation": "Final optimized 50+50 comparison; all attempts included, unavailable required replies have infinite latency.",
+    "strict_zero_failure_gate_passed": false
+  },
+  "limitations": [
+    "QQ receipts and image conversion were simulated; no QQ/Bili test messages were sent.",
+    "The live bot and other normal machine workloads remained running; the upstream provider was not exclusive to these probes. Interleaved blocks limit drift but do not remove external load or establish a permanent latency guarantee.",
+    "The ordinary-text benchmark executes emoji selection and counts same-chain image receipts. Deferred decorations are verified in a separate real-model functional probe and regression tests; fake platform transport does not establish real QQ media-delivery latency or a production sending frequency.",
+    "External TTS/network transport latency is not included; voice behavior is covered by regression tests.",
+    "Original image bytes and six original Bili tool requests/descriptions/comments were not retained. Bili supplements use exact retained titles and confirmed share records.",
+    "The exchange replay preserves the archived human script; two initial sends lack an exactly retained trigger and are explicitly unreconstructed.",
+    "The first latency worker was interrupted after one complete paired block. Its two incomplete-block successes were archived separately; the incomplete block was rerun in full. Every counted block has both variants. The interruption cause is unconfirmed.",
+    "The existing watchdog restarted the live service during acceptance and loaded the candidate source already on disk. This incidental recovery was recorded separately from the later drained backup and verified persona publication.",
+    "An admission stress test intermittently exceeded its three-second wall limit on this loaded host; the frozen baseline also exceeded it. Full regression and a separate invariant diagnostic passed; original failures remain private.",
+    "The first two comparisons belong to the previous candidate scheduler and remain reported as nonpassing. A new fixed paired comparison was declared after the real admission-order fix; earlier slow and failed attempts were not substituted into the final revision."
+  ],
+  "unmet_criteria": [
+    "One retained language-quality dispute is not counted as passed.",
+    "The zero-failure comparison gate is not passed: at least one request encountered directly recorded upstream overload. Counts remain separate for each revision and unavailable answers remain failed attempts. This does not validate provider availability or a universal 30-second guarantee."
+  ],
+  "optional_media": {
+    "passed": true,
+    "errors": [],
+    "attempts": 12,
+    "confirmed_texts": 12,
+    "confirmed_images": 12,
+    "separate_images": 12,
+    "selected_after_text_was_ready": 6,
+    "remaining_tasks": 0,
+    "duplicate_images": 0,
+    "selection_counters": {
+      "triggered": 12,
+      "selected_prediction": 9,
+      "sent_separate": 12,
+      "selected_local_reply": 3
+    },
+    "qq_test_sends": 0,
+    "scope": "Real model and delayed image worker, fake OneBot receipts/image conversion. Isolated trigger=100% and separate=100% to exercise this branch; live probability/grace settings unchanged. This is functional coverage, not a frequency or QQ-network latency estimate."
+  },
+  "all_acceptance_criteria_passed": false,
+  "previous_candidate_performance": {
+    "expected_attempts_per_variant": 100,
+    "performance_review_mode": "speed_first",
+    "same_model_and_reasoning": true,
+    "qq_sends": 0,
+    "transport": "simulated confirmed OneBot receipt",
+    "aggregation": "Both complete 50+50 comparisons; all attempts included, unavailable required replies have infinite latency.",
+    "runs": [
+      {
+        "run": 1,
+        "change_percent_successful_only": {
+          "first": {
+            "median_ms": -24.91,
+            "p95_ms": -8.13
+          },
+          "all_required": {
+            "median_ms": -24.91,
+            "p95_ms": -8.13
+          },
+          "complete": {
+            "median_ms": -24.93,
+            "p95_ms": -8.13
+          }
+        },
+        "baseline": {
+          "attempts": 50,
+          "failures": 0,
+          "all_required_successful_only": {
+            "count": 50,
+            "median_ms": 7407,
+            "p95_ms": 21719,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 7407,
+            "p95_ms": 21719,
+            "unconfirmed_as_infinite": 0
+          }
+        },
+        "candidate": {
+          "attempts": 50,
+          "failures": 1,
+          "all_required_successful_only": {
+            "count": 49,
+            "median_ms": 5562,
+            "p95_ms": 19953,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 5640,
+            "p95_ms": 24453,
+            "unconfirmed_as_infinite": 1
+          }
+        }
+      },
+      {
+        "run": 2,
+        "change_percent_successful_only": {
+          "first": {
+            "median_ms": 2.05,
+            "p95_ms": 3.51
+          },
+          "all_required": {
+            "median_ms": 2.05,
+            "p95_ms": 3.51
+          },
+          "complete": {
+            "median_ms": 1.83,
+            "p95_ms": 3.6
+          }
+        },
+        "baseline": {
+          "attempts": 50,
+          "failures": 1,
+          "all_required_successful_only": {
+            "count": 49,
+            "median_ms": 6813,
+            "p95_ms": 18250,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 6914,
+            "p95_ms": 19359,
+            "unconfirmed_as_infinite": 1
+          }
+        },
+        "candidate": {
+          "attempts": 50,
+          "failures": 1,
+          "all_required_successful_only": {
+            "count": 49,
+            "median_ms": 6953,
+            "p95_ms": 18891,
+            "unconfirmed_as_infinite": 0
+          },
+          "all_required_all_attempts": {
+            "count": 50,
+            "median_ms": 6977,
+            "p95_ms": 22828,
+            "unconfirmed_as_infinite": 1
+          }
+        }
+      }
+    ],
+    "baseline": {
+      "attempts": 100,
+      "failures": [
+        {
+          "kind": "confirmed_upstream_overload",
+          "error": "RuntimeError"
+        }
+      ],
+      "failure_count": 1,
+      "external_failure_count": 1,
+      "application_failure_count": 0,
+      "first": {
+        "count": 100,
+        "median_ms": 7180,
+        "p95_ms": 21016,
+        "unconfirmed_as_infinite": 1
+      },
+      "all_required": {
+        "count": 100,
+        "median_ms": 7180,
+        "p95_ms": 21016,
+        "unconfirmed_as_infinite": 1
+      },
+      "complete": {
+        "count": 100,
+        "median_ms": 7196,
+        "p95_ms": 21062,
+        "unconfirmed_as_infinite": 1
+      },
+      "successful_only": {
+        "first": {
+          "count": 99,
+          "median_ms": 7156,
+          "p95_ms": 21016,
+          "unconfirmed_as_infinite": 0
+        },
+        "all_required": {
+          "count": 99,
+          "median_ms": 7156,
+          "p95_ms": 21016,
+          "unconfirmed_as_infinite": 0
+        }
+      },
+      "review_calls": 62,
+      "confirmed_attachments": 49,
+      "predictions_completed": 53,
+      "without_confirmed_necessary_reply": 1,
+      "exchange_skips": 0,
+      "confirmed_within_30s": 98,
+      "max_confirmed_ms": 42000.0,
+      "reply_characters": {
+        "count": 99,
+        "median_ms": 21,
+        "p95_ms": 50,
+        "unconfirmed_as_infinite": 0
+      },
+      "input_tokens": {
+        "count": 99,
+        "median_ms": 6004,
+        "p95_ms": 8168,
+        "unconfirmed_as_infinite": 0
+      }
+    },
+    "candidate": {
+      "attempts": 100,
+      "failures": [
+        {
+          "kind": "confirmed_upstream_overload",
+          "error": "RuntimeError"
+        },
+        {
+          "kind": "confirmed_upstream_overload",
+          "error": "RuntimeError"
+        }
+      ],
+      "failure_count": 2,
+      "external_failure_count": 2,
+      "application_failure_count": 0,
+      "first": {
+        "count": 100,
+        "median_ms": 6883,
+        "p95_ms": 22828,
+        "unconfirmed_as_infinite": 2
+      },
+      "all_required": {
+        "count": 100,
+        "median_ms": 6883,
+        "p95_ms": 22828,
+        "unconfirmed_as_infinite": 2
+      },
+      "complete": {
+        "count": 100,
+        "median_ms": 6898,
+        "p95_ms": 22844,
+        "unconfirmed_as_infinite": 2
+      },
+      "successful_only": {
+        "first": {
+          "count": 98,
+          "median_ms": 6774,
+          "p95_ms": 19953,
+          "unconfirmed_as_infinite": 0
+        },
+        "all_required": {
+          "count": 98,
+          "median_ms": 6774,
+          "p95_ms": 19953,
+          "unconfirmed_as_infinite": 0
+        }
+      },
+      "review_calls": 60,
+      "confirmed_attachments": 47,
+      "predictions_completed": 51,
+      "without_confirmed_necessary_reply": 2,
+      "exchange_skips": 0,
+      "confirmed_within_30s": 97,
+      "max_confirmed_ms": 41172.00000000594,
+      "reply_characters": {
+        "count": 98,
+        "median_ms": 20,
+        "p95_ms": 52,
+        "unconfirmed_as_infinite": 0
+      },
+      "input_tokens": {
+        "count": 98,
+        "median_ms": 5629,
+        "p95_ms": 7817,
+        "unconfirmed_as_infinite": 0
+      }
+    },
+    "change_percent": {
+      "first": {
+        "median_ms": -4.14,
+        "p95_ms": 8.62
+      },
+      "all_required": {
+        "median_ms": -4.14,
+        "p95_ms": 8.62
+      },
+      "complete": {
+        "median_ms": -4.14,
+        "p95_ms": 8.46
+      }
+    },
+    "strict_zero_failure_gate_passed": false,
+    "unmet_external_condition": "The zero-failure live-model gate is not passed. Both versions encountered directly recorded upstream overload; unavailable answers remain failed attempts. This does not validate provider availability or a universal 30-second guarantee."
+  },
+  "local_deployment_verified": true,
+  "settings_preserved": true,
+  "unauthenticated_history_rejected": true
+}

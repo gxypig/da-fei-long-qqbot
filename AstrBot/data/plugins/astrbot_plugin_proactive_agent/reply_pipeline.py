@@ -224,8 +224,10 @@ class ReplyPipelineMixin:
             if local:return {'image_ids':local}
             try:
                 from .work_scheduler import model_work
+                work=getattr(self,'_work',None)
+                admission=(work.decoration_work(event) if work and self.review_settings(event)['prediction'] else nullcontext())
                 async with asyncio.timeout(8):
-                    with model_work('auxiliary'):
+                    with model_work('auxiliary'),admission:
                         value=json_object(await self._generate_json(EMOJI_SELECTION_SYSTEM,
                             {'user':(event.get_message_str() or '')[:1000],'candidates':items},event.unified_msg_origin))
                 ids=value.get('image_ids',[])
@@ -268,7 +270,11 @@ class ReplyPipelineMixin:
         self._audit('local_repair',{'status':'template_fallback','issues':problems})
         event.set_extra('qqbot_send_path','template_receipt')
         from .persona_authority import fallback_text
-        return '' if state.get('proactive') and not state.get('required') else fallback_text('reply_failure',state)
+        from .reply_jobs import current_job
+        from .failure_policy import quiet_failure
+        job=current_job.get()
+        if job:job.execution_result='failed';job.reply_purpose='error_notification'
+        return '' if quiet_failure(job,state) else fallback_text('reply_failure',state)
 
     async def run_auxiliary(self, factory):
         from .work_scheduler import model_work

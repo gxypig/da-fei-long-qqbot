@@ -33,6 +33,9 @@ def install_fullchain(plugin):
     queue=plugin._reply_queue;ledger=plugin._delivery
     from .conversation_controls import ConversationControls
     controls=ConversationControls(ledger);queue.controls=controls;ledger.controls=controls;ledger.reply_queue=queue
+    from .exchange_state import Exchanges
+    plugin._exchanges=Exchanges(manager=getattr(plugin.context,'conversation_manager',None),enabled=lambda:plugin._cfg('natural_exchange_enabled',True))
+    controls.exchanges=plugin._exchanges
     queue.restore_echoes(ledger)
     old_convert=AiocqhttpAdapter.convert_message;old_execute=PipelineScheduler.execute
     old_process=ProcessStage.process;old_action=CQHttp.call_action
@@ -51,6 +54,11 @@ def install_fullchain(plugin):
         from .delivery_ledger import delivery_purpose
         job=current_job.get()
         if lease.active and job:job.execution_result='failed';job.reply_purpose='error_notification'
+        from .failure_policy import quiet_failure
+        if quiet_failure(job,event.get_extra('qqbot_character') or {}):
+            if job:job.reason='optional_generation_failed_without_notification'
+            plugin._audit('optional_generation_failure',{'status':'not_sent'})
+            return
         with delivery_purpose('error_notification'):
             return await old_error(stage,event,message)
 
@@ -136,6 +144,8 @@ def install_fullchain(plugin):
             queue.finish(job,ledger.state(job) if job.sends else 'failed',type(exc).__name__);raise
         finally:
             if job.state not in TERMINAL:queue.finish(job,ledger.state(job),'pipeline_completed' if job.sends else 'filtered_or_no_reply')
+            history=getattr(plugin,'_review_history',None)
+            if history:history.end_job(job)
             usage=getattr(plugin,'_meme_usage',None)
             if usage:
                 try:usage.finished(event,job.state)

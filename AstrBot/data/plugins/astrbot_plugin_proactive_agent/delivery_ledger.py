@@ -117,14 +117,20 @@ class DeliveryLedger:
             'purpose':current_purpose(),'submission_state':'not_submitted' if prepared else 'submitted',
             'optional':bool(optional_delivery.get() or job and job.state in {'confirmed','partial'} and not text.strip()),'reason':''}
         if job and job.event:
+            row['exchange']=job.event.get_extra('qqbot_exchange_decision') or {}
+            if job.event.get_extra('qqbot_gallery_result'):row['gallery_result']=job.event.get_extra('qqbot_gallery_result')
             plan=job.event.get_extra('qqbot_meme_plan')
             if plan:row['meme_plan']=plan
         operation=(delivery_scope.get() or {}).get('external_operation')
         from .send_checks import snapshot
         check=snapshot(origin,text)
         if check:row['send_check']={**check,'segment_id':id_,'submission_state':row['submission_state'],'delivery_state':row['state']}
+        from .review_history import linked
+        review_id=linked(origin)
+        if review_id:row['review_id']=review_id
         if isinstance(operation,dict):row['external_operation']={k:str(operation[k])[:100] for k in ('plugin','reservation','token') if k in operation}
         self.store.put(id_,row)
+        if getattr(self,'review_history',None):self.review_history.delivered(row)
         if job:job.sends.append(id_)
         return id_
 
@@ -132,13 +138,16 @@ class DeliveryLedger:
         row=self.store.rows[id_]
         result='not_sent' if state=='failed' and row.get('submission_state')=='not_submitted' else state
         updated={**row,'state':state,'delivery_result':result,'message_id':message_id,'reason':reason,'result_at':time.time(),'confirmed_at':time.time() if state=='confirmed' else None}
+        if row.get('gallery_result')=='found' and state=='failed':updated['gallery_result']='send_failed'
         if row.get('send_check'):updated['send_check']={**row['send_check'],'submission_state':row['submission_state'],'delivery_state':state,'delivery_result':result}
         self.store.put(id_,updated)
+        if getattr(self,'review_history',None):self.review_history.delivered(updated)
         if getattr(self,'controls',None):self.controls.delivered(updated)
         if getattr(self,'reply_queue',None):self.reply_queue.reconcile_echo(row.get('job_id'),state)
         job=current_job.get()
         if job and job.id==row.get('job_id'):
             job.delivery_result=result
+            if job.event and updated.get('gallery_result')=='send_failed':job.event.set_extra('qqbot_gallery_result','send_failed')
             if row.get('purpose')=='error_notification':job.execution_result='failed';job.reply_purpose='error_notification'
         if row.get('state') in self.stats:self.stats[row['state']]=max(0,self.stats[row['state']]-1)
         if state in self.stats:self.stats[state]+=1

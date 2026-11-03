@@ -11,6 +11,7 @@ def begin_task():return _check.set(None)
 def end_task(token):_check.reset(token)
 _QUOTES=re.compile(r'```[\s\S]*?```|“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"|(?m:^>[^\n]*)')
 _INTERNAL=re.compile(r'Traceback \(most recent call last\):|(?m:^\s*File "[^"\n]+", line \d+)|'
+                     r'\[\[EXCHANGE:|\[\[[SK]\]\]|'
                      r'(?i:sk-[a-zA-Z0-9]{20,}|Authorization:\s*Bearer\s+\S+)|'
                      r'(?m:^\s*(?:<tool_call>|<function_call>|\[QQBOT_[A-Z_]+\]))')
 _PLACEHOLDER=re.compile(r'^(?:None|null|undefined|\{(?:reply|response|content|text)\}|<empty>|\[待生成\])$',re.I)

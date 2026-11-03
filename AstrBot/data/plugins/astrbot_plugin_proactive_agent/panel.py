@@ -40,6 +40,7 @@ FIELDS = {
 }
 LEGACY_FIELDS=set(FIELDS)
 FIELDS['reply_review_enabled']=False
+FIELDS.update(review_history_days=30,review_history_limit=10000)
 FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
@@ -101,6 +102,7 @@ def validate(data):
     if values["review_policy"] not in ("all", "speed_first"):
         raise ValueError("审查策略只能选择 all 或 speed_first")
     for key, minimum, maximum, label in [
+        ('review_history_days',1,365,'审阅记录保留天数'),('review_history_limit',100,100000,'审阅记录保留条数'),
         ("reply_audit_sample_percent", 0, 100, "回复审计抽样比例"),
         ("emoji_late_grace_seconds", 0, 10, "表情包迟到宽限秒数"),
         ("reply_latency_target_seconds", 5, 120, "正文回复目标秒数"),
@@ -213,6 +215,7 @@ class PanelMixin:
             'features':{'persona_editor':bool(getattr(self,'_personas',None)),
                 'session_mute':bool(getattr(self,'_mutes',None)),
                 'meme_usage':bool(getattr(self,'_meme_usage',None)),
+                'review_history':bool(getattr(self,'_review_history',None)),
                 'delivery_history':bool(getattr(self,'_delivery',None))},
             'note':'接口可用性与QQ、模型连接状态独立显示'})
 

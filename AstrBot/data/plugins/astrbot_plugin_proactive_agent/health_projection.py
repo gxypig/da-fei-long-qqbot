@@ -7,6 +7,8 @@ def runtime_health(plugin):
     delivery['suspended_replies']=len(getattr(queue,'suspended',{}))
     delivery['backlog_delayed']=delivery['oldest_reply_wait_seconds']>60
     delivery['ordinary_delivery_ok']=not delivery.get('unresolved_necessary')
+    history=getattr(plugin,'_review_history',None)
+    if history:delivery['review_history']=history.status()
     backups=getattr(plugin,'_backups',None)
     delivery['backup']={'enabled':plugin._cfg('hourly_data_backup_enabled',True),
         **(backups.health() if backups and hasattr(backups,'health') else dict(backups.state) if backups else {'status':'not_started'})}

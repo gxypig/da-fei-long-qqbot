@@ -33,13 +33,13 @@ class CharacterState:
         now = self.clock()
         key = (str(origin), str(sender))
         self.rows = {k: v for k, v in self.rows.items() if now - v[0] < 7200}
-        previous = self.rows.get(key, (now, "cheeky"))[1]
+        previous = self.rows.get(key, (now, "neutral"))[1]
         if _SERIOUS.search(text):
             mood = "serious"
         elif _STOP.search(text) or previous == "stop" and not re.search(r"(?:继续|再来|随便).{0,4}(?:损|怼|开玩笑)", text):
             mood = "stop"
         else:
-            mood = "cheeky"
+            mood = "neutral"
         self.rows[key] = (now, mood)
         if len(self.rows) > 512:
             self.rows.pop(min(self.rows, key=lambda k: self.rows[k][0]))
@@ -109,7 +109,7 @@ def proactive_note(origin, cfg, recent=(), persona="",binding=None):
     from .conversation_review import bind_request
     father = str(cfg("father_qq", "")).strip()
     state = {"is_father": bool(father and origin.endswith(":FriendMessage:" + father)),
-             "mood": "cheeky", "emoji_allowed": random.random() * 100 < int(cfg("emoji_probability", 18)),
+             "mood": "neutral", "emoji_allowed": random.random() * 100 < int(cfg("emoji_probability", 18)),
              "visual_intent": "none", "proactive": True, "persona_prompt": persona}
     state['father_address_allowed'] = state['is_father'] and random.random() * 100 < int(cfg('father_address_probability', 20))
     if binding:state.update(binding)

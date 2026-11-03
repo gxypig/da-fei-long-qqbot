@@ -47,12 +47,17 @@ class ConversationControls:
             from .visual_intent import generation_kind
             if generation_kind(job.text)!='none' or re.search(r'(?:发|给|找|来|搜).{0,8}(?:图|表情包)',job.text):
                 if state.get('optional_images_stopped'):self.ledger.store.put(key,{**state,'optional_images_stopped':False,'closed_until':0})
-        return None
+        exchange=getattr(self,'exchanges',None)
+        return exchange.before(job) if exchange else None
 
     def optional_image_allowed(self,origin,sender):
-        return not self.ledger.store.rows.get(_key(origin,sender),{}).get('optional_images_stopped')
+        exchange=getattr(self,'exchanges',None)
+        return (not self.ledger.store.rows.get(_key(origin,sender),{}).get('optional_images_stopped')
+                and not (exchange and exchange.enabled() and exchange.view(origin,sender).get('shorten')))
 
     def delivered(self,row):
+        exchange=getattr(self,'exchanges',None)
+        if exchange:exchange.confirmed(row)
         if row.get('state')!='confirmed' or not row.get('sender'):return
         closing=str(row.get('text',''))
         confirmed_closing=bool(re.search(r'晚安|好梦|拜拜|再见|明天见|下次聊|早点睡|去睡',closing)) and not re.search(r'(?:别|不要|先不)(?:说)?(?:晚安|睡)|[?？]|等等|等下',closing)

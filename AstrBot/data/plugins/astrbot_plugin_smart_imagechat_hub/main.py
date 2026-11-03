@@ -210,16 +210,24 @@ class SmartImageSenderPlugin(
         self._advance_latency_turn(event)
         event.should_call_llm(True)
 
-        await self._sync_library(caption_mode="none")
-        profile, candidates = self._rank_search_candidates(
-            message,
-            self._library_candidates(),
-        )
+        from data.plugins.astrbot_plugin_proactive_agent.persona_authority import plugin_role,fallback_text
+        await plugin_role(event.unified_msg_origin,'gallery')
+        try:
+            await self._sync_library(caption_mode="none")
+            profile, candidates = self._rank_search_candidates(message,self._library_candidates())
+        except Exception:
+            logger.exception('astrbot_plugin_smart_imagechat_hub: local gallery search failed')
+            event.set_extra('qqbot_gallery_result','search_failed')
+            yield event.plain_result(fallback_text('gallery_search_failed'))
+            event.stop_event()
+            return
         if not candidates:
-            yield event.plain_result(self._cfg_str("empty_library_reply"))
+            event.set_extra('qqbot_gallery_result','empty')
+            yield event.plain_result(fallback_text('gallery_empty'))
             event.stop_event()
             return
 
+        search_failed=False
         try:
             decision = await self._analyze_request(
                 event,
@@ -233,6 +241,7 @@ class SmartImageSenderPlugin(
                 exc,
                 exc_info=True,
             )
+            search_failed=True
             fallback = self._fallback_match(candidates)
             decision = {
                 "matched": bool(fallback),
@@ -244,65 +253,44 @@ class SmartImageSenderPlugin(
 
         image_item = self._select_image(decision, candidates)
         if not image_item:
-            if self._cfg_bool("llm_reply_when_not_found"):
-                yield await self._request_llm_with_persona(
-                    event,
-                    self._not_found_prompt(message, candidates),
-                )
-            else:
-                yield event.plain_result(self._cfg_str("not_found_reply"))
+            kind='search_failed' if search_failed else 'unmatched'
+            event.set_extra('qqbot_gallery_result',kind)
+            # A free caption cannot override an unmatched/failed retrieval.
+            # This text is compiled from the selected persona's status wording;
+            # captions are accepted only when bound to an actual selected image.
+            yield event.plain_result(fallback_text('gallery_search_failed' if search_failed else 'gallery_missing'))
             event.stop_event()
             return
 
         image_path = self._abs_plugin_data_path(image_item["rel_path"])
         if not image_path.is_file():
             await self._sync_library(force=True, caption_mode="background")
-            yield event.plain_result(self._cfg_str("not_found_reply"))
+            event.set_extra('qqbot_gallery_result','unmatched')
+            yield event.plain_result(fallback_text('gallery_missing'))
             event.stop_event()
             return
 
-        image_tags = self._tags_from_item(image_item)
-        send_image_path, cleanup_paths = await self._prepare_send_image_path(
-            image_path,
-            image_tags,
-        )
-        cleanup_paths = self._defer_send_image_style_cleanup(event, cleanup_paths)
+        cleanup_paths=[]
         try:
-            if self._cfg_bool("use_custom_reply"):
-                reply_text = self._render_custom_reply(image_item, decision)
-                chain = []
-                if reply_text:
-                    chain.append(Plain(reply_text))
-                chain.append(Image.fromFileSystem(str(send_image_path)))
-                yield event.chain_result(chain)
-                await self._after_plugin_sent_image_for_meme_combat(
-                    event,
-                    str(image_path),
-                    source="user_search",
-                    defer_burst=True,
-                )
-            else:
-                request = await self._request_llm_with_persona(
-                    event,
-                    self._found_prompt(message, image_item, decision),
-                )
-                request.extra_user_content_parts.append(
-                    TextPart(
-                        text=(
-                            "<astrbot_plugin_smart_imagechat_hub>"
-                            "已匹配到本地图片，系统会在回复后发送图片。"
-                            "</astrbot_plugin_smart_imagechat_hub>"
-                        )
-                    )
-                )
-                yield request
-                yield event.chain_result([Image.fromFileSystem(str(send_image_path))])
-                await self._after_plugin_sent_image_for_meme_combat(
-                    event,
-                    str(image_path),
-                    source="user_search",
-                    defer_burst=True,
-                )
+            image_tags = self._tags_from_item(image_item)
+            send_image_path, cleanup_paths = await self._prepare_send_image_path(image_path,image_tags)
+            cleanup_paths = self._defer_send_image_style_cleanup(event, cleanup_paths)
+        except Exception:
+            self._cleanup_temp_paths(cleanup_paths)
+            logger.exception('astrbot_plugin_smart_imagechat_hub: preparing matched image failed')
+            event.set_extra('qqbot_gallery_result','send_failed')
+            yield event.plain_result(fallback_text('gallery_send_failed'))
+            event.stop_event()
+            return
+        try:
+            event.set_extra('qqbot_gallery_result','found')
+            reply_text=self._render_custom_reply(image_item,decision) if self._cfg_bool('use_custom_reply') else self._caption_for_image(image_item,decision)
+            chain=([Plain(reply_text)] if reply_text else [])+[Image.fromFileSystem(str(send_image_path))]
+            yield event.chain_result(chain)
+            await self._after_plugin_sent_image_for_meme_combat(event,str(image_path),source='user_search',defer_burst=True)
+        except Exception:
+            event.set_extra('qqbot_gallery_result','send_failed')
+            raise
         finally:
             self._cleanup_temp_paths(cleanup_paths)
 
@@ -316,7 +304,7 @@ class SmartImageSenderPlugin(
     async def on_decorating_result(self, event: AstrMessageEvent):
         await self._maybe_append_proactive_emoji(event)
 
-    @filter.on_llm_request(priority=20)
+    @filter.on_llm_request(priority=-110)
     async def on_llm_request(self, event: AstrMessageEvent, req):
         self._advance_latency_turn(event)
         if is_generation_request(event.get_message_str() or ""):

@@ -28,6 +28,9 @@ def active_sources(plugin):
     add('configured_proactive','已保存的主动人格',plugin._cfg('personality',''),'plugin-config:personality','proactive')
     add('first_generation','首次生成的表达习惯',EXPRESSION_GUIDANCE,'persona_authority.py:EXPRESSION_GUIDANCE','chat')
     add('punctuation','聊天标点约定',PUNCTUATION_RULE,'chat_punctuation.py:PUNCTUATION_RULE','chat')
+    from .persona_projection import NATURAL,IDENTITY_GUIDANCE
+    add('natural_exchange','自然接话与收束',NATURAL,'persona_projection.py:NATURAL','chat')
+    add('identity_chat','角色身份的聊天口吻',IDENTITY_GUIDANCE,'persona_projection.py:IDENTITY_GUIDANCE','chat')
     base=Path(__file__).parent
     import json
     imported=base/'persona_import_sources.json'
@@ -55,6 +58,7 @@ def active_sources(plugin):
     except (AttributeError,TypeError):pass
     for row in rows:
         row['epoch']=2 if row['id'] in {'first_generation','punctuation','chat:generation_example','gallery:replies'} else 1
+        if row['id'] in {'natural_exchange','identity_chat'}:row['epoch']=3
         scene=row.get('scene', 'chat')
         row['destination']=scene if scene in {'chat','proactive','schedule','qzone','bili','gallery','image','review'} else 'chat'
     # Frozen import snapshots may share an ID with a current source. Keep the

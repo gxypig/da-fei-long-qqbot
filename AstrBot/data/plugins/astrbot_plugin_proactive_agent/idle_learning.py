@@ -234,6 +234,9 @@ class IdleLearning:
         self._last_snapshot = None
         self._next_prune = 0.0
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.quality_exclusions=set(json.loads((self.path.parent/'quality-exclusions.json').read_text('utf-8')).get('text_hashes',[]))
+        except FileNotFoundError:self.quality_exclusions=set()
         self._persistence=SQLiteSnapshot(self.path)
         db = self._persistence.db
         db.row_factory = sqlite3.Row
@@ -301,6 +304,14 @@ class IdleLearning:
                             db.execute('UPDATE '+table+' SET payload=? WHERE id=?',(_json(payload),row['id']))
                             if table=='jobs':db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(row['id'],))
                     self._set_meta('removed_counterattack_v1',True)
+                if self.quality_exclusions:
+                    for table in ('jobs','cases'):
+                        for row in db.execute('SELECT id,payload FROM '+table).fetchall():
+                            payload=json.loads(row['payload'])
+                            if hashlib.sha256(str(payload.get('text','')).strip().encode()).hexdigest() not in self.quality_exclusions:continue
+                            payload.update(exclude_evidence=True,exclusion_reason='audited_naturalness_case')
+                            db.execute('UPDATE '+table+' SET payload=? WHERE id=?',(_json(payload),row['id']))
+                            if table=='jobs':db.execute("UPDATE jobs SET status='quarantined' WHERE id=?",(row['id'],))
             self._prune()
         except BaseException:
             db.close()
@@ -414,6 +425,7 @@ class IdleLearning:
     def enqueue_review(self, text, recent, origin, state, force=False, corrected=None):
         if not isinstance(text, str) or not text.strip() or len(text) > 1200:
             return False
+        if hashlib.sha256(text.strip().encode()).hexdigest() in self.quality_exclusions:return False
         if corrected is not None and (not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 1200):
             return False
         job=current_job.get()
@@ -444,6 +456,11 @@ class IdleLearning:
         job.learning_finalized=True
         actual=ledger.confirmed_text(job)
         if not actual:return
+        # A stalled exchange is not independent evidence of naturalness. Its
+        # delivery remains in the journal; it simply cannot train style policy.
+        exchange=job.event.get_extra('qqbot_exchange') if getattr(job,'event',None) else None
+        if exchange and exchange.get('rounds_5m',0)>=4:
+            job.learning_samples=[];return
         source={'platform':job.origin.split(':',1)[0],'account':job.sender,'kind':'unverified'}
         if profiles:source['kind']=profiles.source_label(source['platform'],source['account'])
         for text,recent,origin,state,force,corrected in getattr(job,'learning_samples',[]):

@@ -30,7 +30,7 @@ class CharacterTests(unittest.TestCase):
     def test_retired_reaction_cannot_return_from_old_state(self):
         cache=CharacterState()
         cache.rows[('g','1')]=(cache.clock(),'timid')
-        self.assertEqual(cache.for_message('g','1','你好',{}.get)['mood'],'cheeky')
+        self.assertEqual(cache.for_message('g','1','你好',{}.get)['mood'],'neutral')
 
     def test_father_uses_transport_identity_not_claim_or_nickname(self):
         state = CharacterState(roll=lambda:0)
@@ -42,11 +42,11 @@ class CharacterTests(unittest.TestCase):
     def test_retired_setting_ignored_but_stop_still_scoped(self):
         state=CharacterState();cfg={'counterattack_apology_enabled':True}.get
         for text in ['你再嘴欠试试，揍你','算你识相','今天吃啥']:
-            self.assertEqual(state.for_message('g','1',text,cfg)['mood'],'cheeky')
+            self.assertEqual(state.for_message('g','1',text,cfg)['mood'],'neutral')
         self.assertEqual(state.for_message('g','1','不要再损我了',cfg)['mood'],'stop')
-        self.assertEqual(state.for_message('g','2','今天吃啥',cfg)['mood'],'cheeky')
+        self.assertEqual(state.for_message('g','2','今天吃啥',cfg)['mood'],'neutral')
         self.assertEqual(state.for_message('g','1','今天吃啥',cfg)['mood'],'stop')
-        self.assertEqual(state.for_message('g','1','继续开玩笑吧',cfg)['mood'],'cheeky')
+        self.assertEqual(state.for_message('g','1','继续开玩笑吧',cfg)['mood'],'neutral')
 
     def test_distress_takes_priority_over_mockery(self):
         state = CharacterState(roll=lambda:0).for_message("g", "1", "闭嘴，我受伤流血了", {}.get)

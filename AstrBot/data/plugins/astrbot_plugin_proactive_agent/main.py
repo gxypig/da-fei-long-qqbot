@@ -100,6 +100,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._live_journal = LiveJournal(self._data_dir / 'live-messages.sqlite3')
         self._restore_live = self._restore_chat_lane = self._restore_context_window = None
         self._reviewer = ReplyReviewer(self._generate_json, self._audit, enabled=lambda:self.review_settings()['enabled'])
+        from .review_history import ReviewHistory
+        self._review_history=ReviewHistory(self._data_dir/'review-history.sqlite3',self._cfg)
+        self._reviewer.history=self._review_history
+        self._delivery.review_history=self._review_history
         from .memewiki_engine import MemeWikiEngine
         self._memory = MemeMemory(self._data_dir / "meme_memory.json", self._generate_json, self._search_meme, self._audit,
                                   wiki=MemeWikiEngine(self._data_dir/'memewiki'/'memes.db'))
@@ -135,6 +139,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if getattr(self._memory,'wiki',None):await self._memory.wiki.start()
         await self._sent_memory.start()
         await self._delivery.start()
+        await self._review_history.start()
         await self._meme_usage.start(self._delivery)
         await self._life.start()
         self._sent_memory.legacy_before=self._delivery.legacy_cutoff
@@ -146,6 +151,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._restore_delivery_history = install_delivery_history(self)
         self.register_panel()
         register_fullchain_panel(self)
+        from .review_history import register as register_review_history
+        register_review_history(self)
         from .round2_panel import register_round2_panel
         register_round2_panel(self)
         from .persona_panel import register_persona_panel
@@ -214,9 +221,11 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         delivery=runtime_health(self)
         checks['necessary_delivery']=delivery['ordinary_delivery_ok']
         checks['reply_backlog']=not delivery['backlog_delayed']
+        if getattr(self,'_review_history',None):checks['review_history']=not self._review_history.status()['current_fault']
         return jsonify({"status": "ok", "data": {"version": VERSION, "checks": checks,
             "performance": self.performance_status(),
             "incoming_visual": dict(getattr(getattr(self,'_incoming_visual',None),'stats',{})),
+            "review_history": self._review_history.status() if getattr(self,'_review_history',None) else None,
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
             "group_wake_words": self._cfg("group_wake_words", "大肥龙,肥龙"),
@@ -306,6 +315,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if getattr(self,'_restore_voice',None):self._restore_voice()
         if self._restore_delivery:self._restore_delivery()
         await self._delivery.close()
+        if getattr(self,'_review_history',None):await self._review_history.close()
         if getattr(self,'_meme_usage',None):await self._meme_usage.close()
         if getattr(self,'_mutes',None):await self._mutes.close()
         await self._sent_memory.close()
@@ -944,6 +954,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         from .persona_authority import bind_persona,PRIORITY,functional_style,generation_example
         state = self.character_context(event)
         await bind_persona(self,event,req,state)
+        from .persona_projection import dragon_identity
+        req.system_prompt=(req.system_prompt or '')+dragon_identity(event.get_message_str(),state)
+        exchanges=getattr(self,'_exchanges',None)
+        if exchanges:req.system_prompt=(req.system_prompt or '')+exchanges.prepare(event,state)
         req.system_prompt=(req.system_prompt or '')+'\n'+functional_style(state)+'\n'+PUNCTUATION_RULE+PRIORITY
         profiles=getattr(self,'_ai_profiles',None)
         if profiles:
@@ -1099,7 +1113,25 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         state["generated_image"] = has_image and bool(getattr(response, "qqbot_generated_image", False))
         from .send_checks import own_style,issues
         raw=response.completion_text or ''
+        exchanges=getattr(self,'_exchanges',None)
+        if exchanges:
+            raw,decision=exchanges.parse(event,raw)
+            if decision and decision['action']=='skip':
+                event.set_extra('qqbot_exchange_skipped',True)
+                event.stop_event();response.completion_text=''
+                if chain:chain.chain.clear()
+                from .reply_jobs import current_job
+                job=current_job.get()
+                if job:job.execution_result='ignored';job.reason='generation_chose_no_useful_reply'
+                return
+            if decision and decision.get('invalid_skip'):
+                # Preserve explicit requests if the model violates the control
+                # contract. This exceptional repair uses the existing local
+                # repair budget; normal replies add no model call.
+                raw=await self.repair_local_output(event,raw,['明确请求被错误跳过，请正常回答当前请求'],messages=getattr(run_context,'messages',()))
         response.completion_text = own_style(raw,state,mode)
+        from .review_history import observe_format
+        observe_format(self,event.unified_msg_origin,raw,response.completion_text,state,mode)
         media=sum(type(p).__name__ not in {'Plain','At','Reply'} for p in chain.chain) if chain else 0
         problems=issues(response.completion_text,state=state,mode=mode,media=media)
         if problems:
@@ -1190,7 +1222,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 raise
             from .persona_authority import fallback_text
             state=event.get_extra('qqbot_character') or {}
-            if state.get('proactive') and not state.get('required'):
+            from .failure_policy import quiet_failure
+            if quiet_failure(job,state):
+                if job:job.execution_result='failed';job.reason='optional_reply_failed_without_notification'
+                self._audit('review_failure_skipped',{'error':type(exc).__name__})
                 event.stop_event();response.completion_text=''
                 if chain:chain.chain.clear()
                 return

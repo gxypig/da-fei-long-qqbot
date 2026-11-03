@@ -93,6 +93,8 @@ def bind_request(origin, recent, management, character=None, review_settings=Non
     if review_settings is not None:bind(review_settings)
     _receipt.set(None)
     _approved.set(None)
+    from .review_history import reset_link
+    reset_link()
     _request_scope.set({"origin": origin, "recent": list(recent), "management": management,
                         "character": character or {}, "request_id": uuid.uuid4().hex,
                         "review_settings":review_settings or snapshot()})
@@ -153,6 +155,7 @@ class ReplyReviewer:
     def __init__(self, generate, audit, timeout=55, enabled=lambda:True):
         self.generate, self.audit, self.timeout = generate, audit, timeout
         self.enabled=enabled
+        self.history=None
         self.stats = {"checked": 0, "rewritten": 0, "failed": 0, "model_calls": 0, "guard_rejections": 0}
         self._slots = asyncio.Semaphore(3)
 
@@ -171,9 +174,17 @@ class ReplyReviewer:
         async with parking:
             shared=self._inflight.get(key)
             if shared is None:
+                history=self.history
+                state=character if character is not None else scope.get('character',{})
+                original=scope.get('review_draft',{})
+                original=original.get('original',text) if original.get('formatted')==text else text
+                record_id=history.begin(original,text,origin=origin,state=state,mode=mode,settings=snapshot(),scope=scope,job=job) if history else None
                 task=asyncio.create_task(self._review(text,origin=origin,recent=recent,mode=mode,media=media,
-                    prior_replies=prior_replies,character=character,on_verdict=on_verdict),name='qqbot-full-review')
-                shared={'task':task,'waiters':0};self._inflight[key]=shared
+                    prior_replies=prior_replies,character=character,on_verdict=on_verdict,record_id=record_id),name='qqbot-full-review')
+                shared={'task':task,'waiters':0,'record_id':record_id};self._inflight[key]=shared
+            if shared.get('record_id'):
+                from .review_history import set_link
+                set_link(origin,shared['record_id'],scope.get('request_id'))
             shared['waiters']+=1
             try:return await asyncio.shield(shared['task'])
             finally:
@@ -183,7 +194,7 @@ class ReplyReviewer:
                     if not shared['task'].done():shared['task'].cancel()
                     await asyncio.gather(shared['task'],return_exceptions=True)
 
-    async def _review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None, on_verdict=None):
+    async def _review(self, text, *, origin, recent=(), mode="chat", media=0, prior_replies=(), character=None, on_verdict=None, record_id=None):
         if not text.strip():return text
         from .send_checks import own_style,issues as hard_issues
         started=time.monotonic();acquired=False
@@ -194,6 +205,7 @@ class ReplyReviewer:
             state=character if character is not None else (request_scope(origin) or {}).get('character',{})
             candidate=own_style(text,state,mode)
             formatted=candidate;feedback=[];extended=False
+            if self.history and record_id:self.history.update(record_id,formatted=formatted,format_changed=hashlib.sha256(formatted.encode()).hexdigest()!=self.history.store.rows.get(record_id,{}).get('original_sha256',hashlib.sha256(text.encode()).hexdigest()))
             urls=re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',text)
             async with asyncio.timeout_at(execution+self.timeout) as budget:
                 for attempt in range(3):
@@ -202,6 +214,7 @@ class ReplyReviewer:
                     if urls and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',candidate)!=urls:
                         issues.append('必须逐字保留原稿B站网址')
                     self.stats['model_calls']+=1
+                    round_started=time.monotonic()
                     from .work_scheduler import review_verdict_observer
                     with review_verdict_observer(on_verdict) as arrived:
                         raw=await self.generate(REVIEW_FUNCTIONAL+"\n"+PUNCTUATION_RULE+
@@ -212,13 +225,17 @@ class ReplyReviewer:
                              '同一会话最近机器人回复（避免重复句式）':[str(x)[:200] for x in list(prior_replies)[-3:]],
                              '原稿':text,'待发文字':candidate,'附件数':media,'审阅轮次':attempt+1,
                              '不可改变的事实':{'网址':urls,'工具':state.get('tool_facts',[]),
-                                 '原样文本':state.get('verbatim_text'),'语音记录':state.get('voice_receipts','')},
+                                 '原样文本':state.get('verbatim_text'),'语音记录':state.get('voice_receipts',''),
+                                 '图库结果':state.get('gallery_result')},
+                             '交流状态':state.get('exchange',{}),'身份场景':bool(state.get('identity_scene')),
                              '必须修正的问题':list(dict.fromkeys(issues+feedback))},origin)
                         arrived()
                     data=json_object(raw)
+                    if self.history and record_id:self.history.round(record_id,candidate,data,round((time.monotonic()-round_started)*1000))
                     if any(type(data.get(k)) is not bool for k in ('pass','natural','chat_fit')):raise ValueError('Missing review judgements')
                     if data['pass'] and data['natural'] and data['chat_fit'] and not issues:
                         self.stats['checked']+=1;self.stats['rewritten']+=int(candidate!=text)
+                        if self.history and record_id:self.history.update(record_id,approved=candidate,result='passed',ai_changed=candidate!=formatted,elapsed_ms=round((time.monotonic()-started)*1000),finished_at=time.time())
                         self.audit('review',{'status':'rewritten' if candidate!=text else 'passed','rounds':attempt+1,'mode':mode,
                             'model_rewritten':candidate!=formatted,'format_changed':formatted!=text,
                             'queue_ms':round((execution-started)*1000),'extended':extended,
@@ -235,7 +252,11 @@ class ReplyReviewer:
                         replacement=re.sub(r'https?://[^\s<>]+','',replacement).strip()+'\n'+'\n'.join(urls)
                     candidate=own_style(replacement,state,mode)
                     if len(candidate)>1200:raise ValueError('Review replacement too long')
+        except asyncio.CancelledError:
+            if self.history and record_id:self.history.update(record_id,result='cancelled',failure='cancelled',elapsed_ms=round((time.monotonic()-started)*1000))
+            raise
         except Exception as exc:
+            if self.history and record_id:self.history.update(record_id,result='failed',failure=type(exc).__name__,elapsed_ms=round((time.monotonic()-started)*1000))
             self.stats['failed']+=1
             self.audit('review',{'status':'blocked','mode':mode,'error':type(exc).__name__,'elapsed_ms':round((time.monotonic()-started)*1000)})
             raise ReviewUnavailable('发送前审阅暂不可用，原稿未发送') from exc
@@ -316,6 +337,8 @@ class OutboundGuard:
         from .send_checks import normalize,issues,record
         from .reply_jobs import current_job
         job=current_job.get();event=getattr(job,'event',None)
+        if event and event.get_extra('qqbot_gallery_result'):
+            state={**state,'gallery_result':event.get_extra('qqbot_gallery_result')}
         if slots and state.get('verbatim_text') is not None:
             expected=state['verbatim_text'];ledger=getattr(self.plugin,'_delivery',None)
             prior=''.join(ledger.store.rows.get(id_,{}).get('text','') for id_ in job.sends
@@ -332,6 +355,8 @@ class OutboundGuard:
             from .voice_memory import spoken_text
             text=spoken_text(message,bot,origin)
         checked=normalize(text,state,mode) if slots else text
+        from .review_history import observe_format
+        observe_format(self.plugin,origin,text,checked,state,mode)
         problems=issues(checked,state=state,mode=mode,media=media)
         # Foreign forward nodes and genuine media-only messages are not empty replies.
         if not slots and not text:
@@ -349,6 +374,8 @@ class OutboundGuard:
             checked=revised;path='full_review'
         elif not settings['enabled'] and path not in {'local_repair','template_receipt'}:
             path='local_repair' if checked!=text else 'review_off'
+        if path=='prediction_direct':
+            observe_format(self.plugin,origin,text,checked,state,mode,final_unreviewed=True)
         record(origin,checked,settings,state=state,recent=recent,path=path,
                local=problems,reviewed=settings['enabled'] and path not in {'prediction_direct','template_receipt'})
         if checked != text:

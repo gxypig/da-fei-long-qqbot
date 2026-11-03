@@ -33,4 +33,6 @@ def is_library_request(text: str) -> bool:
         return False
     image_word = re.search(r"表情包|梗图|动图|照片|美图|图片|[张个幅].{0,8}图|meme|sticker|picture|photo", text)
     request_word = re.search(r"找|搜|来|发|给|挑|选|有没有|求|分享|send|find|show|give", text)
-    return bool(image_word and request_word) or text in {"表情包", "梗图"}
+    soft_request = re.search(r"(?:该|应该)有.{0,20}(?:表情包|梗图|动图)(?:了吧|了|吧|呀|呢)?[?？!！\s]*$",text)
+    if re.search(r"(?:不该|不应该|不应当)有.{0,20}(?:表情包|梗图|动图)",text):soft_request=None
+    return bool(image_word and (request_word or soft_request)) or text in {"表情包", "梗图"}

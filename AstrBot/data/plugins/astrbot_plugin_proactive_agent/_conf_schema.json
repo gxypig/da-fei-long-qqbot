@@ -422,5 +422,29 @@
     "description": "长截图与小字识别最多补充原图局部数（0至6，每次请求总上限）",
     "type": "int",
     "default": 4
+  },
+  "review_history_days": {
+    "description": "审阅记录保留天数",
+    "type": "int",
+    "default": 30,
+    "hint": "独立本地记录，不增加模型请求；1—365天"
+  },
+  "review_history_limit": {
+    "description": "审阅记录数量上限",
+    "type": "int",
+    "default": 10000,
+    "hint": "与保留天数同时生效；100—100000条"
+  },
+  "natural_exchange_enabled": {
+    "description": "重复话题自然收束",
+    "type": "bool",
+    "default": true,
+    "hint": "可独立回退，不改变模型、回复概率或权限"
+  },
+  "persona_scene_projection_enabled": {
+    "description": "人格按场景取用",
+    "type": "bool",
+    "default": true,
+    "hint": "可独立回退，不改变模型、回复概率或权限"
   }
 }

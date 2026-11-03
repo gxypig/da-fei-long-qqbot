@@ -31,7 +31,10 @@
   const deliveryPrev=button(deliveryPager,'delivery-prev','上一页',()=>{if(deliveryCursors.length>1)loadDelivery(deliveryCursors.slice(0,-1));});
   const deliveryPage=el('span');deliveryPager.append(deliveryPage);
   const deliveryNext=button(deliveryPager,'delivery-next','下一页',()=>{if(deliveryNextCursor)loadDelivery([...deliveryCursors,deliveryNextCursor]);});
-  const showRun=subviews($('performance'),'queue',[['queue','回复队列',queue],['speed','速度与审查',speed],['delivery','投递记录',delivery]]);
+  const reviews=el('div');reviews.append(el('h2','审阅记录'),el('p','原稿、各轮修改、通过稿与实际发送分别展示；仅本机保存，查看不重发'));
+  for(const [host,label] of [[reviews,'打开审阅记录'],[speed,'查看改写记录']]){const b=el('button',label);b.type='button';b.dataset.subview='reviews';host.append(b);}
+  $('performance').append(reviews);
+  const showRun=subviews($('performance'),'queue',[['queue','回复队列',queue],['speed','速度与审查',speed],['delivery','投递记录',delivery],['reviews','审阅记录',reviews]]);
   pending.onclick=()=>{nav.querySelector('[data-tab="performance"]').click();showRun('queue');};
   const idle=el('div');while($('learning').firstChild)idle.append($('learning').firstChild);$('learning').append(idle);
   const memes=$('memes');memes.classList.remove('tab-panel');$('learning').append(memes);
@@ -96,6 +99,7 @@
     for(const r of d.unresolved_necessary||[])line(healthDelivery,'尚待解决',`${r.origin} · ${r.state==='unknown'?'回执未知，不自动重发':'必要回复失败'} · ${new Date((r.result_at||r.at)*1000).toLocaleString()}`);
     if(d.backup)line(healthDelivery,'数据备份',`${d.backup.enabled?'开启':'关闭'} · ${{waiting:'等待首次空闲',running:'备份中',ready:'最近备份成功',deferred:'为聊天延期',failed:'备份失败',not_started:'尚未启动'}[d.backup.status]||d.backup.status}${d.backup.last_success?' · '+new Date(d.backup.last_success*1000).toLocaleString():''}${d.backup.error?' · '+d.backup.error:''}`);
     if(d.reply_backlog!==undefined)line(healthDelivery,'待回复 / 最老等待',`${d.reply_backlog} 条 / ${Math.round(d.oldest_reply_wait_seconds||0)} 秒`);
+    if(d.review_history){const h=d.review_history;line(healthDelivery,'审阅记录保存',`${h.current_fault?'当前异常':'运行正常'} · 待写 ${h.pending||0} · 本次加载累计缺失 ${h.missing_records||0}${h.last_error?' · '+h.last_error:''}`);if(h.recovered_at)line(healthDelivery,'审阅记录最近恢复',new Date(h.recovered_at*1000).toLocaleString());}
     line(healthDelivery,'等待落盘',d.persistence?.pending??0);line(healthDelivery,'最近持久化恢复',d.persistence?.recovered_at?new Date(d.persistence.recovered_at*1000).toLocaleString():'没有历史恢复记录');}
   async function loadProactive(){if(!ready)return;const request=++serial;try{const d=await api('panel_proactive');if(request!==serial)return;state=d;
     summary.textContent=`主动消息${d.enabled?'已开启':'已关闭'} · ${d.quiet_now?'免打扰中':'可检查机会'} · 待回复 ${d.pending_replies} 条；自由群聊：${d.scope.group.label}，自由私聊：${d.scope.private.label}`;

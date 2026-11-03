@@ -7,7 +7,8 @@ def reconcile(reservation,facts):
     # Partial confirmation is uncertain and must never permit an automatic retry.
     url=reservation.get('url','')
     if url and any(r.get('state')=='confirmed' and url in r.get('text','') for r in matches):
-        return {'state':'confirmed','recovery':'confirmed_outbox','delivery_ids':[r['id'] for r in matches if r.get('state')=='confirmed']}
+        return {'state':'confirmed','recovery':'confirmed_outbox','delivery_ids':[r['id'] for r in matches if r.get('state')=='confirmed'],
+                'actual_text':'\n'.join(r.get('text','') for r in sorted(matches,key=lambda r:r.get('at',0)) if r.get('state')=='confirmed')}
     if any(r.get('state')=='confirmed' for r in matches):
         return {'state':'unknown','recovery':'partial_confirmation_without_link'}
     if any(r.get('submission_state') in {'submitted','intent_durable'} and r.get('state')!='failed'
