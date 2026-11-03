@@ -7,6 +7,9 @@ def register_persona_panel(plugin):
         registry=plugin._personas;pid=request.args.get('persona_id')
         try:
             data=await registry.inspect(pid) if pid else {'people':await registry.list_people(),'selected_persona_id':registry.owner_id}
+            if pid and request.args.get('compact')=='1':
+                data['jobs']=[{k:v for k,v in job.items() if k in {'id','action','at','status','reason','recovered'}} for job in data.get('jobs',[])[-8:]]
+                data['versions']=[{k:v for k,v in version.items() if k in ({'id','at','master','variants','catalog_epoch'} if version['id']==data.get('active') else {'id','at','master'})} for version in data.get('versions',[])]
             return jsonify(status='ok',data={**data,'capabilities':{'persona_editor':1,'atomic_versions':True}})
         except ValueError as exc:return jsonify(status='error',kind='missing_persona',message=str(exc)),404
         except Exception:return jsonify(status='error',kind='read_failure',message='人格读取失败，未恢复默认人格'),503

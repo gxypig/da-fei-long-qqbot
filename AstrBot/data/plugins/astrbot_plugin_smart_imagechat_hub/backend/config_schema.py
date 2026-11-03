@@ -39,9 +39,36 @@ class ConfigSchemaMixin:
             return {"version": 1, "images": {}}
 
     def _save_index(self) -> None:
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.index_path, "w", encoding="utf-8") as f:
-            json.dump(self._index, f, ensure_ascii=False, indent=2)
+        from .gallery_io import atomic_json
+        self._library_revision = getattr(self, '_library_revision', 0) + 1
+        atomic_json(self.index_path, self._index)
+
+    async def _save_index_async(self) -> None:
+        from .gallery_io import SnapshotWriter
+        self._library_revision = getattr(self, '_library_revision', 0) + 1
+        writer = getattr(self, '_index_writer', None)
+        if writer is None:
+            writer = self._index_writer = SnapshotWriter(self.index_path)
+        writer.submit(self._index)
+        await writer.flush()
+
+    async def _flush_gallery_io(self):
+        import asyncio
+        writer = getattr(self, '_index_writer', None)
+        if writer is not None:
+            await writer.flush()
+        task = getattr(self, '_config_save_task', None)
+        if task is not None:
+            await asyncio.shield(task)
+
+    async def _write_gallery_config(self):
+        while getattr(self, '_config_save_dirty', False):
+            self._config_save_dirty = False
+            try:
+                await self.config.save_config_async()
+            except BaseException:
+                self._config_save_dirty = True
+                raise
 
     def _load_collection_pool(self) -> dict[str, Any]:
         if not self.collection_pool_path.is_file():
@@ -173,11 +200,26 @@ class ConfigSchemaMixin:
             self._save_plugin_config()
 
     def _save_plugin_config(self) -> None:
+        import asyncio
+        self._library_revision = getattr(self, '_library_revision', 0) + 1
         self._refresh_caption_tag_category_schema()
         self._refresh_meme_combat_schema()
         self._refresh_scheduled_backup_schema()
         self._refresh_model_fallback_schema()
         save_config = getattr(self.config, "save_config", None)
+        if callable(getattr(self.config, 'save_config_async', None)):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self._config_save_dirty = True
+                task = getattr(self, '_config_save_task', None)
+                if task is None or task.done():
+                    if task is not None and not task.cancelled():
+                        task.exception()  # A later explicit flush still reports failures.
+                    self._config_save_task = asyncio.create_task(self._write_gallery_config())
+                return
         if callable(save_config):
             save_config()
 

@@ -216,6 +216,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         checks['reply_backlog']=not delivery['backlog_delayed']
         return jsonify({"status": "ok", "data": {"version": VERSION, "checks": checks,
             "performance": self.performance_status(),
+            "incoming_visual": dict(getattr(getattr(self,'_incoming_visual',None),'stats',{})),
             "group_chat_ids": sorted(self._id_set(self._cfg("group_chat_ids", ""))),
             "group_chat_probability": self._cfg("group_chat_probability", 10),
             "group_wake_words": self._cfg("group_wake_words", "大肥龙,肥龙"),
@@ -940,10 +941,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         # Keep the invariant role/rules before per-message IDs and timestamps.
         # Providers can reuse the prompt prefix without changing any rule, tool,
         # reasoning setting or conversation fact.
-        from .persona_authority import bind_persona,PRIORITY,FUNCTIONAL_STYLE,generation_example
+        from .persona_authority import bind_persona,PRIORITY,functional_style,generation_example
         state = self.character_context(event)
         await bind_persona(self,event,req,state)
-        req.system_prompt=(req.system_prompt or '')+'\n'+FUNCTIONAL_STYLE+'\n'+PUNCTUATION_RULE+PRIORITY
+        req.system_prompt=(req.system_prompt or '')+'\n'+functional_style(state)+'\n'+PUNCTUATION_RULE+PRIORITY
         profiles=getattr(self,'_ai_profiles',None)
         if profiles:
             req.system_prompt=(req.system_prompt or '')+profiles.reply_note(event.get_platform_id(),str(event.get_sender_id()))
@@ -1000,12 +1001,15 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                           + json.dumps(batch, ensure_ascii=False) + '\n当前最后一条：' + str(req.prompt or ''))
         from .speaker_context import attribute_request
         attribute_request(event,req,state)
+        incoming_visual=getattr(self,'_incoming_visual',None)
+        if incoming_visual:
+            await incoming_visual.enrich(event,req)
         from .history_recall import enrich as enrich_archive
         await enrich_archive(self,event,req)
         if hasattr(self, '_group_flow'):
             req.system_prompt = (req.system_prompt or '') + self._group_flow.note(event)
         req.system_prompt = (req.system_prompt or "") + character_note(state) + generation_note(state["visual_intent"],state)
-        req.system_prompt += generation_example(event.get_message_str() or '')
+        req.system_prompt += generation_example(event.get_message_str() or '',state)
         event.set_extra('qqbot_generation_request',req)
         life=getattr(self,'_life',None)
         if life:req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())

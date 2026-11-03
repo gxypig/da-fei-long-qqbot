@@ -182,12 +182,13 @@ class SmartImageSenderPlugin(
                 pass
         await self._wait_caption_cleanup_tasks()
         await self._close_openai_compatible_provider_lanes()
-        self._save_index()
+        await self._save_index_async()
         self._save_collection_pool()
         self._save_discarded_collection()
         self._save_external_import_state()
         self._save_imagebed_import_state()
         self._save_imagebed_discarded()
+        await self._flush_gallery_io()
         clear_auto_collection_plugin(self)
 
     @filter.custom_filter(WakeImageRequestFilter, priority=100)

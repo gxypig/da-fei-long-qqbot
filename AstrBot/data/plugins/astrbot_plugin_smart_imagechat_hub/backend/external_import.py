@@ -403,7 +403,7 @@ class ExternalImportMixin:
                             active["updated_at"] = int(time.time())
                 if copied_since_save >= 25:
                     async with self._lock:
-                        self._save_index()
+                        await self._save_index_async()
                         self._save_external_import_state()
                     copied_since_save = 0
 
@@ -414,7 +414,7 @@ class ExternalImportMixin:
                     active["message"] = "External image import finished."
                     active["finished_at"] = int(time.time())
                     active["updated_at"] = int(time.time())
-                self._save_index()
+                await self._save_index_async()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)
@@ -433,7 +433,7 @@ class ExternalImportMixin:
                         active["status"] = "cancelled"
                         active["message"] = "External image import was cancelled."
                     active["updated_at"] = int(time.time())
-                self._save_index()
+                await self._save_index_async()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)
@@ -456,7 +456,7 @@ class ExternalImportMixin:
                         active["status"] = "failed"
                         active["message"] = str(exc)
                     active["updated_at"] = int(time.time())
-                self._save_index()
+                await self._save_index_async()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)
@@ -860,7 +860,7 @@ class ExternalImportMixin:
                         result["deleted"].append(image_id)
                     else:
                         result["skipped"].append(image_id)
-                self._save_index()
+                await self._save_index_async()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)

@@ -23,302 +23,317 @@ from .common import (
 
 
 class WebApiMixin:
+    def _register_gallery_api(self, route, handler, methods, description):
+        async def guarded(*args, **kwargs):
+            result = await handler(*args, **kwargs)
+            if request.method != 'GET':
+                await self._flush_gallery_io()
+            return result
+        self.context.register_web_api(route, guarded, methods, description)
+
+    async def _gallery_image_data(self, path):
+        from .gallery_io import ThumbnailCache
+        cache = getattr(self, '_thumbnail_cache', None)
+        if cache is None:
+            cache = self._thumbnail_cache = ThumbnailCache()
+        return await cache.get(path, request.args.get('thumbnail') == '1')
+
     def _register_web_apis(self) -> None:
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_progress",
             self.caption_progress_api,
             ["GET"],
             "Get smart image tag generation progress",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_start",
             self.caption_start_api,
             ["POST"],
             "Start smart image tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_library",
             self.caption_library_api,
             ["GET"],
             "Get smart image library tags",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_plugin_config",
             self.caption_plugin_config_api,
             ["GET", "POST"],
             "Get or update smart image sender plugin settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_tag_category_settings",
             self.caption_tag_category_settings_api,
             ["GET", "POST"],
             "Get or update smart image tag category settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/proactive_emoji_config",
             self.proactive_emoji_config_api,
             ["GET", "POST"],
             "Get or update proactive emoji reply settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/auto_collection_config",
             self.auto_collection_config_api,
             ["GET", "POST"],
             "Get or update auto image collection settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/meme_combat_config",
             self.meme_combat_config_api,
             ["GET", "POST"],
             "Get or update group meme combat settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/auto_collection_pool",
             self.auto_collection_pool_api,
             ["GET"],
             "Get pending auto-collected image pool",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/scheduled_backup_config",
             self.scheduled_backup_config_api,
             ["GET", "POST"],
             "Get or update scheduled backup settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/scheduled_backup_list",
             self.scheduled_backup_list_api,
             ["GET"],
             "List scheduled backup files",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/scheduled_backup_download/<backup_id>",
             self.scheduled_backup_download_api,
             ["GET"],
             "Download scheduled backup file",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/scheduled_backup_delete",
             self.scheduled_backup_delete_api,
             ["POST"],
             "Delete scheduled backup file",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/scheduled_backup_create",
             self.scheduled_backup_create_api,
             ["POST"],
             "Create scheduled backup file",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/auto_collection_accept",
             self.auto_collection_accept_api,
             ["POST"],
             "Accept pending auto-collected images",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/auto_collection_discard",
             self.auto_collection_discard_api,
             ["POST"],
             "Discard pending auto-collected images",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_tree",
             self.external_import_tree_api,
             ["GET"],
             "Get external plugin data directory tree",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_stat",
             self.external_import_stat_api,
             ["POST"],
             "Count images under an external plugin data directory",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_start",
             self.external_import_start_api,
             ["POST"],
             "Import images from an external plugin data directory",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_status",
             self.external_import_status_api,
             ["GET"],
             "Get external image import status",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_pending",
             self.external_import_pending_api,
             ["GET"],
             "Get external imported images waiting for tags",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_thumb/<image_id>",
             self.external_import_thumb_api,
             ["GET"],
             "Get external import pending thumbnail",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_delete_pending",
             self.external_import_delete_pending_api,
             ["POST"],
             "Delete pending external imported images",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_warning_preference",
             self.external_import_warning_preference_api,
             ["POST"],
             "Update external import warning preferences",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_pause_caption",
             self.external_import_pause_caption_api,
             ["POST"],
             "Pause external import tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_start_caption",
             self.external_import_start_caption_api,
             ["POST"],
             "Start external import tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_resume_caption",
             self.external_import_resume_caption_api,
             ["POST"],
             "Resume external import tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/external_import_cancel_caption",
             self.external_import_cancel_caption_api,
             ["POST"],
             "Cancel external import tag generation and remove pending images",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_config",
             self.imagebed_import_config_api,
             ["GET", "POST"],
             "Get or update Cloudflare R2 imagebed import settings",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_test",
             self.imagebed_import_test_api,
             ["POST"],
             "Test Cloudflare R2 imagebed connection",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_status",
             self.imagebed_import_status_api,
             ["GET"],
             "Get Cloudflare R2 imagebed import status",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_start",
             self.imagebed_import_start_api,
             ["POST"],
             "Start Cloudflare R2 imagebed import",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_pending",
             self.imagebed_import_pending_api,
             ["GET"],
             "Get Cloudflare R2 imagebed images waiting for tags",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_thumb/<image_id>",
             self.imagebed_import_thumb_api,
             ["GET"],
             "Get Cloudflare R2 imagebed pending thumbnail",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_delete_pending",
             self.imagebed_import_delete_pending_api,
             ["POST"],
             "Delete pending Cloudflare R2 imagebed images",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_start_caption",
             self.imagebed_import_start_caption_api,
             ["POST"],
             "Start Cloudflare R2 imagebed tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_cancel_caption",
             self.imagebed_import_cancel_caption_api,
             ["POST"],
             "Cancel Cloudflare R2 imagebed tag generation",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/imagebed_import_ack_error",
             self.imagebed_import_ack_error_api,
             ["POST"],
             "Acknowledge Cloudflare R2 imagebed import error",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_update_tags",
             self.caption_update_tags_api,
             ["POST"],
             "Update smart image tags",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_update_global_tags",
             self.caption_update_global_tags_api,
             ["POST"],
             "Update smart image global tags",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_upload_image",
             self.caption_upload_image_api,
             ["POST"],
             "Upload smart image library image",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_provider_config",
             self.caption_provider_config_api,
             ["GET", "POST"],
             "Get or update default image caption provider",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_delete_image",
             self.caption_delete_image_api,
             ["POST"],
             "Delete smart image library image",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_export_config",
             self.caption_export_config_api,
             ["GET"],
             "Export smart image sender backup zip",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_import_config",
             self.caption_import_config_api,
             ["POST"],
             "Import smart image sender backup zip",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_import_config_file",
             self.caption_import_config_file_api,
             ["POST"],
             "Import smart image sender backup zip by file upload",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_image/<image_id>",
             self.caption_image_api,
             ["GET"],
             "Get smart image thumbnail source",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/caption_image_data/<image_id>",
             self.caption_image_data_api,
             ["GET"],
             "Get smart image thumbnail data",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/collection_pending_image/<image_id>",
             self.collection_pending_image_api,
             ["GET"],
             "Get pending auto-collected image",
         )
-        self.context.register_web_api(
+        self._register_gallery_api(
             f"/{PLUGIN_NAME}/collection_pending_image_data/<image_id>",
             self.collection_pending_image_data_api,
             ["GET"],
@@ -326,7 +341,6 @@ class WebApiMixin:
         )
 
     async def caption_progress_api(self):
-        await self._sync_library_if_changed(caption_mode="background")
         return jsonify(
             {
                 "status": "ok",
@@ -343,8 +357,14 @@ class WebApiMixin:
         return jsonify({"status": "ok", "data": self._caption_progress_snapshot()})
 
     async def caption_library_api(self):
-        await self._sync_library_if_changed(caption_mode="background")
-        return jsonify({"status": "ok", "data": self._caption_library_snapshot()})
+        revision = str(getattr(self, '_library_revision', 0))
+        if request.args.get('since') == revision:
+            return jsonify({'status': 'ok', 'data': {'revision': revision, 'unchanged': True}})
+        snapshot = self._caption_library_snapshot()
+        if request.args.get('compact') == '1':
+            snapshot.pop('images', None)
+            snapshot.pop('all_images', None)
+        return jsonify({'status': 'ok', 'data': snapshot})
 
     async def caption_plugin_config_api(self):
         if request.method == "GET":
@@ -407,7 +427,7 @@ class WebApiMixin:
             self._refresh_caption_tag_category_schema()
             if category_changed and recaption_all:
                 self._reset_all_caption_tags_for_new_categories()
-                self._save_index()
+                await self._save_index_async()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)
@@ -703,6 +723,9 @@ class WebApiMixin:
             message = str(exc)
             status_code = 404 if "not found" in message or "missing" in message else 400
             return jsonify({"status": "error", "message": message}), status_code
+        if request.args.get('thumbnail') == '1':
+            media = await self._gallery_image_data(image_path)
+            return Response(base64.b64decode(media['data_url'].split(',', 1)[1]), mimetype=media['mime_type'])
         return await send_file(image_path)
 
     async def external_import_delete_pending_api(self):
@@ -834,6 +857,9 @@ class WebApiMixin:
             message = str(exc)
             status_code = 404 if "not found" in message or "missing" in message else 400
             return jsonify({"status": "error", "message": message}), status_code
+        if request.args.get('thumbnail') == '1':
+            media = await self._gallery_image_data(image_path)
+            return Response(base64.b64decode(media['data_url'].split(',', 1)[1]), mimetype=media['mime_type'])
         return await send_file(image_path)
 
     async def imagebed_import_delete_pending_api(self):
@@ -974,7 +1000,7 @@ class WebApiMixin:
             uploaded.append(rel_path)
 
         if uploaded:
-            await self._sync_library(caption_mode="background")
+            await self._sync_library(caption_mode="background", only_rel_paths=set(uploaded))
 
         if not uploaded:
             return jsonify(
@@ -1157,51 +1183,38 @@ class WebApiMixin:
         raw_content = str(payload.get("content_base64") or "")
         if "," in raw_content and raw_content.split(",", 1)[0].startswith("data:"):
             raw_content = raw_content.split(",", 1)[1]
+        from .gallery_io import decode_upload, save_upload
         try:
-            content = base64.b64decode(raw_content, validate=True)
-        except Exception:
-            return jsonify({"status": "error", "message": "Invalid image payload"})
-        if not content:
-            return jsonify({"status": "error", "message": "Empty file"})
+            content = await asyncio.to_thread(decode_upload, raw_content)
+        except Exception as exc:
+            return jsonify({"status": "error", "message": "Invalid image payload: " + str(exc)[:180]})
 
-        selected_global_tags = self._valid_global_tags(
-            payload.get("selected_global_tags", [])
-        )
-        folder = self._config_file_folder(IMAGE_FILES_CONFIG_KEY)
-        rel_path = self._unique_upload_rel_path(folder, filename)
-        try:
-            save_path = self._abs_plugin_data_path(rel_path)
-        except ValueError:
-            return jsonify({"status": "error", "message": f"Invalid path: {filename}"})
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "wb") as f:
-            f.write(content)
-        if not self._is_allowed_image(save_path):
-            try:
-                save_path.unlink()
-            except OSError:
-                pass
-            return jsonify(
-                {"status": "error", "message": f"Unsupported file type: {filename}"}
-            )
-
-        await self._sync_library(
-            caption_mode="background",
-            initial_global_tags_by_rel_path={rel_path: selected_global_tags}
-            if selected_global_tags
-            else None,
-        )
-        return jsonify(
-            {
-                "status": "ok",
-                "data": {
-                    "uploaded": [rel_path],
-                    "errors": [],
-                    "progress": self._caption_progress_snapshot(),
-                    "library": self._caption_library_snapshot(),
-                },
-            }
-        )
+        selected_global_tags = self._valid_global_tags(payload.get('selected_global_tags', []))
+        gate = getattr(self, '_upload_gate', None)
+        if gate is None:
+            gate = self._upload_gate = asyncio.Lock()
+        async with gate:
+            request_id = str(payload.get('request_id') or '')[:100]
+            previous = next((item for item in self._index.get('images', {}).values()
+                if request_id and item.get('upload_request_id') == request_id), None)
+            if previous:
+                rel_path = previous['rel_path']
+            else:
+                folder = self._config_file_folder(IMAGE_FILES_CONFIG_KEY)
+                rel_path = self._unique_upload_rel_path(folder, filename)
+                try:
+                    save_path = self._abs_plugin_data_path(rel_path)
+                    await asyncio.to_thread(save_upload, save_path, content)
+                except (OSError, ValueError) as exc:
+                    return jsonify({'status': 'error', 'message': 'Upload failed: ' + str(exc)[:180]})
+                await self._sync_library(caption_mode='background', only_rel_paths={rel_path},
+                    initial_global_tags_by_rel_path={rel_path: selected_global_tags})
+                if request_id:
+                    self._index['images'][self._image_id(rel_path)]['upload_request_id'] = request_id
+                    await self._save_index_async()
+            await self._flush_gallery_io()
+        return jsonify({'status': 'ok', 'data': {'uploaded': [rel_path], 'errors': [],
+            'progress': self._caption_progress_snapshot()}})
 
     async def caption_image_api(self, image_id: str):
         item = self._index_image_by_id(image_id)
@@ -1214,6 +1227,9 @@ class WebApiMixin:
             return jsonify({"status": "error", "message": "invalid image path"})
         if not image_path.is_file():
             return jsonify({"status": "error", "message": "image file missing"})
+        if request.args.get('thumbnail') == '1':
+            media = await self._gallery_image_data(image_path)
+            return Response(base64.b64decode(media['data_url'].split(',', 1)[1]), mimetype=media['mime_type'])
         return await send_file(image_path)
 
     async def caption_image_data_api(self, image_id: str):
@@ -1228,16 +1244,13 @@ class WebApiMixin:
         if not image_path.is_file():
             return jsonify({"status": "error", "message": "image file missing"})
 
-        mime_type = mimetypes.guess_type(image_path.name)[0] or "image/png"
-        with open(image_path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("ascii")
+        media = await self._gallery_image_data(image_path)
         return jsonify(
             {
                 "status": "ok",
                 "data": {
                     "image_id": str(item.get("id") or image_id),
-                    "mime_type": mime_type,
-                    "data_url": f"data:{mime_type};base64,{encoded}",
+                    **media,
                     "updated_at": self._to_int(item.get("updated_at"), 0),
                 },
             }
@@ -1254,6 +1267,9 @@ class WebApiMixin:
             return jsonify({"status": "error", "message": "invalid image path"})
         if not image_path.is_file():
             return jsonify({"status": "error", "message": "image file missing"})
+        if request.args.get('thumbnail') == '1':
+            media = await self._gallery_image_data(image_path)
+            return Response(base64.b64decode(media['data_url'].split(',', 1)[1]), mimetype=media['mime_type'])
         return await send_file(image_path)
 
     async def collection_pending_image_data_api(self, image_id: str):
@@ -1268,16 +1284,13 @@ class WebApiMixin:
         if not image_path.is_file():
             return jsonify({"status": "error", "message": "image file missing"})
 
-        mime_type = mimetypes.guess_type(image_path.name)[0] or "image/png"
-        with open(image_path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("ascii")
+        media = await self._gallery_image_data(image_path)
         return jsonify(
             {
                 "status": "ok",
                 "data": {
                     "image_id": str(item.get("id") or image_id),
-                    "mime_type": mime_type,
-                    "data_url": f"data:{mime_type};base64,{encoded}",
+                    **media,
                     "updated_at": self._to_int(item.get("collected_at"), 0),
                 },
             }

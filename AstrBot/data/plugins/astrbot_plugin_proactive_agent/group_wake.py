@@ -73,6 +73,9 @@ def install_group_wake(plugin):
             if hasattr(plugin, '_group_flow'):
                 plugin._group_flow.observe(event)
             reason = group_wake_reason(event, stage.ctx.astrbot_config, plugin._cfg)
+            incoming=getattr(plugin,'_incoming_visual',None)
+            if reason is None and incoming and event.get_group_id():
+                reason=incoming.followup_wake(event)
             if reason:
                 event.is_at_or_wake_command = True
                 event.is_wake = True

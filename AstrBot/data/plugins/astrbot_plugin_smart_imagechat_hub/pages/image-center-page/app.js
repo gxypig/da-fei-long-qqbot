@@ -588,6 +588,11 @@ const AUTO_COLLECTION_NON_MEME_FILTER_HINTS = {
     "严格过滤：只收 OneBot/NapCat 明确标记为表情包的图片，过滤其他全部图像。",
 };
 const imageUrlCache = new Map();
+function cacheImageUrl(key, url) {
+  imageUrlCache.delete(key);
+  imageUrlCache.set(key, url);
+  while (imageUrlCache.size > 120) imageUrlCache.delete(imageUrlCache.keys().next().value);
+}
 const thumbnailLoadQueue = [];
 let activeThumbnailLoads = 0;
 let directThumbnailTransportFailed = false;
@@ -941,7 +946,7 @@ function deferLibraryRenderUntilScrollIdle(source = MANUAL_LIBRARY_SOURCE) {
 function withTimeout(promise, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
-      reject(new Error("等待 AstrBot Plugin Page Bridge 超时"));
+      reject(new Error("请求超时，结果尚未确认，请刷新查看后再决定是否重试"));
     }, timeoutMs);
     promise.then(
       (value) => {
@@ -995,6 +1000,10 @@ async function directPluginApi(method, endpoint, body) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
+  const controller = new AbortController();
+  options.signal = controller.signal;
+  const timer = window.setTimeout(() => controller.abort(), method === "GET" ? 15000 : 45000);
+  try {
   const response = await fetch(`${pluginApiBase}/${endpoint}`, options);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -1004,24 +1013,25 @@ async function directPluginApi(method, endpoint, body) {
     throw new Error(payload.message || "插件 API 请求失败");
   }
   return unwrapApiResponse(payload);
+  } finally { window.clearTimeout(timer); }
 }
 
 async function pluginApiGet(endpoint) {
   try {
     const api = await ensureBridgeReady();
-    return unwrapApiResponse(await api.apiGet(endpoint));
+    return unwrapApiResponse(await withTimeout(api.apiGet(endpoint), 15000));
   } catch (bridgeError) {
     return directPluginApi("GET", endpoint);
   }
 }
 
 async function pluginApiPost(endpoint, body) {
-  try {
-    const api = await ensureBridgeReady();
-    return unwrapApiResponse(await api.apiPost(endpoint, body));
-  } catch (bridgeError) {
-    return directPluginApi("POST", endpoint, body);
-  }
+  let api;
+  try { api = await ensureBridgeReady(); }
+  catch { return directPluginApi("POST", endpoint, body); }
+  // Once submitted, a timeout is an unknown result, never a reason to submit
+  // the mutation again through a different transport.
+  return unwrapApiResponse(await withTimeout(api.apiPost(endpoint, body), 45000));
 }
 
 async function pluginApiDownload(endpoint, filename) {
@@ -1061,22 +1071,24 @@ function readFileAsBase64(file) {
 }
 
 async function uploadImageFile(file, selectedGlobalTags = []) {
+  if (file.size > 20 * 1024 * 1024) throw new Error("图片超过 20MB，请先缩小后上传");
   const contentBase64 = await readFileAsBase64(file);
   return pluginApiPost("caption_upload_image", {
     filename: file.name || "image",
     mime_type: file.type || "",
     size: file.size || 0,
     content_base64: contentBase64,
+    request_id: crypto.randomUUID(),
     selected_global_tags: selectedGlobalTags,
   });
 }
 
-function directImageUrl(imageId) {
-  return `${pluginApiBase}/caption_image/${encodeURIComponent(imageId)}`;
+function directImageUrl(imageId, full = false) {
+  return `${pluginApiBase}/caption_image/${encodeURIComponent(imageId)}${full ? "" : "?thumbnail=1"}`;
 }
 
 function pendingImageUrl(imageId) {
-  return `${pluginApiBase}/collection_pending_image/${encodeURIComponent(imageId)}`;
+  return `${pluginApiBase}/collection_pending_image/${encodeURIComponent(imageId)}?thumbnail=1`;
 }
 
 function imageCacheKey(image) {
@@ -1087,7 +1099,8 @@ function imageCacheKey(image) {
   ].join(":");
 }
 
-async function resolveImageUrl(image) {
+async function resolveImageUrl(image, full = false) {
+  if (full) return resolveImageDataUrl(image, true);
   const imageId = String(image?.id || "").trim();
   if (!imageId) {
     return "";
@@ -1106,23 +1119,23 @@ async function resolveImageUrl(image) {
     }
   }
 
-  const url = image.thumbnail_url || directImageUrl(imageId);
-  imageUrlCache.set(cacheKey, url);
+  const url = directImageUrl(imageId);
+  cacheImageUrl(cacheKey, url);
   return url;
 }
 
-async function resolveImageDataUrl(image) {
+async function resolveImageDataUrl(image, full = false) {
   const imageId = String(image?.id || "").trim();
   if (!imageId) {
     return "";
   }
-  const cacheKey = `data:${imageCacheKey(image)}`;
+  const cacheKey = `${full ? "original" : "data"}:${imageCacheKey(image)}`;
   if (imageUrlCache.has(cacheKey)) {
     return imageUrlCache.get(cacheKey);
   }
-  const result = await pluginApiGet(`caption_image_data/${imageId}`);
+  const result = await pluginApiGet(`caption_image_data/${imageId}${full ? "" : "?thumbnail=1"}`);
   if (result?.data_url) {
-    imageUrlCache.set(cacheKey, result.data_url);
+    if (!full) cacheImageUrl(cacheKey, result.data_url);
     return result.data_url;
   }
   return "";
@@ -1145,8 +1158,8 @@ async function resolvePendingImageUrl(image) {
     }
   }
 
-  const url = image.thumbnail_url || pendingImageUrl(imageId);
-  imageUrlCache.set(cacheKey, url);
+  const url = pendingImageUrl(imageId);
+  cacheImageUrl(cacheKey, url);
   return url;
 }
 
@@ -1159,9 +1172,9 @@ async function resolvePendingImageDataUrl(image) {
   if (imageUrlCache.has(cacheKey)) {
     return imageUrlCache.get(cacheKey);
   }
-  const result = await pluginApiGet(`collection_pending_image_data/${imageId}`);
+  const result = await pluginApiGet(`collection_pending_image_data/${imageId}?thumbnail=1`);
   if (result?.data_url) {
-    imageUrlCache.set(cacheKey, result.data_url);
+    cacheImageUrl(cacheKey, result.data_url);
     return result.data_url;
   }
   return "";
@@ -1255,26 +1268,26 @@ function drainThumbnailLoadQueue() {
   }
 }
 
-function applyResolvedImageUrl(img, image) {
+function applyResolvedImageUrl(img, image, full = false) {
   setThumbnailLoading(img);
   const load = () => {
-    return resolveImageUrl(image).then(
+    return resolveImageUrl(image, full).then(
       (url) => {
         return setThumbnailSource(img, url, () => {
           if (!isDataImageUrl(url)) {
             if (image?.prefer_direct_thumbnail === true) {
               directThumbnailTransportFailed = true;
             }
-            return resolveImageDataUrl(image);
+            return resolveImageDataUrl(image, full);
           }
-          return image.thumbnail_url || directImageUrl(image.id);
+          return directImageUrl(image.id, full);
         });
       },
       () => {
         return setThumbnailSource(
           img,
-          image.thumbnail_url || directImageUrl(image.id),
-          () => resolveImageDataUrl(image),
+          directImageUrl(image.id, full),
+          () => resolveImageDataUrl(image, full),
         );
       },
     );
@@ -1296,13 +1309,13 @@ function applyResolvedPendingImageUrl(img, image) {
           if (!isDataImageUrl(url)) {
             return resolvePendingImageDataUrl(image);
           }
-          return image.thumbnail_url || pendingImageUrl(image.id);
+          return pendingImageUrl(image.id);
         });
       },
       () => {
         return setThumbnailSource(
           img,
-          image.thumbnail_url || pendingImageUrl(image.id),
+          pendingImageUrl(image.id),
           () => resolvePendingImageDataUrl(image),
         );
       },
@@ -3421,9 +3434,11 @@ async function cancelImagebedCaptioning(options = {}) {
   }
 }
 
+let libraryRevision = "";
 async function refreshLibrary() {
-  const library = await pluginApiGet("caption_library");
-  applyLibraryState(library);
+  const library = await pluginApiGet(`caption_library?compact=1&since=${encodeURIComponent(libraryRevision)}`);
+  if (!library?.unchanged) applyLibraryState(library);
+  libraryRevision = library?.revision ?? "";
 }
 
 async function refreshPendingPool() {
@@ -3438,7 +3453,13 @@ async function refreshExternalImportPending() {
   return pending;
 }
 
-async function refreshAll() {
+let refreshInFlight = null;
+function refreshAll() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = performRefreshAll().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+async function performRefreshAll() {
   try {
     const progress = await pluginApiGet("caption_progress");
     renderProgress(progress || {});
@@ -3481,7 +3502,7 @@ function openEditor(image) {
   editingImage = image;
   els.editorTitle.textContent = imageDisplayName(image);
   els.editorImage.alt = image.filename || image.rel_path;
-  applyResolvedImageUrl(els.editorImage, image);
+  applyResolvedImageUrl(els.editorImage, image, true);
   els.tagInput.value = (image.tags || []).join("\n");
   els.editorMessage.textContent = "";
   renderGlobalTagChoices(image.selected_global_tags || []);
@@ -5978,4 +5999,13 @@ try {
 
 updateLibraryScopeVisibility();
 await refreshAll();
-window.setInterval(refreshAll, 1500);
+let galleryVisible = true;
+if (typeof IntersectionObserver !== "undefined") {
+  new IntersectionObserver(entries => { galleryVisible = entries.some(entry => entry.isIntersecting); }).observe(document.documentElement);
+}
+async function pollGallery() {
+  if (!document.hidden && galleryVisible && !els.uploadButton.disabled) await refreshAll();
+  window.setTimeout(pollGallery, 5000);
+}
+window.setTimeout(pollGallery, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });

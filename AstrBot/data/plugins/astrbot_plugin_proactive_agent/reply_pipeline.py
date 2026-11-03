@@ -244,7 +244,7 @@ class ReplyPipelineMixin:
     async def repair_local_output(self,event,text,problems,*,media=0,messages=()):
         """One main-model regeneration on objective failure; never a judge call."""
         from .send_checks import normalize,issues
-        from .persona_authority import role_text,FUNCTIONAL_STYLE
+        from .persona_authority import role_text,functional_style
         state=event.get_extra('qqbot_character') or {};mode=self.review_mode(event.unified_msg_origin)
         if not event.get_extra('qqbot_local_repair_used'):
             event.set_extra('qqbot_local_repair_used',True)
@@ -256,7 +256,7 @@ class ReplyPipelineMixin:
                        if (m.get('role') if isinstance(m,dict) else getattr(m,'role',None))=='tool']
                 with model_work('interactive'):
                     async with asyncio.timeout(30):
-                        result=await provider.text_chat(system_prompt=(getattr(req,'system_prompt','') or role_text('chat',state))+FUNCTIONAL_STYLE+
+                        result=await provider.text_chat(system_prompt=(getattr(req,'system_prompt','') or role_text('chat',state))+functional_style(state)+
                             '\n上一稿存在明确程序错误，请重新回复当前原问题。保留事实，只输出最终正文；不输出内部错误、占位符或修复过程，不重复执行任何工具。',
                             prompt=json.dumps({'原问题':event.get_message_str(),'必须修正':problems,'已有工具事实':facts,'附件数':media},ensure_ascii=False,default=str),
                             contexts=getattr(req,'contexts',None) or [],request_max_retries=1)

@@ -921,7 +921,7 @@ class ImageBedImportMixin:
                         )
                     if copied_since_save >= 20:
                         async with self._lock:
-                            self._save_index()
+                            await self._save_index_async()
                             self._save_imagebed_import_state()
                         copied_since_save = 0
 
@@ -933,7 +933,7 @@ class ImageBedImportMixin:
                     active["finished_at"] = int(time.time())
                     active["updated_at"] = int(time.time())
                 self._imagebed_import_state["last_successful_sync_at"] = int(time.time())
-                self._save_index()
+                await self._save_index_async()
                 self._save_imagebed_import_state()
                 existing_rel_paths = self._all_existing_index_rel_paths()
                 self._sync_config_image_files(existing_rel_paths)
@@ -951,7 +951,7 @@ class ImageBedImportMixin:
                     active["status"] = "cancelled"
                     active["message"] = "Imagebed import was cancelled."
                     active["updated_at"] = int(time.time())
-                self._save_index()
+                await self._save_index_async()
                 self._save_imagebed_import_state()
             raise
         except Exception as exc:
@@ -972,7 +972,7 @@ class ImageBedImportMixin:
                     detail,
                     trigger,
                 )
-                self._save_index()
+                await self._save_index_async()
                 self._save_imagebed_import_state()
 
     async def _download_imagebed_object(
@@ -1124,7 +1124,7 @@ class ImageBedImportMixin:
                 else:
                     result["skipped"].append(image_id)
             self._imagebed_import_state["caption_paused"] = True
-            self._save_index()
+            await self._save_index_async()
             self._save_imagebed_import_state()
             existing_rel_paths = self._all_existing_index_rel_paths()
             self._sync_config_image_files(existing_rel_paths)

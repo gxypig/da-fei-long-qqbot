@@ -42,18 +42,31 @@ class CaptionLibraryMixin:
         force: bool = False,
         caption_mode: str = "background",
         initial_global_tags_by_rel_path: dict[str, list[str]] | None = None,
+        only_rel_paths: set[str] | None = None,
     ) -> None:
         async with self._lock:
             initial_global_tags_by_rel_path = initial_global_tags_by_rel_path or {}
-            configured_rel_paths = self._configured_image_rel_paths()
-            discovered_rel_paths = self._discover_uploaded_images()
             configured_tag_items = self._configured_tag_items()
-            candidate_rel_paths = (
-                configured_rel_paths
-                | discovered_rel_paths
-                | set(configured_tag_items.keys())
-            )
-            existing_rel_paths = self._existing_image_rel_paths(candidate_rel_paths)
+            if only_rel_paths is None:
+                candidate_rel_paths = (
+                    self._configured_image_rel_paths()
+                    | await asyncio.to_thread(self._discover_uploaded_images)
+                    | set(configured_tag_items)
+                )
+            else:
+                candidate_rel_paths = set(only_rel_paths)
+            def inspect_files():
+                result = {}
+                for rel_path in candidate_rel_paths:
+                    try:
+                        path = self._abs_plugin_data_path(rel_path)
+                        if self._is_allowed_image(path):
+                            result[rel_path] = (path, path.stat(), self._cached_sha256(path))
+                    except (OSError, ValueError):
+                        continue
+                return result
+            files = await asyncio.to_thread(inspect_files)
+            existing_rel_paths = set(files)
 
             images = self._index.setdefault("images", {})
             if not isinstance(images, dict):
@@ -64,7 +77,7 @@ class CaptionLibraryMixin:
             )
 
             stale_by_digest: dict[str, dict[str, Any]] = {}
-            for image_id in list(images.keys()):
+            for image_id in list(images.keys()) if only_rel_paths is None else ():
                 item = images.get(image_id)
                 if not isinstance(item, dict):
                     images.pop(image_id, None)
@@ -77,11 +90,9 @@ class CaptionLibraryMixin:
                     images.pop(image_id, None)
 
             for rel_path in sorted(existing_rel_paths):
-                abs_path = self._abs_plugin_data_path(rel_path)
-                stat = abs_path.stat()
+                abs_path, stat, digest = files[rel_path]
                 image_id = self._image_id(rel_path)
                 item = images.get(image_id)
-                digest = await self._cached_sha256_async(abs_path)
                 if not isinstance(item, dict) and digest in stale_by_digest:
                     item = dict(stale_by_digest[digest])
                     images[image_id] = item
@@ -229,13 +240,18 @@ class CaptionLibraryMixin:
                 if item["caption_status"] == "done":
                     item["caption_prompt_version"] = CAPTION_PROMPT_VERSION
 
-            self._save_index()
+            await self._save_index_async()
+            if only_rel_paths is not None:
+                existing_rel_paths = {self._norm_rel_path(item.get('rel_path'))
+                    for item in images.values() if isinstance(item, dict)} - {''}
             self._sync_config_image_files(existing_rel_paths)
             self._sync_config_tags(existing_rel_paths)
             self._refresh_image_tag_schema(existing_rel_paths)
-            self._last_library_signature = self._library_signature_for_rel_paths(
-                existing_rel_paths
-            )
+            # The periodic reconciliation verifies the complete tree off-thread.
+            # A single upload never rehashes or restats every existing image.
+            if only_rel_paths is None:
+                self._last_library_signature = await asyncio.to_thread(
+                    self._library_signature_for_rel_paths, existing_rel_paths)
             if caption_mode == "background":
                 self._start_caption_background_task()
 
@@ -268,7 +284,15 @@ class CaptionLibraryMixin:
             return
         if self._imagebed_import_task and not self._imagebed_import_task.done():
             return
-        signature = self._library_signature()
+        gate = getattr(self, '_library_check_gate', None)
+        if gate is None:
+            gate = self._library_check_gate = asyncio.Lock()
+        if gate.locked() or time.monotonic() < getattr(self, '_library_check_after', 0):
+            return
+        async with gate:
+            async with self._lock:
+                signature = await asyncio.to_thread(self._library_signature)
+            self._library_check_after = time.monotonic() + 5
         task_running = bool(self._caption_task and not self._caption_task.done())
         waiting_without_task = (
             bool(self._pending_caption_rel_paths(include_failed=False))
@@ -539,12 +563,9 @@ class CaptionLibraryMixin:
                     continue
                 if item.get("caption_status") != "done":
                     continue
-                try:
-                    abs_path = self._abs_plugin_data_path(rel_path)
-                except ValueError:
-                    continue
-                if not abs_path.is_file():
-                    continue
+                # The watcher reconciles the filesystem; serving metadata must
+                # not resolve/stat hundreds of originals on the server loop.
+                # Actual preview/send/delete paths still validate containment.
                 library_item = self._caption_library_image_item(item)
                 source = library_item.get("library_source", MANUAL_LIBRARY_SOURCE)
                 if source == COLLECTED_LIBRARY_SOURCE:
@@ -591,6 +612,7 @@ class CaptionLibraryMixin:
                 self._page_library_default_view_mode()
             ),
             "updated_at": int(time.time()),
+            "revision": str(getattr(self, '_library_revision', 0)),
         }
 
     def _library_items_for_source(self, source: str = "") -> list[dict[str, Any]]:
@@ -1185,13 +1207,13 @@ class CaptionLibraryMixin:
                         and item.get("caption_status") == "running"
                     ):
                         item["caption_status"] = "pending"
-                self._save_index()
-                existing_rel_paths = self._all_existing_index_rel_paths()
+                await self._save_index_async()
+                existing_rel_paths = await asyncio.to_thread(self._all_existing_index_rel_paths)
                 self._sync_config_image_files(existing_rel_paths)
                 self._sync_config_tags(existing_rel_paths)
                 self._refresh_image_tag_schema(existing_rel_paths)
                 self._last_library_signature = (
-                    self._library_signature_for_rel_paths(existing_rel_paths)
+                    await asyncio.to_thread(self._library_signature_for_rel_paths, existing_rel_paths)
                 )
             return len(
                 [
@@ -1371,7 +1393,7 @@ class CaptionLibraryMixin:
                     if not isinstance(item, dict):
                         continue
                     item["caption_status"] = "running"
-                    self._save_index()
+                    await self._save_index_async()
                     self._set_caption_progress(
                         status="running",
                         total=total,
@@ -1429,7 +1451,7 @@ class CaptionLibraryMixin:
                             paused = images.get(self._image_id(rel_path)) if isinstance(images, dict) else None
                             if isinstance(paused, dict):
                                 paused['caption_status'] = 'pending'
-                                self._save_index()
+                                await self._save_index_async()
                             attempted_rel_paths.discard(rel_path)
                             self._set_caption_progress(status='pending', message='等待当前聊天完成后继续打标签',
                                 current_image='', completed=completed, failed=failed)
@@ -1464,13 +1486,13 @@ class CaptionLibraryMixin:
                             source = "recaption"
                         else:
                             source = self._rollback_caption_failed_item(item, rel_path)
-                        self._save_index()
-                        existing_rel_paths = self._all_existing_index_rel_paths()
+                        await self._save_index_async()
+                        existing_rel_paths = await asyncio.to_thread(self._all_existing_index_rel_paths)
                         self._sync_config_image_files(existing_rel_paths)
                         self._sync_config_tags(existing_rel_paths)
                         self._refresh_image_tag_schema(existing_rel_paths)
                         self._last_library_signature = (
-                            self._library_signature_for_rel_paths(existing_rel_paths)
+                            await asyncio.to_thread(self._library_signature_for_rel_paths, existing_rel_paths)
                         )
                         remaining = len(
                             [
@@ -1534,13 +1556,13 @@ class CaptionLibraryMixin:
                             manual_tags,
                             selected_global_tags,
                         )
-                    self._save_index()
-                    existing_rel_paths = self._all_existing_index_rel_paths()
+                    await self._save_index_async()
+                    existing_rel_paths = await asyncio.to_thread(self._all_existing_index_rel_paths)
                     self._sync_config_image_files(existing_rel_paths)
                     self._sync_config_tags(existing_rel_paths)
                     self._refresh_image_tag_schema(existing_rel_paths)
                     self._last_library_signature = (
-                        self._library_signature_for_rel_paths(existing_rel_paths)
+                        await asyncio.to_thread(self._library_signature_for_rel_paths, existing_rel_paths)
                     )
                     remaining = len(
                         [

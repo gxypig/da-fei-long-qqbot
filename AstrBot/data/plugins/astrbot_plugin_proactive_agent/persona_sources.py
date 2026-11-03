@@ -16,6 +16,8 @@ def active_sources(plugin):
     from .conversation_review import REVIEW_SYSTEM
     from .local_recall import BRIEF_RULE
     from .life_state import COMPOSE_SYSTEM
+    from .persona_authority import EXPRESSION_GUIDANCE
+    from .chat_punctuation import PUNCTUATION_RULE
     rows=[]
     def add(id_,label,text,path,scene):
         if isinstance(text,str) and text.strip():rows.append({'id':id_,'label':label,'text':text,'path':path,'scene':scene,'priority':1})
@@ -24,11 +26,14 @@ def active_sources(plugin):
         ('review','审阅角色约定',REVIEW_SYSTEM,'conversation_review.py'),('brief','长短表达习惯',BRIEF_RULE,'local_recall.py'),
         ('life','主动表达',COMPOSE_SYSTEM,'life_state.py')]:add(id_,label,value,file,id_)
     add('configured_proactive','已保存的主动人格',plugin._cfg('personality',''),'plugin-config:personality','proactive')
+    add('first_generation','首次生成的表达习惯',EXPRESSION_GUIDANCE,'persona_authority.py:EXPRESSION_GUIDANCE','chat')
+    add('punctuation','聊天标点约定',PUNCTUATION_RULE,'chat_punctuation.py:PUNCTUATION_RULE','chat')
     base=Path(__file__).parent
     import json
     imported=base/'persona_import_sources.json'
     if imported.is_file():rows.extend(json.loads(imported.read_text('utf-8')))
     adapters=[(base/'dragon_character.py',['photo_caption'],'image'),(base/'visual_intent.py',['generation_note'],'image'),
+        (base/'persona_authority.py',['generation_example'],'chat'),
         ]
     for path,names,scene in adapters:
         if not path.is_file():continue
@@ -44,5 +49,14 @@ def active_sources(plugin):
                 import json
                 value=getattr(instance,'config',{}).get('send_image_style',{})
                 if value:add('gallery:saved','图库已保存表达',json.dumps(value,ensure_ascii=False),'plugin-config:send_image_style','gallery')
+                replies=getattr(instance,'config',{}).get('reply_after_search',{})
+                prose={k:v for k,v in replies.items() if k in {'custom_reply','not_found_reply','empty_library_reply'} and isinstance(v,str) and v.strip()} if isinstance(replies,dict) else {}
+                if prose:add('gallery:replies','图库已保存的回应台词',json.dumps(prose,ensure_ascii=False),'plugin-config:reply_after_search','gallery')
     except (AttributeError,TypeError):pass
-    return rows
+    for row in rows:
+        row['epoch']=2 if row['id'] in {'first_generation','punctuation','chat:generation_example','gallery:replies'} else 1
+        scene=row.get('scene', 'chat')
+        row['destination']=scene if scene in {'chat','proactive','schedule','qzone','bili','gallery','image','review'} else 'chat'
+    # Frozen import snapshots may share an ID with a current source. Keep the
+    # current implementation authoritative, retain distinct historical sources.
+    return list({row['id']:row for row in reversed(rows)}.values())[::-1]

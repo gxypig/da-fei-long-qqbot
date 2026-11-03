@@ -35,10 +35,10 @@ COMPOSE_SYSTEM='''为大肥龙的一次主动联系评估时机并写正文。�
 
 async def role_context(plugin,origin,recent=(),cid=None,purpose='proactive'):
     from .dragon_character import proactive_note
-    from .persona_authority import PRIORITY,FUNCTIONAL_STYLE,bind_origin,role_text
+    from .persona_authority import PRIORITY,functional_style,bind_origin,role_text
     state=await bind_origin(plugin,origin,cid,purpose)
     life=getattr(plugin,'_life',None)
-    return (role_text('qzone' if origin=='qzone' else purpose,state)+'\n'+FUNCTIONAL_STYLE
+    return (role_text('qzone' if origin=='qzone' else purpose,state)+'\n'+functional_style(state)
         +proactive_note(origin,plugin._cfg,recent,state.get('persona_prompt',''),state)
         +(life.context(origin) if life else '')+PRIORITY)
 

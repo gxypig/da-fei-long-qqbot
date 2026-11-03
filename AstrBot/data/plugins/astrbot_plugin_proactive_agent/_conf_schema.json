@@ -402,5 +402,25 @@
     "type": "string",
     "default": "04:00",
     "hint": "HH:MM；错过的每日更新只补一次"
+  },
+  "incoming_visual_enabled": {
+    "description": "联合理解同一人分开发送的图片与文字，补充原图清晰局部",
+    "type": "bool",
+    "default": true
+  },
+  "incoming_visual_context_seconds": {
+    "description": "相邻图文资料最多保留秒数（5至120，仅当前会话同一人）",
+    "type": "int",
+    "default": 45
+  },
+  "incoming_visual_burst_ms": {
+    "description": "图文连发合并窗口毫秒（0至1500，仅图片或看图请求，普通文字不等待）",
+    "type": "int",
+    "default": 650
+  },
+  "incoming_visual_detail_tiles": {
+    "description": "长截图与小字识别最多补充原图局部数（0至6，每次请求总上限）",
+    "type": "int",
+    "default": 4
   }
 }

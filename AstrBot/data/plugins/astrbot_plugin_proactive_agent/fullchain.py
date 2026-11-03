@@ -17,6 +17,8 @@ _conversion=ContextVar('qqbot_conversion',default=None)
 
 def install_fullchain(plugin):
     lease=HookLease('fullchain',plugin)
+    from .incoming_visual import install as install_incoming_visual
+    restore_visual=install_incoming_visual(plugin)
     from .db_pressure import DatabasePressure
     plugin._db_pressure=DatabasePressure(plugin)
     restore_db=plugin._db_pressure.install()
@@ -119,6 +121,7 @@ def install_fullchain(plugin):
             job.sources[0]['text']=job.text;event.set_extra('qqbot_reply_job',job)
         job.owner=asyncio.current_task()
         event.set_extra('qqbot_received_at',job.received)
+        plugin._incoming_visual.observe(event)
         token=current_job.set(job)
         from .persona_authority import begin_task,end_task
         persona_token=begin_task()
@@ -188,6 +191,7 @@ def install_fullchain(plugin):
             fence=get_fence(manager)
             job.session_epoch=fence.epoch(job.origin) if fence else 0
             bind_route(job.origin,job.sender,job.source_id,bool(event.get_group_id()))
+            plugin._incoming_visual.admitted(event)
             yield True
 
     @wraps(old_process)
@@ -238,6 +242,7 @@ def install_fullchain(plugin):
     for cls,name,wrapper,_ in patches:setattr(cls,name,wrapper)
     def restore():
         lease.close()
+        restore_visual()
         restore_db()
         queue.close()
         if FunctionToolExecutor.__dict__['execute'] is wrapped_tool:FunctionToolExecutor.execute=tool_descriptor
