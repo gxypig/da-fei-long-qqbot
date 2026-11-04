@@ -74,6 +74,40 @@ class VoicePanel(unittest.IsolatedAsyncioTestCase):
             response=await self.post(action='audition',mode='paid',request_id='request-paid')
         self.assertEqual(response.status_code,400);synth.assert_not_awaited()
 
+    async def test_expression_save_is_partial_versioned_and_rollback_safe(self):
+        before=copy.deepcopy(self.config)
+        r=await self.post(action='expression',enabled=False,revision=revision(self.config))
+        self.assertEqual(r.status_code,200)
+        self.assertFalse(self.config['provider_tts_settings']['fish_expression_enabled'])
+        self.assertEqual(self.config['provider'],before['provider'])
+        self.assertEqual(self.config['provider_tts_settings']['trigger_probability'],.05)
+        self.assertEqual((await self.post(action='expression',enabled=True,revision='old')).status_code,409)
+        with patch.object(self.config,'save_config',return_value=False):
+            r=await self.post(action='expression',enabled=True,revision=revision(self.config))
+        self.assertEqual(r.status_code,503)
+        self.assertFalse(self.config['provider_tts_settings']['fish_expression_enabled'])
+
+    async def test_preview_is_local_side_effect_free_and_does_not_need_paid_consent(self):
+        before=copy.deepcopy(self.config)
+        with patch('data.plugins.astrbot_plugin_proactive_agent.voice_panel.synthesize',AsyncMock()) as synth:
+            r=await self.post(action='preview',mode='paid',text='晚安')
+        self.assertEqual(r.status_code,200);synth.assert_not_awaited()
+        d=(await r.get_json())['data'];self.assertEqual(d['preview']['text'],'[soft tone]晚安')
+        self.assertEqual(d['network_requests'],0);self.assertEqual(self.config,before)
+        self.assertFalse(hasattr(self.plugin,'_voice_recent'))
+
+    async def test_preview_and_audition_respect_unsaved_optout_without_saving(self):
+        with patch('data.plugins.astrbot_plugin_proactive_agent.voice_panel.synthesize',AsyncMock(return_value=(str(self.audio),{}))) as synth:
+            r=await self.post(action='audition',text='晚安',expression_enabled=False,request_id='expression-off')
+        self.assertEqual(r.status_code,200)
+        self.assertEqual((await r.get_json())['data']['preview']['text'],'晚安')
+        self.assertFalse(synth.call_args.kwargs['expression'])
+        self.assertNotIn('fish_expression_enabled',self.config['provider_tts_settings'])
+
+    async def test_expression_bad_input_rejected(self):
+        self.assertEqual((await self.post(action='expression',enabled='false',revision=revision(self.config))).status_code,400)
+        self.assertEqual((await self.post(action='preview',text='好',instruction=['not text'])).status_code,400)
+
     async def test_inflight_audition_cannot_be_submitted_twice(self):
         entered=asyncio.Event();finish=asyncio.Event()
         async def synth(*a,**kw):entered.set();await finish.wait();return str(self.audio),{'model':FREE,'state':'synthesized'}

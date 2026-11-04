@@ -1,0 +1,44 @@
+{
+  "version": "1.23.0-rc3",
+  "date": "2026-11-04",
+  "tests": {
+    "private-tests.log": 1147,
+    "public-tests.log": 1131
+  },
+  "audition": {
+    "samples": 8,
+    "successes": 8,
+    "qq_sends": 0,
+    "planning_median_ms": 0.015699999494245276,
+    "planning_p95_ms": 0.03565000224625692,
+    "by_mode": {
+      "False": {
+        "median_ms": 3133.0,
+        "max_ms": 5562
+      },
+      "True": {
+        "median_ms": 3375.5,
+        "max_ms": 3953
+      }
+    },
+    "limits": "Small interleaved free-endpoint synthesis sample, not QQ delivery or subjective listening verification"
+  },
+  "notes": [
+    "No extra analysis-model request; native free Fish and voice kept",
+    "Plain transcript retained in records, emoji selection, dual text and fallback",
+    "Browser visual and subjective listening QA not performed; no real QQ test sends",
+    "Eight interleaved samples cannot establish production latency; comparison retains all samples"
+  ],
+  "deployment": {
+    "healthy_checks": 20,
+    "settings_preserved": true,
+    "expression_enabled": true
+  },
+  "live_panel_audition": {
+    "state": "synthesized",
+    "elapsed_ms": 5344,
+    "duration_seconds": 5.712108843537415,
+    "cues": 2,
+    "qq_sends": 0
+  }
+}

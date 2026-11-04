@@ -3,6 +3,7 @@ import asyncio,base64,copy,hashlib,json,re,time
 from pathlib import Path
 from quart import request,jsonify
 from .fish_voice import FREE,PAID,BASE,validate,synthesize,error_kind
+from .voice_expression import plan
 
 def profiles(config):
     values=config.get('provider',[])
@@ -22,6 +23,7 @@ def view(plugin):
     return {'revision':revision(config),'mode':mode,'enabled':config.get('provider_tts_settings',{}).get('enable',False),
         'voice':current.get('display_name') or current.get('fishaudio-tts-character') or current.get('id'),
         'model':current.get('model'),'key_configured':bool(current.get('api_key')),
+        'expression_enabled':config.get('provider_tts_settings',{}).get('fish_expression_enabled',True),
         'available':{k:bool(v) for k,v in values.items()},'recent':recent,
         'price':{'free':0,'paid_usd_per_million_utf8_bytes':15},
         'usage_note':'按请求UTF-8字节估算，失败请求及重试是否计费以服务商账单为准；合成成功不等于已发送',
@@ -35,11 +37,31 @@ def register_voice_panel(plugin):
         body=await request.get_json(silent=True)
         if not isinstance(body,dict) or request.content_length and request.content_length>8192:return jsonify(status='error',message='请求格式错误'),400
         kind=body.get('action');mode=body.get('mode','free')
-        if mode not in {'free','paid','mimo'} or kind not in {'check','audition','switch'}:return jsonify(status='error',message='语音操作不支持'),400
-        if mode=='paid' and body.get('confirm_paid') is not True:return jsonify(status='error',message='付费模式需明确确认：15美元／百万UTF-8字节；免费失败不会自动转付费'),400
+        if mode not in {'free','paid','mimo'} or kind not in {'check','audition','switch','expression','preview'}:return jsonify(status='error',message='语音操作不支持'),400
+        if mode=='paid' and kind not in {'expression','preview'} and body.get('confirm_paid') is not True:return jsonify(status='error',message='付费模式需明确确认：15美元／百万UTF-8字节；免费失败不会自动转付费'),400
         config=plugin.context.get_config();profile=profiles(config).get(mode)
-        if not profile:return jsonify(status='error',message='请先在AstrBot语音提供商中配置该模式'),400
+        if not profile and kind not in {'expression','preview'}:return jsonify(status='error',message='请先在AstrBot语音提供商中配置该模式'),400
         try:
+            if kind=='expression':
+                if type(body.get('enabled')) is not bool:return jsonify(status='error',message='语气开关必须为布尔值'),400
+                async with lock:
+                    if body.get('revision')!=revision(config):return jsonify(status='error',message='语音配置已变化，请刷新后重试'),409
+                    previous=copy.deepcopy(config.get('provider_tts_settings',{}))
+                    try:
+                        config.setdefault('provider_tts_settings',{})['fish_expression_enabled']=body['enabled']
+                        if config.save_config() is False:raise OSError('save failed')
+                    except Exception:
+                        config['provider_tts_settings']=previous;raise
+                    plugin.context.provider_manager.provider_tts_settings=config['provider_tts_settings']
+                    return jsonify(status='ok',data=view(plugin))
+            if kind in {'preview','audition'}:
+                text=body.get('text','本龙在呢，听得到吗')
+                if not isinstance(text,str) or not text.strip() or len(text)>200:return jsonify(status='error',message='试听文字请填1至200字'),400
+                enabled=body.get('expression_enabled',config.get('provider_tts_settings',{}).get('fish_expression_enabled',True))
+                direction=body.get('instruction','')
+                if type(enabled) is not bool or not isinstance(direction,str) or len(direction)>200:return jsonify(status='error',message='语气设置格式错误'),400
+                prepared=plan(text,enabled=enabled and mode in {'free','paid'},instruction=direction)
+                if kind=='preview':return jsonify(status='ok',data={'preview':prepared,'network_requests':0})
             if kind=='switch':
                 async with lock:
                     if body.get('revision')!=revision(config):return jsonify(status='error',message='语音配置已变化，请刷新后再切换'),409
@@ -68,8 +90,6 @@ def register_voice_panel(plugin):
                 # Public metadata only; neither account info nor API key is sent.
                 return jsonify(status='ok',data={k:data.get(k) for k in ('_id','title','state','visibility','languages')})
             if audition_lock.locked():return jsonify(status='error',message='上一条试听仍在生成，请稍候'),409
-            text=body.get('text','本龙在呢，听得到吗')
-            if not isinstance(text,str) or not text.strip() or len(text)>200:return jsonify(status='error',message='试听文字请填1至200字'),400
             reqid=body.get('request_id')
             if not isinstance(reqid,str) or not re.fullmatch('[a-zA-Z0-9_-]{8,80}',reqid):return jsonify(status='error',message='缺少试听请求编号'),400
             if reqid in submitted:return jsonify(status='error',message='本次试听已经提交，请勿重复生成'),409
@@ -83,12 +103,12 @@ def register_voice_panel(plugin):
                     validate(provider)
                 else:provider=plugin.context.provider_manager.inst_map.get(profile['id'])
                 if provider is None:return jsonify(status='error',message='语音提供商未加载'),503
-                path,meta=await synthesize(provider,text,explicit=True)
+                path,meta=await synthesize(provider,text,explicit=True,expression=enabled,instruction=direction)
                 plugin._voice_recent=(getattr(plugin,'_voice_recent',[])+[meta])[-20:]
                 if not path:return jsonify(status='error',message='试听未生成：'+meta.get('error','unknown'),data=meta),503
                 data=await asyncio.to_thread(Path(path).read_bytes)
                 if len(data)>8*1024*1024:return jsonify(status='error',message='试听音频过大'),400
-                return jsonify(status='ok',data={'mime':'audio/wav','audio':base64.b64encode(data).decode('ascii'),'metrics':meta})
+                return jsonify(status='ok',data={'mime':'audio/wav','audio':base64.b64encode(data).decode('ascii'),'metrics':meta,'preview':prepared})
         except asyncio.CancelledError:raise
         except Exception as exc:
             reason,_=error_kind(exc)

@@ -62,16 +62,21 @@ def normalize_wav(path):
         finally:temporary.unlink(missing_ok=True)
     return {'duration_seconds':actual/rate,'sample_rate':rate,'channels':channels,'header_finalized':declared!=actual}
 
-async def synthesize(provider,text,*,explicit=False,budget=None):
+async def synthesize(provider,text,*,explicit=False,budget=None,expression=False,instruction=''):
     """One total deadline, including the sole possible 429/5xx retry."""
-    started=time.monotonic();scope={'text_sha256':hashlib.sha256(text.encode()).hexdigest(),
-        'bytes':len(text.encode('utf-8')),'model':str(provider.get_model()),'voice':getattr(provider,'reference_id',None),
+    from .voice_expression import plan,MODELS
+    started=time.monotonic()
+    delivery=plan(text,enabled=expression and provider.get_model() in MODELS,instruction=instruction)
+    spoken=delivery.pop('text')
+    scope={'text_sha256':hashlib.sha256(text.encode()).hexdigest(),
+        'bytes':len(spoken.encode('utf-8')),'transcript_bytes':len(text.encode('utf-8')),
+        'expression':delivery,'model':str(provider.get_model()),'voice':getattr(provider,'reference_id',None),
         'provider_id':getattr(provider,'provider_config',{}).get('id'),
         'attempts':0,'state':'generating','at':time.time()}
     token=_call.set(scope)
     try:
         async with asyncio.timeout(budget if budget is not None else 15 if explicit else 8):
-            audio=await provider.get_audio(text)
+            audio=await provider.get_audio(spoken)
             if audio and str(provider.get_model()) in {FREE,PAID}:
                 scope.update(await asyncio.to_thread(normalize_wav,audio))
         if not audio:raise VoiceFailure('empty_audio')
@@ -134,13 +139,15 @@ async def transform(plugin,stage,event,*,force=False,forbidden=False):
     provider=await stage.ctx.plugin_manager.context.get_using_tts_provider_async(event.unified_msg_origin)
     if provider is None:return
     chain=[];texts=[];records=[]
+    expression=cfg.get('fish_expression_enabled',True)
     deadline=time.monotonic()+(15 if force else 8)
     async def flush():
         if not texts:return
         merged=''.join(texts);texts.clear()
         for paragraph in paragraphs(merged) if force else [merged]:
             budget=15 if force and len(text)>200 else max(.001,deadline-time.monotonic())
-            path,meta=await synthesize(provider,paragraph,explicit=force,budget=budget)
+            path,meta=await synthesize(provider,paragraph,explicit=force,budget=budget,
+                expression=expression,instruction=event.get_message_str())
             records.append(meta)
             if path:
                 chain.append(Record(file=path,url=path,text=paragraph))
@@ -169,7 +176,10 @@ async def replace_stale_audio(plugin,event,parts,text,origin):
         previous=next((r for r in reversed(history) if r.get('state')=='synthesized'),None)
         if (provider and previous and previous.get('model')==provider.get_model()
                 and previous.get('voice')==getattr(provider,'reference_id',None)):
-            audio,meta=await synthesize(provider,text,explicit=True)
+            # Recompute from the approved rewrite; stale offsets cannot leak in.
+            cfg=plugin.context.get_config().get('provider_tts_settings',{})
+            audio,meta=await synthesize(provider,text,explicit=True,
+                expression=cfg.get('fish_expression_enabled',True),instruction=event.get_message_str())
             event.set_extra('qqbot_voice_synthesis',history+[meta])
     replacement=(await Event._from_segment_to_dict(Record(file=audio,url=audio,text=text))) if audio else {'type':'text','data':{'text':text}}
     out=[];inserted=False

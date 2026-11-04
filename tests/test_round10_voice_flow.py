@@ -19,7 +19,7 @@ class VoiceFlow(unittest.IsolatedAsyncioTestCase):
         self.cfg['platform_settings']['segmented_reply']['enable']=False
         self.cfg['content_safety']['also_use_in_response']=False;self.cfg['t2i']=False
         self.provider=SimpleNamespace(get_audio=AsyncMock(return_value='test.wav'),get_model=lambda:'test-tts',provider_config={'id':'test'})
-        self.context=SimpleNamespace(get_using_tts_provider_async=AsyncMock(return_value=self.provider))
+        self.context=SimpleNamespace(get_using_tts_provider_async=AsyncMock(return_value=self.provider),get_config=lambda:self.cfg)
         self.stage=ResultDecorateStage();await self.stage.initialize(SimpleNamespace(astrbot_config=self.cfg,plugin_manager=SimpleNamespace(context=self.context)))
         self.plugin=SimpleNamespace(_cfg={}.get,_platform=lambda:None,_audit=Mock(),context=self.context)
         self.addCleanup(install_voice_memory(self.plugin))
@@ -79,6 +79,39 @@ class VoiceFlow(unittest.IsolatedAsyncioTestCase):
         await self.process(e)
         self.assertEqual([type(p).__name__ for p in e.result.chain],['Record','Plain'])
         self.assertEqual(component_body(e.result),'晚安');self.assertEqual(e.get_extra('qqbot_voice_result_text'),'晚安')
+
+    async def test_expression_is_only_on_fish_input_memory_and_emoji_keep_final_words(self):
+        self.provider.get_model=lambda:FREE
+        self.cfg['provider_tts_settings']['dual_output']=True
+        e=Event('用语音回复');e.result.chain=[Plain('哼哼，早点休息')]
+        seen=[];e.set_extra('qqbot_emoji_final_ready',seen.append)
+        with patch('data.plugins.astrbot_plugin_proactive_agent.fish_voice.normalize_wav',return_value={}):
+            await self.process(e)
+        self.provider.get_audio.assert_awaited_once_with('[confident]哼哼，[soft tone]早点休息')
+        self.assertEqual(seen,['哼哼，早点休息'])
+        self.assertEqual(component_body(e.result),'哼哼，早点休息')
+        self.assertTrue(all(p.text=='哼哼，早点休息' for p in e.result.chain))
+        self.assertEqual(e.get_extra('qqbot_voice_result_text'),'哼哼，早点休息')
+        e.clear_result();await self.process(e)
+        self.assertEqual(self.provider.get_audio.await_count,1)
+
+    async def test_expression_failure_falls_back_to_unmarked_full_text(self):
+        self.provider.get_model=lambda:FREE
+        self.provider.get_audio.side_effect=RuntimeError('network failed')
+        e=Event('用语音');e.result.chain=[Plain('晚安，早点休息')]
+        await self.process(e)
+        self.assertEqual(component_body(e.result),'晚安，早点休息')
+        self.assertEqual(self.provider.get_audio.await_count,1)
+
+    async def test_expression_optout_and_automatic_voice_use_same_path(self):
+        self.provider.get_model=lambda:FREE
+        for enabled in (True,False):
+            self.cfg['provider_tts_settings']['fish_expression_enabled']=enabled
+            self.provider.get_audio.reset_mock()
+            e=Event('聊聊');e.result.chain=[Plain('晚安')]
+            with patch('data.plugins.astrbot_plugin_proactive_agent.fish_voice.normalize_wav',return_value={}):
+                await self.process(e,roll=.01)
+            self.provider.get_audio.assert_awaited_once_with('[soft tone]晚安' if enabled else '晚安')
 
     async def test_rewritten_audio_invalidates_original_and_one_resynthesis_limit(self):
         e=Event('语音回复');e.set_extra('qqbot_voice_synthesis',[{'state':'synthesized','model':'test-tts','voice':None}])
