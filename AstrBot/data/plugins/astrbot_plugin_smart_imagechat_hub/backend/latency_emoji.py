@@ -58,8 +58,18 @@ def local_candidates(text, candidates, *, ambiguous=False):
     Reuse the fast retriever's scoring primitives instead of its fixed top-10
     wrapper, so widening never mutates its global limit or truncates the library.
     """
-    profile = _fast_query_profile(_tone_text(text), candidates)
-    ranked = [_score_fast_candidate(profile, item) for item in candidates]
+    # Search confirmed visual facts as well as old tags. These extra search
+    # terms are temporary: keep the real asset identity unchanged so the final
+    # file/version check does not reject our own ranked candidate.
+    searchable=[]
+    for item in candidates:
+        sem=item.get('semantic') or {}
+        terms=[sem.get('description',''),*sem.get('reliable_text',[]),
+               *sem.get('emotion',[]),*sem.get('conditions',[])]
+        searchable.append({**item,'tags':[*_item_tags(item),*[s for s in terms if isinstance(s,str) and s]]})
+    profile = _fast_query_profile(_tone_text(text), searchable)
+    ranked = [{**item,**{k:v for k,v in _score_fast_candidate(profile,search).items() if k.startswith('proactive_fast_')}}
+              for item,search in zip(candidates,searchable)]
     ranked.sort(key=lambda item: (
         item.get("proactive_fast_score", 0), _fallback_rank(item),
         len(item.get("proactive_fast_hints", [])), str(item.get("id", "")),
@@ -349,7 +359,9 @@ class LatencyEmojiMixin:
             await turn.final_ready.wait()
             if not self._valid_latency_turn(turn) or not turn.text.strip():return
             turn.selected_text=turn.text
-            turn.candidates=local_candidates(turn.text,turn.pool,ambiguous=True)
+            from data.plugins.astrbot_plugin_proactive_agent.emoji_match import contradiction
+            eligible=[item for item in turn.pool if not contradiction(turn.text,turn.character,item)]
+            turn.candidates=local_candidates(turn.text,eligible,ambiguous=True)
             turn.prediction=turn.companion.prepare_emoji_selection(turn.event,candidates=copy.deepcopy(turn.candidates),
                 final_text=turn.text,character=turn.character)
             if turn.prediction is None:return

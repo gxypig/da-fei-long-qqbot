@@ -135,7 +135,10 @@ def install_voice_memory(plugin):
 
     @wraps(old_decorate)
     async def decorate(stage,event):
-        if not lease.active:
+        # PipelineScheduler can revisit this stage after RespondStage cleared
+        # the result. Do not publish an empty "replacement" body or erase the
+        # confirmed voice transcript: late optional images still depend on it.
+        if not lease.active or not getattr(event.get_result(),'chain',None):
             async for x in old_decorate(stage,event):yield x
             return
         force=explicit_voice_request(event.get_message_str())
@@ -145,6 +148,7 @@ def install_voice_memory(plugin):
         original_stage=stage;stage=copy.copy(stage);stage.tts_trigger_probability=0.0
         force=force and not forbidden
         async for x in old_decorate(stage,event):yield x
+        if not getattr(event.get_result(),'chain',None):return
         final_ready=event.get_extra('qqbot_emoji_final_ready')
         if callable(final_ready):final_ready(component_body(event.get_result()))
         from .fish_voice import transform

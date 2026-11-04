@@ -19,6 +19,15 @@ def item(action='goodnight',ocr='晚安',**changes):return {'id':'one','content_
 def decision(text):return {'image_id':'one','final_sha256':fingerprint(text),'reason':'对应语境','checks':{k:True for k in ('intent','ocr','target','emotion','relationship')}}
 
 class Matching(unittest.TestCase):
+    def test_visible_emotion_needs_semantic_approval_not_swear_keywords(self):
+        text='本龙可爱这事还用你说';pic=item('affirm','',intensity=2)
+        self.assertEqual(contradiction(text,{},pic),'')
+        self.assertFalse(accepted(text,{},pic))
+        self.assertTrue(accepted(text,{},pic,decision(text)))
+        negative=decision(text);negative['checks']['emotion']=False
+        self.assertFalse(accepted(text,{},pic,negative))
+        self.assertFalse(accepted(text,{'mood':'serious'},pic,decision(text)))
+
     def test_real_wrong_matches_rejected_even_with_model_approval(self):
         for text,pic in [('睡得还行就好，没耽误事吧？',item('confirm_guess','你猜对了')),('路上别为了赶时间着急',item('replace','换一个'))]:
             self.assertFalse(accepted(text,{},pic,decision(text)))
@@ -162,6 +171,10 @@ class FinalModel(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p._generate_json.await_count,1)
         data=p._generate_json.await_args.args[1]
         self.assertEqual(data['final_text'],'哈哈笑死');self.assertIn('semantic',data['candidates'][0])
+        supplied=data['candidates'][0]['semantic']
+        for key in ('description','reliable_text','emotion','intensity','actions','target','conditions','exclusions','relationship'):
+            self.assertEqual(supplied[key],pic['semantic'][key])
+        self.assertNotIn('content_hash',supplied);self.assertNotIn('ocr',supplied)
 
     async def test_exact_goodnight_no_model(self):
         p=object.__new__(Main);p.config={};p._audit=lambda *a:None;p._work=None;p._generate_json=AsyncMock()

@@ -218,7 +218,10 @@ class ReplyPipelineMixin:
         from .emoji_match import SYSTEM,shortcut,accepted,fingerprint,contradiction
         state=character or event.get_extra('qqbot_character') or {}
         candidates=[r for r in candidates if not contradiction(final_text,state,r)][:30]
-        items=[{'id':str(r['id']),'semantic':r['semantic']} for r in candidates]
+        # The local gate already checked hash/version/OCR confidence/type.
+        # Keep all matching facts, omit duplicated OCR and storage metadata.
+        fields=('description','reliable_text','emotion','intensity','actions','target','conditions','exclusions','relationship')
+        items=[{'id':str(r['id']),'semantic':{k:r['semantic'].get(k) for k in fields}} for r in candidates]
         digest=fingerprint(final_text)
         async def choose():
             for item in candidates:
@@ -231,7 +234,11 @@ class ReplyPipelineMixin:
                 from .work_scheduler import model_work
                 work=getattr(self,'_work',None)
                 admission=work.decoration_work(event) if work else nullcontext()
-                async with asyncio.timeout(8):
+                # Delivery owns the user's post-confirmation grace deadline
+                # and cancels this task when it expires. Do not abandon at 8s
+                # while that send window is still open (e.g. 10s + transport).
+                # A hard cap also bounds direct callers without a delivery task.
+                async with asyncio.timeout(12):
                     with model_work('auxiliary'),admission:
                         value=json_object(await self._generate_json(SYSTEM,{
                             'user':(event.get_message_str() or '')[:1000],'final_text':final_text,
@@ -241,7 +248,9 @@ class ReplyPipelineMixin:
                 value.update(final_sha256=digest,source='final_model')
                 selected=next((r for r in candidates if str(r['id'])==value.get('image_id')),None)
                 if not selected or not accepted(final_text,state,selected,value):
-                    return {'image_ids':[],'reason':'no_affirmative_match','final_sha256':digest}
+                    return {'image_ids':[],'reason':'no_affirmative_match','final_sha256':digest,
+                        'model_reason':str(value.get('reason',''))[:300],'checks':value.get('checks'),
+                        'rejected_by':contradiction(final_text,state,selected) if selected else 'no_selected_candidate'}
                 return {**value,'image_ids':[str(selected['id'])]}
             except asyncio.CancelledError:raise
             except Exception as exc:

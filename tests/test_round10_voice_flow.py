@@ -39,6 +39,18 @@ class VoiceFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen,['本龙在呢，你说']);self.assertEqual(e.get_extra('qqbot_voice_result_text'),'本龙在呢，你说')
         self.assertEqual(e.get_extra('qqbot_voice_synthesis')[0]['state'],'synthesized')
 
+    async def test_native_pipeline_empty_reentry_keeps_completed_body_and_voice_fact(self):
+        # The real scheduler re-enters later stages after RespondStage clears
+        # the result. This is lifecycle cleanup, not a new empty reply.
+        e=Event('用语音回复');e.result.chain=[Plain('本龙在呢')]
+        seen=[];e.set_extra('qqbot_emoji_final_ready',seen.append)
+        await self.process(e)
+        e.clear_result()
+        await self.process(e)
+        self.assertEqual(seen,['本龙在呢'])
+        self.assertEqual(e.get_extra('qqbot_voice_result_text'),'本龙在呢')
+        self.provider.get_audio.assert_awaited_once()
+
     async def test_probability_and_200_limit_no_call_for_ordinary_text(self):
         for text,roll,count in [('短句',.01,1),('短句',.1,0),('长'*201,.01,0)]:
             self.provider.get_audio.reset_mock();e=Event('聊聊');e.result.chain=[Plain(text)]

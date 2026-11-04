@@ -1,0 +1,23 @@
+{
+  "version": "1.23.0-rc2",
+  "test_counts": {
+    "private-tests.log": 1125,
+    "public-tests.log": 1109
+  },
+  "selector_replay": {
+    "cases": 13,
+    "selected": 11,
+    "no_match": 2,
+    "timeouts": 0,
+    "scope": "Each previously triggered example replayed independently against the same configured model and cached real image facts. Not a measured long-run QQ send rate."
+  },
+  "probability_test": "100 controlled draws at each of 35% and 80%; one draw per eligible turn, all compatible selected attachments delivered in simulated transport",
+  "native_cleanup": "Both text and voice with delayed image selection survive cleared-result stage re-entry",
+  "qq_test_sends": 0,
+  "image_memory": "Confirmed cached facts; original recipient recorded; group comments, own follow-up, quotes and cross-session isolation tested",
+  "date": "2026-11-04",
+  "validation_limits": [
+    "No real QQ test sends or long-run post-deployment frequency measurement",
+    "No new full main-model latency benchmark; nonblocking text boundary verified in tests"
+  ]
+}

@@ -45,6 +45,28 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.images.stats['confirmed_images'],1);self.assertIn('content_hash',self.ledger.note(self.origin,self.cid))
         self.assertEqual(self.ledger.note(self.origin,'reset-cid'),'')
 
+    async def test_group_member_can_comment_on_bot_image_sent_to_another_member(self):
+        attachment=await self.capture();digest=attachment['content_hash']
+        self.images.store.put(digest,{**self.images.store.rows[digest],
+            'semantic':safe_semantic({**SEMANTIC_FIELDS,'description':'白龙比心','ocr':[],
+              'text_complete':True,'emotion':['亲近'],'inferred_usage':['表达好感']},content_hash=digest)})
+        sent=await self.send(attachment)
+        self.ledger.store.put(sent,{**self.ledger.store.rows[sent],'sender':'original-member'})
+        e=event(text='这表情好可爱');e.get_sender_id=lambda:'different-member';e.get_messages=lambda:[]
+        req=SimpleNamespace(conversation=SimpleNamespace(cid=self.cid),system_prompt='',image_urls=[])
+        await self.images.enrich(e,req)
+        self.assertIn('白龙比心',req.system_prompt);self.assertIn('original-member',req.system_prompt)
+        self.assertIn('"sent_by": "bot"',req.system_prompt);self.assertFalse(req.image_urls)
+        self.provider.text_chat.assert_not_awaited()
+        # A stale image addressed to this member must not hide an explicit
+        # comment on the group's current sticker.
+        older=await self.capture(PNG+b'older');old_id=await self.send(older)
+        self.ledger.store.put(old_id,{**self.ledger.store.rows[old_id],'sender':'different-member','at':self.ledger.store.rows[sent]['at']-1})
+        req.system_prompt='';await self.images.enrich(e,req)
+        self.assertIn('白龙比心',req.system_prompt)
+        e.unified_msg_origin='p:GroupMessage:other';req.system_prompt=''
+        await self.images.enrich(e,req);self.assertEqual(req.system_prompt,'')
+
     async def test_ocr_uncertainty_reuses_first_result_unless_recheck_is_explicit(self):
         attachment=await self.capture();await self.send(attachment)
         self.plugin._work.busy=lambda:False

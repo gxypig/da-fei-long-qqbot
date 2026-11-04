@@ -112,6 +112,15 @@ class Companion:
 
 
 class LocalRecall(unittest.TestCase):
+    def test_recall_uses_visual_facts_without_mutating_asset_identity(self):
+        rows=[item(str(i),['普通']) for i in range(50)]
+        target=item('untagged',['普通']);target['semantic']['conditions']=['比心表达亲近']
+        rows.append(target);before=copy.deepcopy(rows)
+        selected=local_candidates('给你比心',rows,ambiguous=True)
+        self.assertIn('untagged',[r['id'] for r in selected])
+        found=next(r for r in selected if r['id']=='untagged')
+        self.assertEqual(found['tags'],target['tags']);self.assertEqual(rows,before)
+
     def test_full_library_scored_before_top10_and_never_pruned(self):
         rows = [item(str(i), ["其他"]) for i in range(150)] + [item("target", ["开心", "大笑"])]
         before = copy.deepcopy(rows)
@@ -221,6 +230,38 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
             for outcome in outcomes:
                 if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
                     raise outcome
+
+    async def test_native_cleanup_reentry_does_not_cancel_late_text_or_voice_emoji(self):
+        from astrbot.core.pipeline.result_decorate.stage import ResultDecorateStage
+        from astrbot.core.config.default import DEFAULT_CONFIG
+        from astrbot.core.star.star_handler import star_handlers_registry
+        from astrbot.core.star.session_llm_manager import SessionServiceManager
+        from data.plugins.astrbot_plugin_proactive_agent.voice_memory import install_voice_memory
+        cfg=copy.deepcopy(DEFAULT_CONFIG)
+        cfg['platform_settings']['segmented_reply']['enable']=False
+        cfg['provider_tts_settings'].update(enable=True,trigger_probability=.05,dual_output=False,use_file_service=False)
+        cfg['t2i']=False;cfg['content_safety']['also_use_in_response']=False
+        provider=SimpleNamespace(get_audio=AsyncMock(return_value='test.wav'),get_model=lambda:'test-tts',provider_config={'id':'test'})
+        context=SimpleNamespace(get_using_tts_provider_async=AsyncMock(return_value=provider))
+        stage=ResultDecorateStage();await stage.initialize(SimpleNamespace(astrbot_config=cfg,plugin_manager=SimpleNamespace(context=context)))
+        restore=install_voice_memory(SimpleNamespace(context=context,_platform=lambda:None,_cfg={}.get,_audit=Mock()))
+        try:
+            with patch.object(star_handlers_registry,'get_handlers_by_event_type',return_value=[]),patch.object(SessionServiceManager,'should_process_tts_request',AsyncMock(return_value=True)),patch('random.random',return_value=.99):
+                for request in ('聊聊','用语音回复'):
+                    with self.subTest(request=request):
+                        self.companion.release.clear();event=Event(request)
+                        turn=await self.start(event)
+                        await self.p._maybe_append_proactive_emoji(event)
+                        async for _ in stage.process(event):pass
+                        await self.sent(event)
+                        event.clear_result()  # RespondStage's real cleanup
+                        async for _ in stage.process(event):pass  # scheduler re-entry
+                        self.assertFalse(turn.closed)
+                        self.companion.release.set();await self.drain(turn)
+                        self.assertTrue(turn.confirmed);self.assertIsNotNone(turn.path)
+                self.assertEqual(self.p.context.send_message.await_count,2)
+                self.assertNotIn('body_changed',self.p._latency_emoji_stats)
+        finally:restore()
 
     async def test_input_prepares_only_locally_final_body_starts_one_selection(self):
         turn=await self.start()
@@ -690,28 +731,28 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn.selection_source, "prediction")
         self.p._proactive_emoji_probability_hit.assert_called_once()
 
-    async def test_35_percent_probability_is_applied_once_and_semantic_hits_are_not_lost(self):
-        self.cfg["trigger_probability"] = "0.35"
+    async def test_configured_35_and_80_percent_probability_applied_once_without_lost_hits(self):
         self.p._to_float = SmartImageSenderPlugin._to_float.__get__(self.p)
         self.p._proactive_emoji_probability_hit = RetrievalMixin._proactive_emoji_probability_hit.__get__(self.p)
         self.p._proactive_emoji_embed = Mock(return_value=False)
         self.companion.release.set()
-        rolls = [.1 if i % 20 < 7 else .9 for i in range(100)]
-        with patch("data.plugins.astrbot_plugin_smart_imagechat_hub.backend.retrieval.random.random", side_effect=rolls) as roll:
-            for _ in range(100):
-                event = Event()
-                event.result.chain[0].text = "本龙给你鼓个掌"
-                turn = await self.start(event)
-                await self.decorate(event)
-                if isinstance(turn, EmojiTurn):
-                    await asyncio.wait_for(asyncio.shield(turn.prepare), 1)
-                await self.sent(event)
-                if isinstance(turn, EmojiTurn): await self.drain(turn)
-        self.assertEqual(roll.call_count, 100)
-        self.assertEqual(self.p.context.send_message.await_count, 35)
-        self.assertEqual(self.p._latency_emoji_stats["triggered"], 35)
-        self.assertEqual(self.p._latency_emoji_stats["probability_skipped"], 65)
-        self.assertEqual(self.p._latency_emoji_stats["sent_separate"], 35)
+        for probability,hits in ((.35,35),(.8,80)):
+            with self.subTest(probability=probability):
+                self.cfg['trigger_probability']=str(probability)
+                self.p.context.send_message.reset_mock();self.p._latency_emoji_stats.clear()
+                rolls=[(i+.5)/100 for i in range(100)]
+                with patch("data.plugins.astrbot_plugin_smart_imagechat_hub.backend.retrieval.random.random", side_effect=rolls) as roll:
+                    for _ in range(100):
+                        event=Event();event.result.chain[0].text='本龙给你鼓个掌'
+                        turn=await self.start(event);await self.decorate(event)
+                        if isinstance(turn,EmojiTurn):await asyncio.wait_for(asyncio.shield(turn.prepare),1)
+                        await self.sent(event)
+                        if isinstance(turn,EmojiTurn):await self.drain(turn)
+                self.assertEqual(roll.call_count,100)
+                self.assertEqual(self.p.context.send_message.await_count,hits)
+                self.assertEqual(self.p._latency_emoji_stats['triggered'],hits)
+                self.assertEqual(self.p._latency_emoji_stats['probability_skipped'],100-hits)
+                self.assertEqual(self.p._latency_emoji_stats['sent_separate'],hits)
 
     async def test_existing_image_and_explicit_search_are_never_auto_replaced(self):
         event = Event()
