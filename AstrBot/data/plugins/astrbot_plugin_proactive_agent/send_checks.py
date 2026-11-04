@@ -86,7 +86,8 @@ def own_style(text,state=None,mode='chat'):
     value=_QUOTES.sub(mask,text or '')
     value=limit_father_address(limit_emoji(value,state,mode),state,mode)
     for i,quote in enumerate(quotes):value=value.replace('\ue000'+str(i)+'\ue001',quote)
-    return normalize(value,state,mode)
+    from .identity_expression import guard
+    return normalize(guard(value,state,mode),state,mode)
 
 def record(origin,text,settings,*,state=None,recent=(),path=None,local=(),reviewed=False):
     from .reply_jobs import current_job
@@ -95,6 +96,9 @@ def record(origin,text,settings,*,state=None,recent=(),path=None,local=(),review
            'persona_version':state.get('persona_version'),'context_fingerprint':digest(list(recent)),
            'final_fingerprint':digest(text),'path':path or ('review_off' if not settings['enabled'] else 'full_review'),
            'local_issues':list(local),'final_body_reviewed':bool(reviewed)}
+    if state.get('identity_guard_review_override'):
+        value.update(path='identity_guard',final_body_reviewed=False)
+    if state.get('identity_guard'):value['identity_guard']=copy.deepcopy(state['identity_guard'])
     _check.set(value);return value
 
 def snapshot(origin,text):

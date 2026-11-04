@@ -36,7 +36,7 @@ REVIEW_SYSTEM = """你是大肥龙的发送前编辑。审阅目标是“这句�
 输入的“必须修正的问题”若非空，必须实质修正，不能仅删除反引号、粗体或把同一份技术答案压成一句。
 只返回精简 JSON：{"pass":true或false,"natural":true或false,"chat_fit":true或false}。
 只有两项都为 true 且无其他问题才可 pass=true。不通过时还必须提供 "reason":"20字内问题" 和 "replacement":"完整的自然聊天改写"，改写不能再次接单或转而追问技术参数。
-不要输出检查过程。不要因为出现 AI 事实词判失败，不要硬改已自然的文字；保持自然的虚拟龙娘人设。"""
+不要输出检查过程。不要因为出现 AI 事实词判失败，不要硬改已自然的文字；保持当前角色口吻；自身身份问答不追加虚拟、型号未知或技术信息不可见。"""
 
 _receipt = ContextVar("qqbot_review_receipt", default=None)
 _request_scope = ContextVar("qqbot_review_request", default=None)
@@ -217,7 +217,9 @@ class ReplyReviewer:
                     round_started=time.monotonic()
                     from .work_scheduler import review_verdict_observer
                     with review_verdict_observer(on_verdict) as arrived:
+                        from .identity_expression import RULE as IDENTITY_RULE
                         raw=await self.generate(REVIEW_FUNCTIONAL+"\n"+PUNCTUATION_RULE+
+                            ('\n'+IDENTITY_RULE+'符合此规则的角色短答视为切题，不得因为未解释型号而改写。' if state.get('identity_scene') else '')+
                             (voice_note(state)+speaker_note(state) if mode=='chat' else '')+
                             (review_persona(state) if mode!='management' else '')+
                             ('\n主动联系只能依据已有生活事件或待办；没有合适话题允许放弃，不编造新话题填满机会。' if state.get('proactive') else ''),
@@ -251,6 +253,12 @@ class ReplyReviewer:
                     if urls:
                         replacement=re.sub(r'https?://[^\s<>]+','',replacement).strip()+'\n'+'\n'.join(urls)
                     candidate=own_style(replacement,state,mode)
+                    if state.get('identity_scene') and candidate!=replacement and state.get('identity_guard',{}).get('original_sha256')==hashlib.sha256(replacement.encode()).hexdigest() and not hard_issues(candidate,state=state,mode=mode,media=media):
+                        state['identity_guard_review_override']=True
+                        self.stats['guard_rejections']+=1
+                        if self.history and record_id:self.history.update(record_id,approved=candidate,result='local_guard',local_guard=state['identity_guard'],ai_changed=False,elapsed_ms=round((time.monotonic()-started)*1000),finished_at=time.time())
+                        self.audit('review',{'status':'identity_guard','rounds':attempt+1,'mode':mode})
+                        return candidate
                     if len(candidate)>1200:raise ValueError('Review replacement too long')
         except asyncio.CancelledError:
             if self.history and record_id:self.history.update(record_id,result='cancelled',failure='cancelled',elapsed_ms=round((time.monotonic()-started)*1000))
@@ -370,7 +378,6 @@ class OutboundGuard:
         approved=consume_approval(origin,checked,policy_version=version) if settings['enabled'] else False
         if settings['enabled'] and not approved:
             revised=await self.reviewer.review(checked,origin=origin,recent=recent,mode=mode,media=media,character=state)
-            if not slots and revised!=checked:raise ReviewUnavailable('音频原文已变化，需重新合成后再发送')
             checked=revised;path='full_review'
         elif not settings['enabled'] and path not in {'local_repair','template_receipt'}:
             path='local_repair' if checked!=text else 'review_off'
@@ -379,6 +386,12 @@ class OutboundGuard:
         record(origin,checked,settings,state=state,recent=recent,path=path,
                local=problems,reviewed=settings['enabled'] and path not in {'prediction_direct','template_receipt'})
         if checked != text:
+            if not qzone and bot is not None and isinstance(message,list):
+                from .voice_memory import record_transcript
+                if any(record_transcript(part,bot,origin) for part in message if part.get('type')=='record'):
+                    from .fish_voice import replace_stale_audio
+                    payload[key]=await replace_stale_audio(self.plugin,event,message,checked,origin)
+                    return payload
             # Preserve all recipients, at/reply/image segments and forward node metadata.
             for i, (container, key) in enumerate(slots):
                 container[key] = checked if i == 0 else ""
@@ -428,6 +441,9 @@ def install_outbound_guard(plugin, reviewer):
                     msg = p.get("message", [])
                     if isinstance(msg, str):
                         msg = list(Message(msg))
+                    from .voice_memory import spoken_text
+                    spoken=spoken_text(msg,bot,origin)
+                    if spoken:return spoken
                     return "\n".join(c[k] for c, k in text_slots(msg) if c[k])
                 _receipt.set({"origin": origin, "original": plain(original), "text": plain(params)})
             return result

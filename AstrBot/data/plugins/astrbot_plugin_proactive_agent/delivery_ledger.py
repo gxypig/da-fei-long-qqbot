@@ -21,6 +21,13 @@ from .route_guard import canonical,destination,SEND_ACTIONS
 
 delivery_scope=ContextVar('qqbot_delivery_scope',default=None)
 optional_delivery=ContextVar('qqbot_optional_delivery',default=False)
+emoji_delivery=ContextVar('qqbot_emoji_delivery',default=None)
+
+@contextmanager
+def emoji_match_delivery(ident):
+    token=emoji_delivery.set(ident)
+    try:yield
+    finally:emoji_delivery.reset(token)
 _purpose=ContextVar('qqbot_delivery_purpose',default='answer')
 
 @contextmanager
@@ -117,10 +124,15 @@ class DeliveryLedger:
             'purpose':current_purpose(),'submission_state':'not_submitted' if prepared else 'submitted',
             'optional':bool(optional_delivery.get() or job and job.state in {'confirmed','partial'} and not text.strip()),'reason':''}
         if job and job.event:
+            match_id=job.event.get_extra('qqbot_emoji_match_id')
+            if match_id:row['emoji_match']=match_id
+            synthesis=job.event.get_extra('qqbot_voice_synthesis')
+            if synthesis:row['voice_synthesis']=synthesis
             row['exchange']=job.event.get_extra('qqbot_exchange_decision') or {}
             if job.event.get_extra('qqbot_gallery_result'):row['gallery_result']=job.event.get_extra('qqbot_gallery_result')
             plan=job.event.get_extra('qqbot_meme_plan')
             if plan:row['meme_plan']=plan
+        if emoji_delivery.get():row['emoji_match']=emoji_delivery.get()
         operation=(delivery_scope.get() or {}).get('external_operation')
         from .send_checks import snapshot
         check=snapshot(origin,text)

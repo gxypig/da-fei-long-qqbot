@@ -127,7 +127,20 @@
   }catch(e){imageList.textContent=e.message;}}
   async function loadDelivery(cursors=[null]){const request=++deliverySerial;deliveryPrev.disabled=deliveryNext.disabled=true;try{const before=cursors.at(-1),d=await api('panel_delivery',undefined,before?{before:JSON.stringify(before)}:{});if(request!==deliverySerial)return;
     deliveryCursors=cursors;deliveryNextCursor=d.next_cursor;deliveryPage.textContent=`第 ${cursors.length} 页 · 共 ${d.total||0} 条持久记录`;
-    deliveryList.replaceChildren();health(d.health);for(const r of d.rows){const a=el('article');a.className='compact-row';line(a,r.origin,`${({confirmed:'确认成功',failed:'明确失败',unknown:'结果未知',sending:'等待回执',preparing:'发送准备',submitting:'准备提交'}[r.state]||r.state)} · ${new Date(r.at*1000).toLocaleString()}`);line(a,'实际正文',r.text||'附件');if(r.reason)line(a,'原因',r.reason);deliveryList.append(a);}
+    deliveryList.replaceChildren();health(d.health);for(const r of d.rows){const a=el('article');a.className='compact-row';line(a,r.origin,`${({confirmed:'确认成功',failed:'明确失败',unknown:'结果未知',sending:'等待回执',preparing:'发送准备',submitting:'准备提交'}[r.state]||r.state)} · ${new Date(r.at*1000).toLocaleString()}`);line(a,'实际正文',r.text||'附件');if(r.reason)line(a,'原因',r.reason);
+      if(r.emoji_details?.id){const m=r.emoji_details,d=details(a,'配图详情');
+        line(d,'用户原话',m.user);line(d,'最终正文',m.final_text);line(d,'配图状态',m.status);
+        line(d,'图片原文',m.semantic?.reliable_text?.join(' / '));line(d,'适用条件',m.semantic?.conditions?.join('；'));
+        line(d,'不适用',m.semantic?.exclusions?.join('；'));line(d,'选择来源',m.decision?.source);
+        line(d,'匹配依据或跳过原因',m.decision?.reason||m.reason||m.status);
+        if(m.content_hash){const pic=el('img');pic.alt='本次候选原图，是否发送以回执状态为准';pic.style.cssText='max-width:240px;max-height:200px;display:none';d.append(pic);
+          button(d,'image-open-'+r.id,'查看原图',async()=>{try{const data=await api('panel_match_image',undefined,{id:m.id});pic.src=`data:${data.mime};base64,${data.data}`;pic.style.display='block';}catch(e){line(d,'图片',e.message);}});
+          for(const [kind,label] of [['mismatch','配得不对'],['recognition_wrong','图片识别错了'],['disable','不要自动使用这张']])
+            button(d,'image-feedback-'+r.id+'-'+kind,label,async()=>{try{await api('panel_image_feedback',{id:m.id,kind});line(d,'反馈','已记录；原图保留，人格不变');}catch(e){line(d,'反馈失败',e.message);}});
+        }
+      }
+      if(r.voice_synthesis?.length){const v=details(a,'语音合成与投递');for(const x of r.voice_synthesis){line(v,'合成',`${x.model} · ${x.elapsed_ms}毫秒 · ${x.error||x.state} · ${x.bytes}字节`);}line(v,'是否已发送',r.state==='confirmed'&&r.attachments?.some(x=>x.kind==='record')?'平台确认语音已发出':'尚无该条语音成功回执');}
+      deliveryList.append(a);}
   }catch(e){if(request===deliverySerial)deliveryPage.textContent='读取失败，仍保留原页：'+e.message;}finally{if(request===deliverySerial){deliveryPrev.disabled=deliveryCursors.length===1;deliveryNext.disabled=!deliveryNextCursor;}}}
   document.addEventListener('qqbot:view',e=>{if(e.detail==='images')loadImages();if(e.detail==='delivery')loadDelivery();});
   nav.addEventListener('click',e=>{if(['proactive','health'].includes(e.target.dataset.tab))loadProactive();queueMicrotask(()=>{

@@ -77,7 +77,33 @@ def register_round2_panel(plugin):
         allkeys=store.select_ids(states={'confirmed','failed','unknown','sending','preparing','submitting'},reverse=True)
         keys=[k for k in allkeys if before is None or (store.index[k].get('at') or 0,k)<tuple(before)]
         page=keys[offset:offset+50];rows=await store.fetch(page)
+        memory=plugin._image_memory
+        rows=[{**row,'emoji_details':memory.store.rows.get('match:'+str(row.get('emoji_match')),{})} if row.get('emoji_match') else row for row in rows]
         cursor=[store.index[page[-1]].get('at') or 0,page[-1]] if len(keys)>offset+50 and page else None
         return jsonify(status='ok',data={'rows':rows,'total':len(allkeys),'offset':offset,'next_cursor':cursor,'health':plugin._delivery.health()})
-    for name,handler,methods in [('panel_proactive',status,['GET']),('panel_proactive_preview',preview,['POST']),('panel_image_memory',images,['GET','POST']),('panel_reply_summary',summary,['GET']),('panel_delivery',deliveries,['GET'])]:
+    async def image_feedback():
+        body=await request.get_json(silent=True) or {}
+        if not isinstance(body,dict):return jsonify(status='error',message='反馈格式错误'),400
+        try:
+            data=plugin._image_memory.feedback(str(body.get('id','')),body.get('kind'))
+            return jsonify(status='ok',data=data)
+        except ValueError as exc:return jsonify(status='error',message=str(exc)),400
+    async def match_image():
+        import base64,asyncio
+        from pathlib import Path
+        decision=plugin._image_memory.store.rows.get('match:'+request.args.get('id',''),{})
+        digest=decision.get('content_hash');asset=plugin._image_memory.store.rows.get(digest,{})
+        path=asset.get('path')
+        if not path:return jsonify(status='error',message='原图尚未缓存'),404
+        def read():
+            target=Path(path)
+            if not target.is_file() or target.stat().st_size>8*1024*1024:raise ValueError('图片过大或已不可用')
+            data=target.read_bytes()
+            import hashlib
+            if hashlib.sha256(data).hexdigest()!=digest:raise ValueError('图片内容已变化')
+            mime='image/png' if data.startswith(b'\x89PNG') else 'image/gif' if data.startswith(b'GIF') else 'image/jpeg' if data.startswith(b'\xff\xd8') else 'image/webp'
+            return {'mime':mime,'data':base64.b64encode(data).decode('ascii')}
+        try:return jsonify(status='ok',data=await asyncio.to_thread(read))
+        except (OSError,ValueError):return jsonify(status='error',message='原图不可用'),404
+    for name,handler,methods in [('panel_proactive',status,['GET']),('panel_proactive_preview',preview,['POST']),('panel_image_memory',images,['GET','POST']),('panel_reply_summary',summary,['GET']),('panel_delivery',deliveries,['GET']),('panel_image_feedback',image_feedback,['POST']),('panel_match_image',match_image,['GET'])]:
         plugin.context.register_web_api('/astrbot_plugin_proactive_agent/'+name,handler,methods,'第二轮控制面板')

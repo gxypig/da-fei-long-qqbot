@@ -25,7 +25,7 @@ class VoicePolicy(unittest.IsolatedAsyncioTestCase):
         config['platform_settings']['segmented_reply']['enable']=False
         config['content_safety']['also_use_in_response']=False
         config['t2i']=False
-        provider=SimpleNamespace(get_audio=AsyncMock(return_value='generated.wav'))
+        provider=SimpleNamespace(get_audio=AsyncMock(return_value='generated.wav'),get_model=lambda:'test-tts',provider_config={'id':'test'})
         ctx=SimpleNamespace(astrbot_config=config,plugin_manager=SimpleNamespace(context=SimpleNamespace(
             get_using_tts_provider_async=AsyncMock(return_value=provider))))
         stage=ResultDecorateStage();await stage.initialize(ctx)

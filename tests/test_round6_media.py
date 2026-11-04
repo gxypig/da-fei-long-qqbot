@@ -33,9 +33,10 @@ class MediaScope(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(req.image_urls,['current.png']);self.assertIn('这次附件',req.system_prompt)
     async def test_gallery_retag_updates_first_caption_without_model(self):
         attachment=await self.capture();digest=attachment['content_hash']
-        self.images.gallery.rows[digest]={'sha256':digest,'caption_status':'done','auto_tags':['旧标签']}
+        self.images.gallery.rows[digest]={'sha256':digest,'caption_status':'done','auto_tags':['旧标签'],
+            'caption_semantic':{**image_tests.SEMANTIC_FIELDS,'content_hash':digest,'description':'旧画面','ocr':[],'text_complete':True}}
         self.assertTrue(self.images.reuse_gallery(digest));old=self.images.store.rows[digest]['source_revision']
-        self.images.gallery.rows[digest]['caption_semantic']={'content_hash':digest,'description':'新确认的画面','ocr':[],
+        self.images.gallery.rows[digest]['caption_semantic']={**image_tests.SEMANTIC_FIELDS,'content_hash':digest,'description':'新确认的画面','ocr':[],
             'emotion':[],'inferred_usage':[],'text_complete':True}
         self.images.reuse_gallery(digest)
         self.assertNotEqual(self.images.store.rows[digest]['source_revision'],old)

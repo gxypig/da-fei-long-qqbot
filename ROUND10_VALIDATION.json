@@ -1,0 +1,188 @@
+{
+  "version": "1.23.0-rc1",
+  "date": "2026-11-04",
+  "release_stage": "candidate",
+  "all_acceptance_criteria_passed": false,
+  "test_counts": {
+    "private-final-tests.log": 1118,
+    "public-final-tests.log": 1104,
+    "image-final-tests.log": 15,
+    "panel-final-tests.log": 26,
+    "voice-flow-tests.log": 62,
+    "migration-tests.log": 1
+  },
+  "identity_cases_per_mode": 17,
+  "identity_modes": [
+    "off",
+    "speed_first",
+    "all"
+  ],
+  "performance": {
+    "at": 1793788921.3767822,
+    "runs": [
+      "durable",
+      "reverse"
+    ],
+    "variants": {
+      "baseline": {
+        "attempts": 100,
+        "confirmed": 97,
+        "failed": 3,
+        "first_confirmed": {
+          "count": 97,
+          "median_ms": 6313.0,
+          "p95_ms": 25703.0,
+          "max_ms": 39875.0
+        },
+        "all_required_confirmed": {
+          "count": 97,
+          "median_ms": 6313.0,
+          "p95_ms": 25703.0,
+          "max_ms": 39875.0
+        },
+        "over_30_seconds": 2,
+        "deadline_censored_attempts": {
+          "count": 100,
+          "median_ms": 6453.0,
+          "p95_ms": 26703.0,
+          "max_ms": 89985
+        },
+        "failures": [
+          {
+            "run": "durable",
+            "case": "P34",
+            "error": "TimeoutError",
+            "elapsed_ms": 89985
+          },
+          {
+            "run": "reverse",
+            "case": "P20",
+            "error": "ReviewUnavailableNotice",
+            "elapsed_ms": 26813
+          },
+          {
+            "run": "reverse",
+            "case": "P21",
+            "error": "RuntimeError",
+            "elapsed_ms": 30406
+          }
+        ],
+        "review_calls": 30,
+        "confirmed_attachments": 73,
+        "reply_chars": {
+          "count": 97,
+          "median_ms": 21,
+          "p95_ms": 53,
+          "max_ms": 75
+        },
+        "input_tokens": {
+          "count": 97,
+          "median_ms": 5610,
+          "p95_ms": 7805,
+          "max_ms": 7995
+        }
+      },
+      "candidate": {
+        "attempts": 100,
+        "confirmed": 99,
+        "failed": 1,
+        "first_confirmed": {
+          "count": 99,
+          "median_ms": 6156.0,
+          "p95_ms": 23406.0,
+          "max_ms": 48782.0
+        },
+        "all_required_confirmed": {
+          "count": 99,
+          "median_ms": 6156.0,
+          "p95_ms": 23406.0,
+          "max_ms": 48782.0
+        },
+        "over_30_seconds": 3,
+        "deadline_censored_attempts": {
+          "count": 100,
+          "median_ms": 6195.5,
+          "p95_ms": 23406.0,
+          "max_ms": 63250
+        },
+        "failures": [
+          {
+            "run": "reverse",
+            "case": "P16",
+            "error": "ReviewUnavailableNotice",
+            "elapsed_ms": 63250
+          }
+        ],
+        "review_calls": 31,
+        "confirmed_attachments": 9,
+        "reply_chars": {
+          "count": 99,
+          "median_ms": 20,
+          "p95_ms": 50,
+          "max_ms": 73
+        },
+        "input_tokens": {
+          "count": 99,
+          "median_ms": 5640,
+          "p95_ms": 7846,
+          "max_ms": 8024
+        }
+      }
+    },
+    "qq_sends": 0,
+    "same_configured_model_and_reasoning": true,
+    "transport": "simulated QQ confirmation; full native model and runtime hooks",
+    "initial_fixture_population_runs": "retained separately in final/steady, excluded because seed writes had not drained and runners briefly overlapped",
+    "scope": "Necessary text confirmation measured independently from optional decoration; all failures remain in denominators. No real QQ end-to-end guarantee.",
+    "performance_pass": true,
+    "change_percent": {
+      "median_ms": -2.49,
+      "p95_ms": -8.94
+    },
+    "non_time_units": {
+      "reply_chars": "characters",
+      "input_tokens": "tokens"
+    }
+  },
+  "free_voice": {
+    "samples": 8,
+    "successful": 8,
+    "synthesis_ms": [
+      1641,
+      6422
+    ],
+    "leading_silence_seconds_max": 0.06387755102040817,
+    "subjective_listening": "not completed"
+  },
+  "historical_image_replay": {
+    "confirmed_image_messages": 80,
+    "attachments_checked": 80,
+    "counts": {
+      "unverified_semantics": 28,
+      "requires_final_body_model_judgment": 17,
+      "strength_mismatch": 30,
+      "relationship_unknown": 1,
+      "replacement_not_requested": 2,
+      "unambiguous_goodnight": 1,
+      "guess_not_confirmed": 1
+    },
+    "scope": "All historical confirmed pairs replayed through local boundaries. Separate images link only exact same job/source+sender+session confirmed text within 30s. Model-required cases remain undecided. Three original pictures independently visually inspected; two documented mismatches are covered by regression tests."
+  },
+  "validation_limits": [
+    "Subjective voice audition unavailable: execution model cannot hear audio",
+    "Browser visual acceptance unavailable after URL safety stop"
+  ],
+  "source_privacy": "No keys, private voice selection, account configuration, images, chats or databases included",
+  "live_local_panel_check": {
+    "model": "s2.1-pro-free",
+    "correct_voice": true,
+    "audition_state": "synthesized",
+    "elapsed_ms": 8031,
+    "duration_seconds": 1.9504761904761905,
+    "qq_sends": 0,
+    "paid_requests": 0,
+    "subjective_listening": false
+  },
+  "live_health_checks": 20,
+  "rollback_preview_passed": true
+}

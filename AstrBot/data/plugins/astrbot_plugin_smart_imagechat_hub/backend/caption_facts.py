@@ -1,4 +1,9 @@
 """First-caption facts travel with tags; the optional companion can reuse them."""
+try:
+    from data.plugins.astrbot_plugin_proactive_agent.image_semantics import normalize,SCHEMA as SEMANTIC_SCHEMA
+except ImportError:
+    normalize=None;SEMANTIC_SCHEMA=''
+
 class CaptionTags(list):
     def __init__(self,tags,raw,digest):
         super().__init__(tags);self.semantic=None
@@ -10,3 +15,5 @@ class CaptionTags(list):
         self.semantic={'content_hash':digest,'description':raw['description'][:600],'ocr':ocr,'text_complete':raw.get('text_complete') is True}
         for field in ('emotion','inferred_usage'):
             self.semantic[field]=[x[:100] for x in raw.get(field,[])[:8] if isinstance(x,str)] if isinstance(raw.get(field),list) else []
+        if normalize:
+            self.semantic=normalize(raw,content_hash=digest,source='gallery_first_caption')

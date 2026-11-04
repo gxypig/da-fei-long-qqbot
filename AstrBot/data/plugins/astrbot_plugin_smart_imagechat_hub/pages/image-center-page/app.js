@@ -1908,6 +1908,11 @@ function createGalleryIconButton(className, icon, label) {
   return button;
 }
 
+function semanticStatusLabel(image){
+  const label=({tags_only:'只有标签',pending:'待识别',recognized:'已识别',manual:'人工确认',failed:'识别失败'})[image.semantic_status]||'只有标签';
+  return `${label} · ${image.automatic_eligible?'可参与自动配图':'仅供检索或等待可靠语义'}`;
+}
+
 function createGalleryCard(image, isSelected, source = MANUAL_LIBRARY_SOURCE) {
   const card = document.createElement("div");
   card.className = isSelected ? "gallery-card is-selected" : "gallery-card";
@@ -1916,6 +1921,7 @@ function createGalleryCard(image, isSelected, source = MANUAL_LIBRARY_SOURCE) {
   card.setAttribute("aria-pressed", String(!!isSelected));
   card.setAttribute("aria-label", image.filename || image.rel_path || "图片");
   card.dataset.galleryImageId = String(image?.id || "").trim();
+  card.title = semanticStatusLabel(image);
 
   const thumb = document.createElement("img");
   thumb.className = "gallery-thumb";
@@ -1981,7 +1987,9 @@ function createGalleryDetailRow(image, source = MANUAL_LIBRARY_SOURCE) {
     tags.appendChild(tagChip(tag));
   }
 
-  main.append(path, relPath, tags);
+  const semantic=document.createElement('div');semantic.className='gallery-detail-rel-path';semantic.textContent=semanticStatusLabel(image);
+  semantic.title=(image.semantic_summary?.conditions||[]).join('；');
+  main.append(path, relPath, semantic, tags);
   main.addEventListener("click", () => openEditor(image));
   main.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -2239,6 +2247,9 @@ function librarySignature(images, tags) {
         JSON.stringify(image?.tags || []),
         JSON.stringify(image?.selected_global_tags || []),
         JSON.stringify(image?.merged_tags || []),
+        String(image?.semantic_status || ''),
+        String(image?.automatic_eligible || false),
+        JSON.stringify(image?.semantic_summary || {}),
       ].join("|"),
     )
     .join("\n");

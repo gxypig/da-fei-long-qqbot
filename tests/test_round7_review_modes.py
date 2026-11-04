@@ -75,8 +75,9 @@ class Modes(unittest.IsolatedAsyncioTestCase):
 
     async def test_selection_is_independent_and_local_candidate_costs_zero(self):
         p=plugin();p.config['reply_review_enabled']=False;p._generate_json=AsyncMock()
-        e=event('哈哈');answer=await p.prepare_emoji_selection(e,[{'id':'happy','tags':['开心'],'proactive_fast_fallback':True}])
-        self.assertEqual(answer['image_ids'],['happy']);p._generate_json.assert_not_awaited()
+        from test_round10_images import item
+        e=event('睡啦');answer=await p.prepare_emoji_selection(e,[item()],final_text='晚安')
+        self.assertEqual(answer['image_ids'],['one']);p._generate_json.assert_not_awaited()
         self.assertIsNone(e.get_extra('qqbot_reply_prediction'))
 
     async def test_mode_pinned_and_not_gated_by_latency_toggle(self):

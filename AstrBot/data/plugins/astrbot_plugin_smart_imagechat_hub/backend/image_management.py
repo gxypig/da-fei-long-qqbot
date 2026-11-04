@@ -139,6 +139,19 @@ class ImageManagementMixin:
     def _caption_library_image_item(self, item: dict[str, Any]) -> dict[str, Any]:
         rel_path = self._norm_rel_path(item.get("rel_path"))
         image_id = str(item.get("id") or self._image_id(rel_path))
+        digest=item.get('sha256');semantic=item.get('caption_semantic') or {};task={};disabled=False
+        lookup=getattr(getattr(self,'context',None),'get_registered_star',None)
+        meta=lookup('astrbot_plugin_proactive_agent') if callable(lookup) else None
+        memory=getattr(getattr(meta,'star_cls',None),'_image_memory',None) if meta and getattr(meta,'activated',False) else None
+        if memory:
+            semantic=memory.store.rows.get(digest,{}).get('semantic') or semantic
+            task=memory.store.rows.get('task:'+str(digest),{})
+            disabled=memory.store.rows.get('feedback:'+str(digest),{}).get('disabled',False)
+        status=('manual' if semantic.get('status')=='manual' else 'recognized') if semantic.get('version')==2 else 'failed' if task.get('status')=='failed' or item.get('caption_status')=='failed' else 'pending' if task.get('status') in {'pending','running'} or item.get('caption_status') in {'pending','running'} else 'tags_only'
+        try:
+            from data.plugins.astrbot_plugin_proactive_agent.image_semantics import automatic
+            auto=not disabled and automatic(semantic) and semantic.get('content_hash')==digest
+        except ImportError:auto=False
         return {
             "id": image_id,
             "rel_path": rel_path,
@@ -155,6 +168,8 @@ class ImageManagementMixin:
             "updated_at": self._to_int(item.get("updated_at"), 0),
             "mtime": self._to_int(item.get("mtime"), 0),
             "size": self._to_int(item.get("size"), 0),
+            "semantic_status":status,"automatic_eligible":auto,
+            "semantic_summary":{k:semantic.get(k) for k in ('description','reliable_text','actions','target','image_type','conditions','exclusions','version')},
             "thumbnail_url": f"/api/plug/{PLUGIN_NAME}/caption_image/{image_id}",
         }
 

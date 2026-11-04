@@ -157,6 +157,18 @@ class UtilityMixin:
             return image_path, cleanup_paths
         if converted != image_path:
             cleanup_paths.append(converted)
+            # The exact converter is known here. Captions cannot be inherited
+            # from arbitrary files just because they have similar names/tags.
+            lookup=getattr(getattr(self,'context',None),'get_registered_star',None)
+            meta=lookup('astrbot_plugin_proactive_agent') if callable(lookup) else None
+            companion=getattr(meta,'star_cls',None) if meta and getattr(meta,'activated',False) else None
+            memory=getattr(companion,'_image_memory',None)
+            if memory:
+                try:
+                    rel=image_path.relative_to(self.data_dir).as_posix()
+                    item=next((r for r in self._index.get('images',{}).values() if r.get('rel_path')==rel),{})
+                    await memory.register_conversion(image_path,converted,item.get('id'))
+                except Exception as exc:logger.debug('Image format relation unavailable: %s',type(exc).__name__)
         return converted, cleanup_paths
 
     def _convert_static_image_to_one_frame_gif(self, source: Path) -> Path:

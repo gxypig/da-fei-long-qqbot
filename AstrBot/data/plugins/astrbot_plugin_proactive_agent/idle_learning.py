@@ -426,6 +426,9 @@ class IdleLearning:
         if not isinstance(text, str) or not text.strip() or len(text) > 1200:
             return False
         if hashlib.sha256(text.strip().encode()).hexdigest() in self.quality_exclusions:return False
+        from .identity_expression import enabled as identity_enabled,_BAD as bad_identity
+        if isinstance(state,dict) and identity_enabled(state) and (state.get('identity_guard') or state.get('identity_scene') and bad_identity.search(text)):
+            return False
         if corrected is not None and (not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 1200):
             return False
         job=current_job.get()

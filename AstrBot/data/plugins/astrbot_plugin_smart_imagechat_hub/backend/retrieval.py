@@ -204,6 +204,8 @@ class RetrievalMixin(LatencyEmojiMixin):
                     "tags": self._tags_from_item(item),
                     "auto_tags": self._normalize_tags(item.get("auto_tags", [])),
                     "manual_tags": self._normalize_tags(item.get("manual_tags", [])),
+                    "content_hash": item.get("sha256"),
+                    "semantic": item.get("caption_semantic"),
                     "selected_global_tags": self._valid_global_tags(
                         item.get("selected_global_tags", [])
                     ),
@@ -1131,6 +1133,9 @@ class RetrievalMixin(LatencyEmojiMixin):
             '"inferred_usage":["可能的使用语境"],"text_complete":false}。'
             'OCR没有字就空数组，看不清不猜；text_complete仅在完整看清图中文字时为true。不要解释或Markdown。'
         )
+        from .caption_facts import SEMANTIC_SCHEMA
+        if SEMANTIC_SCHEMA:
+            prompt+='\n在同一JSON保留tags，并按以下完整结构补齐图片语义：'+SEMANTIC_SCHEMA
         try:
             resp = await self._run_image_caption_provider_request(
                 lambda: self._llm_generate_with_provider_fallback(

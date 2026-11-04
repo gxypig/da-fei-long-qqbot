@@ -124,7 +124,8 @@ class SharedImageCache(unittest.IsolatedAsyncioTestCase):
         digest=hashlib.sha256(PNG).hexdigest();path=self.images.gallery.path;path.parent.mkdir(parents=True,exist_ok=True)
         original=path.parent/'round4-test.png';original.write_bytes(PNG)
         self.addCleanup(lambda:path.unlink(missing_ok=True));self.addCleanup(lambda:original.unlink(missing_ok=True))
-        path.write_text(json.dumps({'images':{'one':{'sha256':digest,'rel_path':original.name,'caption_status':'done','auto_tags':['白龙','无语']}}}),'utf-8')
+        path.write_text(json.dumps({'images':{'one':{'sha256':digest,'rel_path':original.name,'caption_status':'done','auto_tags':['白龙','无语'],
+            'caption_semantic':{**image_tests.SEMANTIC_FIELDS,'content_hash':digest,'description':'白龙无语','ocr':[],'text_complete':True}}}}),'utf-8')
         blocked=asyncio.Event()
         async def wait_forever(*_):await blocked.wait()
         self.images._platform_original=wait_forever
@@ -134,21 +135,21 @@ class SharedImageCache(unittest.IsolatedAsyncioTestCase):
             while not self.images.store.rows.get(digest,{}).get('semantic'):await asyncio.sleep(.1)
         self.assertEqual(self.images.details({'content_hash':digest})['semantic_status'],'ready')
         self.provider.text_chat.assert_not_awaited()
-    async def test_existing_gallery_caption_reused_after_restart_without_vision(self):
+    async def test_old_tags_require_one_real_caption_then_restart_reuses_it(self):
         digest=hashlib.sha256(PNG).hexdigest();path=self.images.gallery.path;path.parent.mkdir(parents=True,exist_ok=True)
         self.addCleanup(lambda:path.unlink(missing_ok=True))
         path.write_text(json.dumps({'images':{'one':{'sha256':digest,'caption_status':'done','auto_tags':['白龙','无语','你再说一句']}}}),'utf-8')
         self.images.gallery.refresh();attachment=await self.capture();await self.send(attachment);self.plugin._work.busy=lambda:False
         for _ in range(3):await self.images.learn(digest,self.origin)
-        self.provider.text_chat.assert_not_awaited();self.assertEqual(self.images.details(attachment)['semantic_status'],'ready')
-        self.assertEqual(self.images.details(attachment)['reliable_text'],[])
+        self.provider.text_chat.assert_awaited_once();self.assertEqual(self.images.details(attachment)['semantic_status'],'ready')
+        self.assertEqual(self.images.details(attachment)['reliable_text'],['无语'])
         await self.images.store.flush(digest);from data.plugins.astrbot_plugin_proactive_agent.image_memory import ImageMemory
         second=ImageMemory(self.plugin,self.images.root);await second.start();self.addAsyncCleanup(second.close)
         self.assertEqual(second.details(attachment)['description'],self.images.details(attachment)['description'])
 
     async def test_new_caption_structured_text_reused_and_wrong_hash_rejected(self):
         digest=hashlib.sha256(PNG).hexdigest()
-        tags=CaptionTags(['白龙'],{'description':'白龙捂脸','ocr':[{'text':'无语','confidence':.98}],'text_complete':True},digest)
+        tags=CaptionTags(['白龙'],{**image_tests.SEMANTIC_FIELDS,'description':'白龙捂脸','ocr':[{'text':'无语','confidence':.98}],'text_complete':True},digest)
         self.images.gallery.rows[digest]={'sha256':digest,'caption_status':'done','caption_semantic':tags.semantic,'auto_tags':['白龙']}
         a=await self.capture();self.assertEqual(self.images.details(a)['reliable_text'],['无语'])
         self.provider.text_chat.assert_not_awaited()

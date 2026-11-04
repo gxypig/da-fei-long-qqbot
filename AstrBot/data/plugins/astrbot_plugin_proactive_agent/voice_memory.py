@@ -83,7 +83,14 @@ def voice_issues(text,state):
 
 def component_body(message):
     from astrbot.api.message_components import Plain,Record
-    return ''.join(str(p.text or '') for p in getattr(message,'chain',()) if isinstance(p,(Plain,Record)))
+    chunks=[];previous=None
+    for part in getattr(message,'chain',()):
+        if not isinstance(part,(Plain,Record)):previous=None;continue
+        text=str(part.text or '');kind='record' if isinstance(part,Record) else 'text'
+        if previous and previous[0]!=kind and previous[1]==text:
+            previous=None;continue
+        chunks.append(text);previous=(kind,text)
+    return ''.join(chunks)
 
 
 def record_transcript(part,bot,origin):
@@ -123,6 +130,8 @@ def install_voice_memory(plugin):
     convert_descriptor=Event.__dict__['_from_segment_to_dict']
     send_descriptor=Event.__dict__['send_message']
     old_decorate=ResultDecorateStage.process
+    from .fish_voice import install_fish_guard
+    restore_fish=install_fish_guard(plugin)
 
     @wraps(old_decorate)
     async def decorate(stage,event):
@@ -132,32 +141,15 @@ def install_voice_memory(plugin):
         force=explicit_voice_request(event.get_message_str())
         forbidden=forbidden_voice_request(event.get_message_str())
         event.set_extra('qqbot_voice_result_text',None)
-        if force or forbidden:
-            stage=copy.copy(stage);stage.tts_trigger_probability=0.0 if forbidden else 1.0
-            force=force and not forbidden
+        # Keep the native formatting/hooks but synthesize only once after them.
+        original_stage=stage;stage=copy.copy(stage);stage.tts_trigger_probability=0.0
+        force=force and not forbidden
         async for x in old_decorate(stage,event):yield x
+        final_ready=event.get_extra('qqbot_emoji_final_ready')
+        if callable(final_ready):final_ready(component_body(event.get_result()))
+        from .fish_voice import transform
+        await transform(plugin,original_stage,event,force=force,forbidden=forbidden)
         result=event.get_result()
-        # Native TTS skips a one-character utterance. Explicit requests must be
-        # able to say "嗯" too; keep all other native settings and dual output.
-        if (force and result and result.is_llm_result()
-                and stage.ctx.astrbot_config.get('provider_tts_settings',{}).get('enable')
-                and any(isinstance(p,Plain) and len(p.text.strip())==1 for p in result.chain)):
-            from astrbot.core.star.session_llm_manager import SessionServiceManager
-            if await SessionServiceManager.should_process_tts_request(event):
-                provider=await stage.ctx.plugin_manager.context.get_using_tts_provider_async(event.unified_msg_origin)
-                if provider:
-                    chain=[]
-                    for part in result.chain:
-                        if isinstance(part,Plain) and len(part.text.strip())==1:
-                            try:audio=await provider.get_audio(part.text)
-                            except Exception as exc:
-                                plugin._audit('voice_request',{'status':'tts_failed','error':type(exc).__name__});audio=None
-                            if audio:
-                                chain.append(Record(file=audio,url=audio,text=part.text))
-                                if stage.ctx.astrbot_config['provider_tts_settings'].get('dual_output'):chain.append(part)
-                                continue
-                        chain.append(part)
-                    result.chain=chain
         if result and any(isinstance(p,Record) and p.text for p in result.chain):
             # RespondStage extracts Record components from the mutable result.
             # Save the final speech body before that mutation for emoji checks.
@@ -193,6 +185,7 @@ def install_voice_memory(plugin):
     ResultDecorateStage.process=decorate
     def restore():
         lease.close()
+        restore_fish()
         if Event.__dict__['_from_segment_to_dict'] is convert_wrapper:Event._from_segment_to_dict=convert_descriptor
         if Event.__dict__['send_message'] is send_wrapper:Event.send_message=send_descriptor
         if ResultDecorateStage.process is decorate:ResultDecorateStage.process=old_decorate

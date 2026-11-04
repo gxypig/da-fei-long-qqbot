@@ -151,6 +151,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         self._restore_delivery_history = install_delivery_history(self)
         self.register_panel()
         register_fullchain_panel(self)
+        from .voice_panel import register_voice_panel
+        register_voice_panel(self)
         from .review_history import register as register_review_history
         register_review_history(self)
         from .round2_panel import register_round2_panel
@@ -892,6 +894,13 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             if not text or str(event.get_sender_id()) == str(event.get_self_id()):
                 return
             umo = event.unified_msg_origin
+            # Cancel only unsent stale pictures when the same interlocutor moves
+            # on; passive group traffic from other people does not cancel it.
+            lookup=getattr(getattr(self,'context',None),'get_registered_star',None)
+            meta=lookup('astrbot_plugin_smart_imagechat_hub') if callable(lookup) else None
+            gallery=getattr(meta,'star_cls',None) if meta and getattr(meta,'activated',False) else None
+            if gallery and hasattr(gallery,'_incoming_latency_message'):
+                gallery._incoming_latency_message(event,text)
             rows = self._recent_messages.setdefault(umo, deque(maxlen=12))
             # Framework already performed command parsing and permission checks.
             # Preserve help/status/IDs verbatim through the SAME mandatory reviewer.
@@ -955,7 +964,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         state = self.character_context(event)
         await bind_persona(self,event,req,state)
         from .persona_projection import dragon_identity
-        req.system_prompt=(req.system_prompt or '')+dragon_identity(event.get_message_str(),state)
+        req.system_prompt=(req.system_prompt or '')+dragon_identity(event.get_message_str(),state,event.get_extra('qqbot_meme_recent') or (),event.get_sender_id(),time.time())
         exchanges=getattr(self,'_exchanges',None)
         if exchanges:req.system_prompt=(req.system_prompt or '')+exchanges.prepare(event,state)
         req.system_prompt=(req.system_prompt or '')+'\n'+functional_style(state)+'\n'+PUNCTUATION_RULE+PRIORITY

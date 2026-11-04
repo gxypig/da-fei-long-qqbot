@@ -127,3 +127,8 @@ OpenAI兼容、Gemini、Anthropic等provider适配器通常负责传递或转换
 - `memewiki_engine.py`提供公共词典的含义、用法与来源，复用`meme_memory.py`现有的理解/使用规则，不新增前台模型提示调用。
 - `delivery_ledger.py`的`note`与`voice_history`记录确认发送的语音原文和发送形式；后者把形式保留到聊天档案，标记只用于记忆，不随QQ消息发送。
 - `voice_memory.py`的明确语音请求判断是本地规则，平时概率仍由AstrBot原有TTS设置控制；不是一份覆盖人格的隐藏提示词。
+
+
+## 1.23 自身身份与图片语义补充
+
+自身身份的场景提示和本地保护在 `identity_expression.py`，首次生成装配见 `persona_projection.py`，审阅通用约束见 `persona_authority.py` 与 `conversation_review.py`。角色备用短答在统一人格总设定编辑，发布后同步用途版本；普通技术讨论不使用此场景规则。图片识别字段在 `image_semantics.py`，最终正文匹配标准在 `emoji_match.py`；这些是识图与选择契约，不是第二份人格。Fish 音色演示文本不会进入人格。

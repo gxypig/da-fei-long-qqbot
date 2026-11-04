@@ -22,9 +22,22 @@ from data.plugins.astrbot_plugin_smart_imagechat_hub.backend.common import SKIP_
 from data.plugins.astrbot_plugin_proactive_agent.route_guard import _route, bind_route
 
 
-def item(image_id, tags):
-    return dict(id=image_id, filename=image_id + ".png", rel_path=image_id + ".png", tags=tags,
-                auto_tags=[], manual_tags=[], selected_global_tags=[])
+def proof(text,ident):
+    from data.plugins.astrbot_plugin_proactive_agent.emoji_match import fingerprint
+    return {'image_id':ident,'image_ids':[ident],'final_sha256':fingerprint(text),'source':'final_model','reason':'Fixture semantic evidence',
+        'checks':{k:True for k in ('intent','ocr','target','emotion','relationship')}}
+
+def item(image_id,tags):
+    import hashlib
+    from data.plugins.astrbot_plugin_proactive_agent.image_semantics import normalize
+    words=' '.join(tags)
+    action='apology' if '道歉' in words else 'comfort' if '难过' in words else 'affirm' if '同意' in words else 'goodnight' if '晚安' in words else 'neutral' if '睡觉' in words else 'amusement'
+    digest=hashlib.sha256(image_id.encode()).hexdigest()
+    sem=normalize({'version':2,'description':words,'ocr':[],'text_complete':True,'emotion':tags,'intensity':0,'actions':[action],
+        'target':'shared','image_type':'single_meme','conditions':['Fixture appropriate context'],'exclusions':[],
+        'relationship':'broad','confidence':.99},content_hash=digest)
+    return dict(id=image_id,filename=image_id+'.png',rel_path=image_id+'.png',tags=tags,content_hash=digest,semantic=sem,
+        auto_tags=[],manual_tags=[],selected_global_tags=[])
 
 
 class Event:
@@ -69,10 +82,12 @@ class Companion:
         self.tasks = []
         self.candidates = []
         self.prepare_calls = 0
+        self._image_memory=SimpleNamespace(candidates=lambda items,origin:items,note_candidates=Mock(),match_record=Mock(),store=SimpleNamespace(rows={}))
 
     def _cfg(self, key, default=None): return self.config.get(key, default)
 
-    def prepare_emoji_selection(self, event, candidates=None):
+    def prepare_emoji_selection(self, event, candidates=None, *, final_text="",character=None):
+        if not final_text:return None
         task = event.get_extra("test_prediction")
         if task is not None:
             return task
@@ -81,7 +96,9 @@ class Companion:
         async def predict():
             self.started.set()
             await self.release.wait()
-            return copy.deepcopy(self.answer)
+            answer=copy.deepcopy(self.answer)
+            ids=answer.get('image_ids',[]) if isinstance(answer,dict) else []
+            return {**answer,**proof(final_text,ids[0])} if isinstance(ids,list) and ids and isinstance(ids[0],str) else answer
         task = asyncio.create_task(predict())
         self.tasks.append(task)
         event.set_extra("test_prediction", task)
@@ -111,30 +128,27 @@ class LocalRecall(unittest.TestCase):
         self.assertEqual(len(rows), 80)
 
     def test_full_final_reply_reversal_negation_and_character(self):
-        happy, sorry = item("h", ["开心", "大笑"]), item("s", ["对不起", "道歉", "认怂"])
-        self.assertTrue(compatible_with_reply("哈哈开心极了", {}, happy))
-        for text in ["我并不开心，我真的很难过", "哈哈我刚才在笑。" + "这是背景。" * 300 + "但其实我很难过", "别笑了，对不起，是我错了"]:
-            self.assertFalse(compatible_with_reply(text, {}, happy))
-        self.assertFalse(compatible_with_reply("我不同意", {}, item("a", ["同意", "点头"])))
-        for mood in ("serious", "stop"):
-            self.assertFalse(compatible_with_reply("哈哈开心", {"mood": mood}, happy))
-        self.assertTrue(compatible_with_reply("对不起，是我错了", {"mood": "cheeky"}, sorry))
+        happy=item('h',['开心','大笑'])
+        self.assertFalse(compatible_with_reply('哈哈开心极了',{},happy))
+        happy['_decision']=proof('哈哈开心极了','h')
+        self.assertTrue(compatible_with_reply('哈哈开心极了',{},happy,semantic_match=True))
+        for text in ['我并不开心，我真的很难过','哈哈我刚才在笑。'+'背景。'*300+'但其实我很难过','别笑了，对不起，是我错了']:
+            happy['_decision']=proof(text,'h');self.assertFalse(compatible_with_reply(text,{},happy,semantic_match=True))
+        for mood in ('serious','stop'):
+            happy['_decision']=proof('哈哈开心极了','h');self.assertFalse(compatible_with_reply('哈哈开心极了',{'mood':mood},happy,semantic_match=True))
 
     def test_model_semantic_match_allows_paraphrase_but_not_contradiction(self):
-        sleepy = item("sleepy", ["困倦", "睡觉"])
-        self.assertFalse(compatible_with_reply("眼皮已经开始打架了", {}, sleepy))
-        self.assertTrue(compatible_with_reply("眼皮已经开始打架了", {}, sleepy, semantic_match=True))
-        happy = item("h", ["开心", "大笑"])
-        self.assertFalse(compatible_with_reply("其实我很难过", {}, happy, semantic_match=True))
-        self.assertFalse(compatible_with_reply("眼皮打架", {"mood": "serious"}, sleepy, semantic_match=True))
+        sleepy=item('sleepy',['困倦','睡觉']);text='眼皮已经开始打架了'
+        self.assertFalse(compatible_with_reply(text,{},sleepy,semantic_match=True))
+        sleepy['_decision']=proof(text,'sleepy');self.assertTrue(compatible_with_reply(text,{},sleepy,semantic_match=True))
+        self.assertFalse(compatible_with_reply(text,{'mood':'serious'},sleepy,semantic_match=True))
 
     def test_retired_reaction_state_cannot_force_apology_images(self):
-        happy = item("happy", ["开心", "大笑"])
-        for mood in ("timid", "rebound"):
-            self.assertTrue(compatible_with_reply("哈哈开心极了", {"mood": mood}, happy))
-            self.assertTrue(compatible_with_reply("乐得睡不着", {"mood": mood}, happy, semantic_match=True))
-            self.assertFalse(compatible_with_reply("其实我很难过", {"mood": mood}, happy, semantic_match=True))
-
+        happy=item('happy',['开心','大笑'])
+        for mood in ('timid','rebound'):
+            for text in ('哈哈开心极了','乐得睡不着'):
+                happy['_decision']=proof(text,'happy');self.assertTrue(compatible_with_reply(text,{'mood':mood},happy,semantic_match=True))
+            happy['_decision']=proof('其实我很难过','happy');self.assertFalse(compatible_with_reply('其实我很难过',{'mood':mood},happy,semantic_match=True))
 
 class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -183,12 +197,18 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
 
     async def ready(self, event=None):
         turn = await self.start(event)
+        await self.decorate(event)
         self.companion.release.set()
-        await asyncio.wait_for(asyncio.shield(turn.prepare), 1)
+        if not turn.closed and turn.final_ready.is_set():await asyncio.wait_for(asyncio.shield(turn.prepare),1)
         return turn
 
     async def decorate(self, event=None):
-        await asyncio.wait_for(self.p._maybe_append_proactive_emoji(event or self.event), .25)
+        event=event or self.event
+        await asyncio.wait_for(self.p._maybe_append_proactive_emoji(event),.25)
+        final=event.get_extra('qqbot_emoji_final_ready')
+        if callable(final):final(event.result.get_plain_text())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
 
     async def sent(self, event=None):
         event = event or self.event
@@ -202,22 +222,16 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                 if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
                     raise outcome
 
-    async def test_parallel_starts_before_body_shared_task_only_once(self):
-        turn = await self.start()
-        same = self.companion.prepare_emoji_selection(self.event)
-        self.assertIs(same, turn.prediction)
-        await self.companion.started.wait()
-        async def body():
-            self.assertFalse(turn.prediction.done())
-            await self.decorate()
-            return self.event.result.get_plain_text()
-        text = await asyncio.wait_for(body(), .25)
-        self.assertEqual(text, "哈哈，好开心呀")
-        self.assertEqual(self.companion.prepare_calls, 1)
-        self.assertTrue(self.companion.candidates[0])
-        await self.p._prefetch_reply_emoji(self.event, SimpleNamespace(completion_text=text))
-        self.p._analyze_proactive_emoji.assert_not_awaited()
-        self.p._sync_library.assert_not_awaited()
+    async def test_input_prepares_only_locally_final_body_starts_one_selection(self):
+        turn=await self.start()
+        self.assertIsNone(turn.prediction);self.assertEqual(self.companion.prepare_calls,0)
+        await self.p._prefetch_reply_emoji(self.event,SimpleNamespace(completion_text='未经审阅的草稿'))
+        self.assertIsNone(turn.prediction)
+        await self.decorate();await asyncio.wait_for(self.companion.started.wait(),1)
+        self.assertFalse(turn.prediction.done());self.assertEqual(self.companion.prepare_calls,1)
+        self.assertIs(self.companion.prepare_emoji_selection(self.event,final_text=turn.text),turn.prediction)
+        self.assertEqual(self.event.result.get_plain_text(),'哈哈，好开心呀')
+        self.p._analyze_proactive_emoji.assert_not_awaited();self.p._sync_library.assert_not_awaited()
 
     async def test_zero_wait_late_image_only_after_confirmed_text(self):
         turn = await self.start()
@@ -318,6 +332,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.p.context.send_message.assert_not_awaited()
         self.event.set_extra("qqbot_agent_final_done", True)
         self.event.result.chain[0].text = "现在其实很难过"
+        self.companion.answer={'image_ids':['sad']}
         await self.decorate()
         await self.sent()
         await self.drain(turn)
@@ -356,9 +371,9 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                     finally:
                         restore()
                 self.assertEqual(turn.text, '对不起，是本龙错了')
-                self.assertEqual(turn.item['id'], 'sorry')
+                self.assertIsNone(turn.item)
                 self.assertFalse(any(p['type'] == 'image' for p in transport.call_args.kwargs['message']))
-                self.assertTrue(self.p.context.send_message.call_args.args[1].chain[0].file.endswith('sorry.png'))
+                self.p.context.send_message.assert_not_awaited()
 
     async def test_image_transport_exception_has_separate_failure_counter(self):
         self.p.context.send_message.side_effect = RuntimeError('fake image send failed')
@@ -471,7 +486,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                 turn = await self.start(event)
                 if reason == "replaced":
                     self.companion.release.set()
-                    await turn.prepare
+                    await self.decorate(event)
+                    await asyncio.wait_for(turn.prepare,1)
                 await self.decorate(event)
                 await self.sent(event)
                 if reason == "disabled": self.cfg["enabled"] = False
@@ -532,21 +548,15 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(turn.closed)
         self.p.context.send_message.assert_not_awaited()
 
-    async def test_final_emotion_reversal_replaces_conflicting_ready_and_late_image(self):
-        for ready in (False, True):
-            self.companion.release.clear()
-            event = Event()
-            turn = await self.ready(event) if ready else await self.start(event)
-            event.result.chain[0].text = "我刚才还很开心。但其实我现在真的很难过。"
-            await self.decorate(event)
-            await self.sent(event)
-            self.companion.release.set()
-            if turn.delivery: await self.drain(turn)
-            self.assertFalse(any(isinstance(p, Image) for p in event.result.chain))
-        self.assertEqual(self.p.context.send_message.await_count, 2)
-        for call in self.p.context.send_message.await_args_list:
-            image = call.args[1].chain[0]
-            self.assertIn("sad.png", str(image.file))
+    async def test_final_emotion_reversal_invalidates_old_image_without_reselection(self):
+        for ready in (False,True):
+            self.companion.release.clear();event=Event()
+            turn=await self.ready(event) if ready else await self.start(event)
+            event.result.chain[0].text='我刚才还很开心。但其实我现在真的很难过。'
+            await self.decorate(event);await self.sent(event);self.companion.release.set()
+            if turn.delivery:await self.drain(turn)
+            self.assertFalse(any(isinstance(p,Image) for p in event.result.chain))
+        self.p.context.send_message.assert_not_awaited()
 
     async def test_message_snapshot_excludes_live_reply_future_and_event_backreference(self):
         for origin in ('aiocqhttp:GroupMessage:100','aiocqhttp:FriendMessage:200'):
@@ -620,9 +630,12 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
 
     async def test_formatter_and_segmented_body_confirm_whole_actual_text(self):
         turn = await self.start()
-        await self.decorate()
+        await self.p._maybe_append_proactive_emoji(self.event)
         # AstrBot's formatter runs AFTER decorating hooks.
         self.event.result.chain = [Plain("前缀 哈哈"), Plain("好开心呀")]
+        self.event.get_extra("qqbot_emoji_final_ready")('前缀 哈哈好开心呀')
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
         await self.event.send(MessageEventResult().message("前缀 哈哈"))
         await self.event.send(MessageEventResult().message("好开心呀"))
         await SmartImageSenderPlugin.after_message_sent(self.p, self.event)
@@ -631,31 +644,21 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn.text, "前缀 哈哈好开心呀")
         self.p.context.send_message.assert_awaited_once()
 
-    async def test_missing_or_malformed_prediction_uses_only_strong_local_reply_match(self):
-        for answer in ({"risk": "unknown", "image_ids": []}, {"risk": "low", "image_ids": ["outside"]},
-                       {"image_ids": []}, {"risk": "low", "image_ids": "happy"}):
-            self.companion.answer = answer
-            event = Event()
-            turn = await self.start(event)
-            self.companion.release.set()
-            await turn.prediction
-            await self.decorate(event)
-            self.assertEqual(event.result.get_plain_text(), "哈哈，好开心呀")
-            await self.sent(event)
-            await self.drain(turn)
-            self.assertEqual(turn.selection_source, "local_reply")
-            self.assertTrue(turn.closed)
-        self.assertEqual(self.p.context.send_message.await_count, 4)
-        for call in self.p.context.send_message.await_args_list:
-            self.assertIn("happy.png", str(call.args[1].chain[0].file))
+    async def test_missing_or_malformed_prediction_never_uses_tag_fallback(self):
+        for answer in ({'image_ids':[]},{'image_ids':['outside']},{'image_ids':'happy'}):
+            self.companion.answer=answer;event=Event();turn=await self.start(event)
+            await self.decorate(event);self.companion.release.set();await turn.prepare
+            await self.sent(event);await self.drain(turn)
+            self.assertTrue(turn.closed);self.assertIsNone(turn.path)
+        self.p.context.send_message.assert_not_awaited()
 
     async def test_no_match_stays_silent_and_does_not_re_roll_probability(self):
         self.companion.answer = {"risk": "unknown", "image_ids": []}
         self.event.result.chain[0].text = "今天聊两句"
         turn = await self.start()
         self.companion.release.set()
-        await turn.prediction
         await self.decorate()
+        await turn.prediction
         await self.sent()
         await self.drain(turn)
         self.assertTrue(turn.closed)
@@ -663,29 +666,19 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.p._proactive_emoji_probability_hit.assert_called_once()
         self.assertEqual(self.p._latency_emoji_stats.get("no_match"), 1)
 
-    async def test_local_reply_preparation_does_not_wait_for_slow_image_selection(self):
-        turn = await self.start()
-        await self.decorate()
-        await self.sent()
-        await self.drain(turn)
-        self.assertTrue(turn.prediction.cancelled())
-        self.p.context.send_message.assert_awaited_once()
-        self.assertEqual(turn.selection_source, "local_reply")
-        self.assertEqual(self.p._latency_emoji_stats.get("sent_separate"), 1)
-
-    async def test_draft_prefetch_overlaps_review_but_never_sends_before_body(self):
-        turn = await self.start()
-        self.companion.config["meme_separate_probability"] = 100
-        await self.p._prefetch_reply_emoji(self.event, SimpleNamespace(completion_text="哈哈，好开心呀"))
-        await asyncio.wait_for(asyncio.shield(turn.prepare), 1)
-        self.assertFalse(turn.prediction.done())
-        self.assertIsNotNone(turn.path)
+    async def test_slow_uncertain_selection_expires_without_delaying_body(self):
+        self.companion.config['emoji_late_grace_seconds']=.03
+        turn=await self.start();await self.decorate();await self.sent()
+        self.assertTrue(self.event.transport.called);self.assertFalse(turn.prediction.done())
+        await self.drain(turn);self.assertTrue(turn.prediction.cancelled())
         self.p.context.send_message.assert_not_awaited()
-        await self.decorate()
-        await self.sent()
-        await self.drain(turn)
-        self.p.context.send_message.assert_awaited_once()
-        self.p._proactive_emoji_probability_hit.assert_called_once()
+
+    async def test_draft_prefetch_never_selects_or_sends_before_final_body(self):
+        turn=await self.start()
+        await self.p._prefetch_reply_emoji(self.event,SimpleNamespace(completion_text='哈哈，好开心呀'))
+        await asyncio.sleep(0);self.assertIsNone(turn.prediction);self.assertIsNone(turn.path)
+        await self.decorate();await self.sent();self.companion.release.set();await self.drain(turn)
+        self.p.context.send_message.assert_awaited_once();self.p._proactive_emoji_probability_hit.assert_called_once()
 
     async def test_model_selected_paraphrase_keeps_original_probability_hit(self):
         self.event.result.chain[0].text = "本龙给你鼓个掌"
@@ -709,9 +702,9 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
                 event = Event()
                 event.result.chain[0].text = "本龙给你鼓个掌"
                 turn = await self.start(event)
+                await self.decorate(event)
                 if isinstance(turn, EmojiTurn):
                     await asyncio.wait_for(asyncio.shield(turn.prepare), 1)
-                await self.decorate(event)
                 await self.sent(event)
                 if isinstance(turn, EmojiTurn): await self.drain(turn)
         self.assertEqual(roll.call_count, 100)
@@ -731,45 +724,31 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         event = Event("帮我找一张表情包")
         await self.start(event)
         await self.decorate(event)
-        self.assertEqual(self.companion.prepare_calls, 1)
+        self.assertEqual(self.companion.prepare_calls, 0)
         self.p.context.send_message.assert_not_awaited()
 
-    async def test_real_companion_contract_receives_gallery_candidates_first(self):
+    async def test_real_companion_receives_final_body_and_structured_candidates(self):
         from data.plugins.astrbot_plugin_proactive_agent.reply_pipeline import ReplyPipelineMixin
         class RealCompanion(ReplyPipelineMixin):
             def __init__(inner):
-                inner._cfg = self.companion._cfg
-                inner.character_context = lambda event: {"mood": "cheeky"}
-                inner._generate_json = AsyncMock(return_value=json.dumps({"risk": "low", "image_ids": ["happy"]}))
-                inner._audit = Mock()
-        real = RealCompanion()
-        self.meta.star_cls = real
-        await SmartImageSenderPlugin.on_llm_request(self.p, self.event, None)
-        turn = self.event.get_extra(LATENCY_EMOJI_KEY)
-        self.assertIsNone(real.prepare_reply_prediction(self.event))
-        self.assertIs(real.prepare_emoji_selection(self.event, turn.candidates), turn.prediction)
-        await turn.prepare
-        self.assertEqual(turn.candidates[0]["id"], "happy")
-        real._generate_json.assert_not_awaited()
-        await self.decorate()
-        await self.sent()
-        await self.drain(turn)
+                inner._cfg=self.companion._cfg;inner._image_memory=self.companion._image_memory
+                inner._generate_json=AsyncMock(return_value=json.dumps(proof('哈哈，好开心呀','happy')));inner._audit=Mock()
+        real=RealCompanion();self.meta.star_cls=real
+        await SmartImageSenderPlugin.on_llm_request(self.p,self.event,None);turn=self.event.get_extra(LATENCY_EMOJI_KEY)
+        self.assertIsNone(turn.prediction);real._generate_json.assert_not_awaited()
+        await self.decorate();await self.sent();await self.drain(turn)
+        real._generate_json.assert_awaited_once()
+        payload=real._generate_json.await_args.args[1]
+        self.assertEqual(payload['final_text'],'哈哈，好开心呀');self.assertIn('semantic',payload['candidates'][0])
         self.p.context.send_message.assert_awaited_once()
 
-    async def test_review_cancel_termination_and_owner_cancel_cancel_image_selection(self):
-        turn = await self.start()
-        await self.event.get_extra("qqbot_cancel_reply_preparation")()
-        self.assertTrue(turn.closed)
-        await asyncio.gather(turn.prediction, return_exceptions=True)
-        self.assertTrue(turn.prediction.cancelled())
-        newer = Event()
-        owned = await self.start(newer)
+    async def test_review_cancel_and_termination_cancel_pending_preparation(self):
+        turn=await self.start();await self.event.get_extra('qqbot_cancel_reply_preparation')()
+        self.assertTrue(turn.closed);self.assertIsNone(turn.prediction)
+        newer=Event();owned=await self.start(newer);await self.decorate(newer)
         await self.p._terminate_latency_emoji()
-        self.assertTrue(owned.closed)
-        self.assertTrue(owned.prepare.cancelled())
-        self.assertTrue(owned.prediction.cancelled())
-        self.assertFalse(self.p._latency_emoji_tasks)
-        self.assertFalse(self.p._latency_emoji_turns)
+        self.assertTrue(owned.closed);self.assertTrue(owned.prepare.cancelled());self.assertTrue(owned.prediction.cancelled())
+        self.assertFalse(self.p._latency_emoji_tasks);self.assertFalse(self.p._latency_emoji_turns)
 
     async def test_cancelled_reply_owner_closes_only_gallery_preparation(self):
         entered = asyncio.Event()
@@ -784,8 +763,7 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
         self.assertTrue(turn.closed)
-        await asyncio.gather(turn.prediction, return_exceptions=True)
-        self.assertTrue(turn.prediction.cancelled())
+        self.assertIsNone(turn.prediction)
 
     async def test_slow_image_conversion_does_not_hold_text(self):
         entered, release = asyncio.Event(), asyncio.Event()
@@ -796,8 +774,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.p._prepare_send_image_path.side_effect = prepare
         turn = await self.start()
         self.companion.release.set()
-        await entered.wait()
         await self.decorate()
+        await asyncio.wait_for(entered.wait(),1)
         await self.sent()
         self.assertEqual(len(self.event.result.chain), 1)
         self.p.context.send_message.assert_not_awaited()
@@ -816,7 +794,8 @@ class AsyncEmoji(unittest.IsolatedAsyncioTestCase):
         self.p._prepare_send_image_path.side_effect = prepare
         turn = await self.start()
         self.companion.release.set()
-        await entered.wait()
+        await self.decorate()
+        await asyncio.wait_for(entered.wait(),1)
         await self.event.get_extra("qqbot_cancel_reply_preparation")()
         self.assertIn(turn.conversion, self.p._latency_emoji_tasks)
         self.assertFalse(turn.conversion.cancelled())

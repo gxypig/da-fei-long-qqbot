@@ -13,6 +13,8 @@ from data.plugins.astrbot_plugin_proactive_agent.delivery_ledger import Delivery
 from data.plugins.astrbot_plugin_proactive_agent.context_window import ContextWindow,split_rounds
 
 PNG=b'\x89PNG\r\n\x1a\nfixture-image-content'
+SEMANTIC_FIELDS={'version':2,'actions':['confusion'],'target':'self','image_type':'single_meme','conditions':['无语'],
+    'exclusions':[],'intensity':1,'confidence':.95,'relationship':'broad'}
 
 
 class ImageTests(unittest.IsolatedAsyncioTestCase):
@@ -21,7 +23,7 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         root=Path(self.temp.name);self.cfg={'image_memory_enabled':True}
         self.ledger=DeliveryLedger(root/'ledger.db');await self.ledger.start();self.addAsyncCleanup(self.ledger.close)
         self.provider=SimpleNamespace(text_chat=AsyncMock(return_value=SimpleNamespace(completion_text=json.dumps({
-            'description':'白色小龙翻白眼','ocr':[{'text':'看不清的猜测','confidence':.4},{'text':'无语','confidence':.99}],
+            **SEMANTIC_FIELDS,'description':'白色小龙翻白眼','ocr':[{'text':'看不清的猜测','confidence':.4},{'text':'无语','confidence':.99}],
             'emotion':['无语'],'inferred_usage':['打趣'],'text_complete':False},ensure_ascii=False))))
         self.plugin=SimpleNamespace(_cfg=self.cfg.get,_delivery=self.ledger,_work=SimpleNamespace(busy=lambda:True),
             _data_dir=root,context=SimpleNamespace(get_using_provider_async=AsyncMock(return_value=self.provider)))

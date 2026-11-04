@@ -47,7 +47,7 @@ def observe_format(plugin,origin,original,formatted,state,mode,*,final_unreviewe
     history=getattr(plugin,'_review_history',None)
     settings=scope.get('review_settings') or plugin.review_settings()
     if history and (not settings.get('enabled') or final_unreviewed) and original!=formatted and not linked(origin):
-        id_=history.begin(original,formatted,origin=origin,state=state,mode=mode,settings=settings,scope=scope,job=current_job.get(),kind='format_only')
+        id_=history.begin(original,formatted,origin=origin,state=state,mode=mode,settings=settings,scope=scope,job=current_job.get(),kind='local_guard' if state.get('identity_guard') else 'format_only')
         if id_:history.update(id_,approved=formatted,elapsed_ms=0)
 
 def delivery_state(row):
@@ -166,7 +166,9 @@ class ReviewHistory:
              'mode':mode,'review_settings':copy.deepcopy(settings),'original':text,'formatted':formatted,
              'original_sha256':hashlib.sha256(text.encode()).hexdigest(),
              'approved':None,'rounds':[],'result':kind,'format_changed':formatted!=text,'ai_changed':False,
-             'sends':{},'exchange':copy.deepcopy(state.get('exchange',{})),'elapsed_ms':None}
+             'sends':{},'exchange':copy.deepcopy(state.get('exchange',{})),'elapsed_ms':None,
+             'local_guard':copy.deepcopy(state.get('identity_guard'))}
+        if state.get('identity_guard'):row['format_changed']=False
         result=self._put(id_,row)
         if result:
             set_link(origin,id_,scope.get('request_id'))
@@ -251,6 +253,7 @@ class ReviewHistory:
             if result=='ai_rewritten':clauses.append('ai_changed=1')
             elif result=='passed':clauses.append("result='passed' AND ai_changed=0 AND format_changed=0")
             elif result=='format_only':clauses.append('ai_changed=0 AND format_changed=1')
+            elif result=='local_guard':clauses.append("result='local_guard'")
             elif result=='failed':clauses.append("(result IN ('failed','cancelled') OR delivery IN ('failed','partial','unknown','cancelled','error_receipt_confirmed'))")
             elif result not in {'','all'}:raise ValueError('未知结果筛选')
             columns='seq,review_id,at,origin,result,delivery,ai_changed,format_changed,original_summary,approved_summary'
