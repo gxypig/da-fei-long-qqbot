@@ -31,7 +31,7 @@ class Expression(unittest.TestCase):
         self.assertEqual(len(p['cues']),1)
 
     def test_sparse_bounded_and_no_added_sounds(self):
-        p=plan(('太好了！你在哪？哼哼。别怕。'*20)+'记住明天出发')
+        p=plan(('太好了！你在哪？哼哼。别怕。'*20)+'记住明天出发',intensity='natural')
         self.assertLessEqual(len(p['cues']),4)
         self.assertTrue(all(c['tag'] in ALLOWED for c in p['cues']))
         self.assertNotRegex(p['text'],r'\[(?:laughing|sobbing|shouting|screaming)\]')

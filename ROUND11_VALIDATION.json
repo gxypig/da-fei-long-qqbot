@@ -1,0 +1,78 @@
+{
+  "version": "1.23.1-rc1",
+  "verified_at_hong_kong": "2026-11-07T00:29:13+08:00",
+  "tests": {
+    "private-tests": 1166,
+    "public-tests": 1150,
+    "final-targeted": 30,
+    "public-targeted": 30
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "settings_preserved": true,
+    "persona_purposes_verified": 8,
+    "voice_expression_enabled": true,
+    "voice_expression_intensity": "lively",
+    "reflection_fields_available": true,
+    "reflection_status": "ready",
+    "reflection_items": 1
+  },
+  "chat_model_replay": {
+    "same_model_and_provider": true,
+    "samples": 16,
+    "by_variant": {
+      "baseline": {
+        "successes": 8,
+        "median_ms": 12289.0,
+        "max_ms": 14906,
+        "review_calls": 10
+      },
+      "candidate": {
+        "successes": 8,
+        "median_ms": 9461.0,
+        "max_ms": 21531,
+        "review_calls": 8
+      }
+    },
+    "limits": "Interleaved actual model generation plus enabled review; excludes platform transport, live queue, gallery and tools. Not an end-to-end speed guarantee.",
+    "quality": "All candidate finals manually inspected for requested sentence patterns, referents, factual grounding and retained help; small synthetic sample, not a universal guarantee."
+  },
+  "free_voice": {
+    "samples": 6,
+    "successes": 6,
+    "qq_sends": 0,
+    "by_mode": {
+      "natural": {
+        "median_ms": 3968
+      },
+      "lively": {
+        "median_ms": 4453
+      }
+    },
+    "limits": "Free synthesis only, not subjective listening acceptance"
+  },
+  "qq_test_sends": 0,
+  "public_test_posts": 0,
+  "subjective_voice_listening_verified": false,
+  "privacy_audit": {
+    "ok": true,
+    "public_files_checked": 335,
+    "secret_values_checked": 7,
+    "account_values_checked": 6,
+    "private_prompt_blocks_checked": 10
+  },
+  "rollback": {
+    "separate_source_and_data_snapshot": true,
+    "source_restore_dryrun_passed": true,
+    "restore_does_not_replay_old_databases": true
+  },
+  "references_reviewed": {
+    "user_supplied_screenshots": 5,
+    "original_browser_page": "CUA URL confidence safety stop; continued with user-supplied screenshots",
+    "external_projects": [
+      "HDS-Interlude",
+      "YuriOS"
+    ],
+    "external_project_code_copied": false
+  }
+}

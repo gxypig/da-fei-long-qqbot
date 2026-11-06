@@ -63,6 +63,20 @@ class ReviewTransportRecovery(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ReviewUnavailable):await self.run_review(reviewer)
         self.assertEqual(len(self.payloads),1)
 
+    async def test_upstream_protocol_500_recovers_with_identical_payload_once(self):
+        async def handler(request):
+            if len(self.payloads)==1:return httpx.Response(500,json={'error':{'message':'synthetic PROTOCOL_ERROR','type':'server_error'}})
+            return self.answer('{"pass":true,"natural":true,"chat_fit":true}')
+        _,reviewer=self.reviewer(handler)
+        self.assertEqual(await self.run_review(reviewer),'奶茶店先笑了')
+        self.assertEqual(len(self.payloads),2);self.assertEqual(self.payloads[0],self.payloads[1])
+
+    async def test_permanent_500_is_bounded(self):
+        async def handler(request):return httpx.Response(500,json={'error':{'message':'synthetic failure'}})
+        _,reviewer=self.reviewer(handler)
+        with self.assertRaises(ReviewUnavailable):await self.run_review(reviewer)
+        self.assertEqual(len(self.payloads),2)
+
     async def test_malformed_review_is_a_verdict_not_a_transport_failure(self):
         async def handler(request):return self.answer('not json')
         _,reviewer=self.reviewer(handler)

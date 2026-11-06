@@ -1249,14 +1249,15 @@ class WorkRuntime:
             children.append(timer)
             await asyncio.wait((primary, timer), return_when=asyncio.FIRST_COMPLETED)
             if primary.done():
-                from openai import APIConnectionError
+                from openai import APIConnectionError,APIStatusError
                 try:
                     return selected(primary.result())
-                except APIConnectionError:
+                except (APIConnectionError,APIStatusError) as transport_error:
                     # A disconnected review has no verdict to preserve. Use
                     # the same turn's one backup budget even when it failed
                     # before the slow-request timer; never retry a verdict.
-                    if (primary_kind != 'review' or first_review is not None
+                    if (isinstance(transport_error,APIStatusError) and transport_error.status_code not in {408,429,500,502,503,504}
+                            or primary_kind != 'review' or first_review is not None
                             or self.scheduler._closed or not self.enabled
                             or not self._hedge_seconds() or state.hedge_used
                             or not state.live or state.delivered):

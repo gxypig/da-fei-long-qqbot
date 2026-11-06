@@ -38,6 +38,8 @@ def delivery_purpose(value):
 
 def current_purpose():
     if _purpose.get()!='answer':return _purpose.get()
+    job=current_job.get()
+    if job and getattr(job,'reply_purpose',None)=='error_notification':return 'error_notification'
     # AstrBot's native exception fallback sends directly inside its except
     # block. Classify that code path, never a user's words or a text regex.
     if sys.exception() is not None:

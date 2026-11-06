@@ -351,6 +351,11 @@
     "type": "bool",
     "default": false
   },
+  "life_reflection_enabled": {
+    "description": "空闲整理实际活动的感想；普通回复只读取，公开动态不使用私聊资料",
+    "type": "bool",
+    "default": true
+  },
   "proactive_life_enabled": {
     "type": "bool",
     "default": false,

@@ -188,6 +188,8 @@ class ReviewHistory:
         row=self.store.rows.get(id_,{})
         # Structured explanations only; never retain a model's chain of thought.
         evidence={k:copy.deepcopy(verdict[k]) for k in ('pass','natural','chat_fit','reason','replacement','dimensions') if k in verdict}
+        if isinstance(verdict.get('replacement_check'),dict):
+            evidence['replacement_check']={k:verdict['replacement_check'].get(k) is True for k in ('pass','natural','chat_fit','facts_preserved')}
         self.update(id_,rounds=row.get('rounds',[])+[{'input':candidate,'verdict':evidence,'elapsed_ms':elapsed_ms}])
 
     def delivered(self,row):

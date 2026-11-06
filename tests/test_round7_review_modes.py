@@ -112,13 +112,14 @@ class Modes(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.monotonic()-started,.6);p._reviewer.review.assert_awaited_once()
         await p._close_reply_pipeline()
 
-    async def test_two_rewrites_keep_original_and_accumulated_feedback(self):
+    async def test_two_rewrites_keep_original_without_stale_charges(self):
         generate=AsyncMock(side_effect=[verdict(False,'第二稿'),verdict(False,'第三稿'),verdict(True)])
         audit=Mock();review=ReplyReviewer(generate,audit)
         self.assertEqual(await review.review('原稿',origin='a'), '第三稿')
         self.assertEqual(generate.await_count,3)
         self.assertEqual(generate.call_args.args[1]['原稿'],'原稿')
-        self.assertTrue(generate.call_args.args[1]['必须修正的问题'])
+        self.assertEqual(generate.call_args.args[1]['必须修正的问题'],[])
+        self.assertEqual([c.args[1]['待发文字'] for c in generate.await_args_list],['原稿','第二稿','第三稿'])
         self.assertTrue(audit.call_args.args[1]['extended'])
 
     async def test_same_task_draft_coalesces_but_context_changes_do_not(self):

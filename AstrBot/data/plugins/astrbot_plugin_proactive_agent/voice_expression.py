@@ -8,12 +8,14 @@ Docs: https://docs.fish.audio/developer-guide/core-features/emotions
 import re
 import time
 
-VERSION = 1
+VERSION = 2
 MODELS = {'s2.1-pro-free', 's2.1-pro'}
 DEFAULT = 'natural conversational tone'
 ALLOWED = {DEFAULT, 'relaxed', 'soft tone', 'whispering', 'confident',
            'happy', 'excited', 'curious', 'surprised', 'sad', 'empathetic',
-           'slightly sarcastic', 'uncertain', 'emphasis'}
+           'slightly sarcastic', 'uncertain', 'emphasis', 'annoyed', 'disappointed',
+           'embarrassed', 'proud', 'worried', 'grateful', 'chuckling', 'sighing', 'break'}
+LEVELS = {'natural', 'lively'}
 _QUOTED = re.compile(r'“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"|‘[^’]*’|`[^`]*`')
 _CLAUSE = re.compile(r'[^，,。！？!?；;\n]+[，,。！？!?；;\n]*')
 
@@ -30,6 +32,9 @@ def _requested_tone(instruction):
         (r'(?:温柔|轻柔|轻声)(?:一点|点|地)?(?:说|读|念|讲|回)|(?:用|以)温柔的?(?:语气|声音)', 'soft tone'),
         (r'(?:开心|兴奋)(?:一点|点|地)?(?:说|读|念|讲|回)|(?:用|以)开心的?(?:语气|声音)', 'happy'),
         (r'(?:平静|自然)(?:一点|点|地)?(?:说|读|念|讲|回)|(?:用|以)平静的?(?:语气|声音)', 'relaxed'),
+        (r'(?:生气|不耐烦)(?:一点|点|地)?(?:说|读|念|讲|回)|(?:用|以)不耐烦的?(?:语气|声音)', 'annoyed'),
+        (r'(?:害羞|羞涩)(?:一点|点|地)?(?:说|读|念|讲|回)', 'embarrassed'),
+        (r'(?:得意|自豪)(?:一点|点|地)?(?:说|读|念|讲|回)', 'proud'),
     ):
         for match in re.finditer(pattern, text):
             if not re.search(r'不要|不用|不许|别|禁止', text[max(0, match.start()-6):match.start()]):
@@ -44,6 +49,11 @@ def _mood(clause):
         return 'soft tone'
     if re.search(r'(?:我|本龙).{0,5}(?:好难过|很难过|有点难过|不开心|好失落)|真(?:的)?很遗憾', text):
         return 'sad'
+    if re.search(r'有点担心|放心不下|你没事吧|还好吗', text):return 'worried'
+    if re.search(r'真是服了|无语了|烦死了|够了啊|少烦(?:我|本龙)', text):return 'annoyed'
+    if re.search(r'白期待了|有点失望|可惜了', text):return 'disappointed'
+    if re.search(r'别夸了|怪不好意思|有点不好意思', text):return 'embarrassed'
+    if re.search(r'多亏(?:你|有你)|真得谢谢你', text):return 'grateful'
     if re.search(r'太好了|好耶|好棒|赢啦|成功啦|开心死了', text):
         return 'excited'
     if re.search(r'^(?:哇|诶[？?]|啊[？?])|居然|竟然', text):
@@ -77,8 +87,12 @@ def _emphasis(text, instruction):
     return match.start() if match else None
 
 
-def plan(text, *, enabled=True, instruction=''):
-    """Insert at most three delivery changes + one stress cue; never edit words."""
+def plan(text, *, enabled=True, instruction='', intensity='lively'):
+    """Bounded delivery changes and grounded sounds, without editing any words.
+
+    Lively allows more turns within a sentence, not a tag on every word. All
+    offsets refer to the plain transcript, including the optional stress cue.
+    """
     started = time.perf_counter()
     cues = []
     reason = 'enabled'
@@ -91,6 +105,8 @@ def plan(text, *, enabled=True, instruction=''):
         # previews can deliberately audition documented Fish tags verbatim.
         reason = 'literal_or_authored_markup'
     else:
+        lively = intensity == 'lively'
+        limit = min(7, max(3, len(text.strip()) // 18 + 2)) if lively else 3
         requested = _requested_tone(instruction)
         previous = None
         for match in _CLAUSE.finditer(text):
@@ -104,9 +120,20 @@ def plan(text, *, enabled=True, instruction=''):
             # Neutral clauses return to normal instead of inheriting sarcasm.
             elif cue is None and re.search(r'[。！？!?；;\n]\s*$', text[:match.start()]):
                 cue = DEFAULT
-            if cue and cue != previous and len(cues) < 3:
+            if cue and cue != previous and len(cues) < limit:
                 cues.append({'offset': at, 'tag': cue})
                 previous = cue
+            # Nonverbal delivery only accompanies words already expressing it.
+            # No surprise laughter in comfort/serious speech, no quoted sounds.
+            plain = _mask_quotes(clause).strip()
+            sound = ('chuckling' if re.match(r'^(?:哈哈|嘿嘿)', plain) else
+                     'sighing' if re.match(r'^(?:唉|唉呀)[，,、\s]', plain) else None)
+            if lively and not requested and sound and len(cues) < limit and not any(c['tag']==sound for c in cues):
+                cues.append({'offset':at,'tag':sound})
+        if lively and len(cues) < limit:
+            # A written hesitation is already part of the delivery intention.
+            pause = re.search(r'…{2,}|\.{3,}', _mask_quotes(text))
+            if pause and text[pause.end():].strip():cues.append({'offset':pause.end(),'tag':'break'})
         at = _emphasis(text, instruction)
         if at is not None and len(text.strip()) > 4:
             cues.append({'offset': at, 'tag': 'emphasis'})
@@ -114,4 +141,5 @@ def plan(text, *, enabled=True, instruction=''):
     for cue in sorted(cues, key=lambda c: (c['offset'],c['tag']=='emphasis'), reverse=True):
         marked = marked[:cue['offset']] + '[' + cue['tag'] + ']' + marked[cue['offset']:]
     return {'text': marked, 'cues': cues, 'version': VERSION, 'reason': reason,
+            'intensity': intensity if intensity in LEVELS else 'natural',
             'planning_ms': round((time.perf_counter()-started)*1000, 3)}

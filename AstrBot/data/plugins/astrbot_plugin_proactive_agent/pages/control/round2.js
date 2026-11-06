@@ -72,6 +72,7 @@
   field(fixedAdvanced,'proactive_unanswered_limit','连续多少次未回应后暂停普通主动消息','number',1,10);
   field(fixedAdvanced,'proactive_min_gap_minutes','普通主动消息的最短间隔（分钟）','number',1,1440);
   const switchCard=el('div');switchCard.className='life-toggle';field(switchCard,'proactive_life_enabled','按连续生活和联系动机判断主动消息','checkbox');channelCard.append(switchCard);
+  field(switchCard,'life_reflection_enabled','空闲阅读公开梗百科并整理自己的感想','checkbox');
   const actions=el('div');actions.className='toolbar';button(actions,'edit-free','编辑自由规则',()=>openEditor('free'));button(actions,'edit-fixed','编辑定时与动态规则',()=>openEditor('fixed'));
   button(actions,'refresh-proactive','刷新运行摘要',()=>loadProactive());button(actions,'preview-proactive','预览但不发送',()=>preview());
   proactive.append(actions);
@@ -80,7 +81,7 @@
   const rules=el('div');rules.id='proactive-rules';proactive.append(rules);
   const previewResult=el('pre');previewResult.id='proactive-preview-result';previewResult.setAttribute('role','status');proactive.append(previewResult);
   const decisions=details(proactive,'查看最近决策：为什么发，为什么跳过');decisions.id='proactive-decisions';
-  const lifeDetails=details(proactive,'当前生活与未完成事项');lifeDetails.id='life-details';
+  const lifeDetails=details(proactive,'当前生活、自己的看法与未完成事项');lifeDetails.id='life-details';
   const healthDelivery=el('article');healthDelivery.id='delivery-health';healthDelivery.className='card';$('health').prepend(healthDelivery);
   // Diagnostics are available on demand, not a wall of fields on the first screen.
   for(const id of ['performance-database-pool','performance-delivery-storage','performance-audit-storage','performance-timing-window']){
@@ -107,6 +108,13 @@
     for(const r of d.decisions){const row=el('article');row.className='compact-row';line(row,new Date(r.at*1000).toLocaleString(),`${r.origin||'无对象'} · ${r.decision.decision} · ${r.decision.reason}`);decisions.append(row);}
     for(const child of [...lifeDetails.children].slice(1))child.remove();line(lifeDetails,'当前虚拟活动',d.life.current_activity||'等待下次空闲检查');line(lifeDetails,'上一活动',d.life.previous_activity||'无');
     line(lifeDetails,'近期兴趣',(d.life.interests||[]).join('、')||'暂无');
+    line(lifeDetails,'空闲感想',d.reflections?.state?.status==='retry'?'上次整理未完成，稍后重试':d.reflections?.state?.last_at?'已整理，正常聊天直接读取':'等待有依据的活动');
+    for(const r of d.reflections?.items||[]){const item=el('article');item.className='card';line(item,'主题',r.topic);line(item,'实际依据',r.basis);line(item,'自己的看法',r.thought);line(item,'接下来想了解（尚未完成）',r.next_interest||'暂无');line(item,'可见范围',r.visibility==='public'?'公开资料':r.visibility);
+      if(r.visibility!=='public'){const edit=details(item,'将这段共同经历选作动态素材');edit.append(el('p','仅公开你确认的摘要。请去掉账号、对话原文和私人信息；此操作不会立即发动态。'));
+        const input=el('textarea');input.maxLength=300;input.rows=2;input.value=r.basis;input.setAttribute('aria-label','允许公开的经历摘要');
+        const consent=el('input');consent.type='checkbox';const label=el('label','确认这段摘要可以公开 ');label.append(consent);const status=el('p');edit.append(input,label,status);
+        const b=el('button','加入公开素材');b.type='button';b.className='secondary';edit.append(b);b.onclick=async()=>{if(!consent.checked){status.textContent='请先确认这段摘要可以公开';return;}b.disabled=true;try{await api('panel_life_public',{event_id:r.event_id,summary:input.value,confirm_public:true});status.textContent='已加入，将按原动态规则判断是否发布';}catch(e){status.textContent=e.message;b.disabled=false;}};
+      }lifeDetails.append(item);}
     for(const [field,label] of [['open_items','未完成事项'],['promises','跟进承诺']])for(const item of d.life[field]||[])line(lifeDetails,label,`${item.summary} · ${item.resolved_at?'已由聊天确认结束':'待跟进'} · 仅在 ${item.visibility} 可见`);
   }catch(e){summary.textContent='读取失败：'+e.message;}}
   function renderRules(){if(!state)return;rules.replaceChildren();const statuses={ready:'可检查',waiting:'等待机会',confirmed:'已确认发送',drop:'已跳过',defer:'已延期',unknown:'投递未知，不重发',failed:'明确失败',unavailable:'对象暂不可用',quiet:'免打扰'};

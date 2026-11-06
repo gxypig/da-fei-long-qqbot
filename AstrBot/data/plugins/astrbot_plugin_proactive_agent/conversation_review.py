@@ -245,14 +245,28 @@ class ReplyReviewer:
                         return candidate
                     if issues:self.stats['guard_rejections']+=1
                     feedback=list(dict.fromkeys(feedback+issues+[str(data.get('reason') or '措辞或回应方式未通过')[:160]]))
-                    if mode=='management' or attempt==2:raise ValueError('No approved replacement')
+                    if mode=='management':raise ValueError('No approved replacement')
                     replacement=data.get('replacement')
                     if not isinstance(replacement,str) or not replacement.strip():raise ValueError('Missing correction')
-                    if attempt==1:
-                        budget.reschedule(execution+self.timeout+30);extended=True
+                    # New protocol: the editor explicitly checks its complete
+                    # replacement in the SAME call. Legacy responses still go
+                    # through the next review. Never infer approval from text.
+                    certificate=data.get('replacement_check')
+                    original_replacement=replacement
                     if urls:
                         replacement=re.sub(r'https?://[^\s<>]+','',replacement).strip()+'\n'+'\n'.join(urls)
                     candidate=own_style(replacement,state,mode)
+                    checked_issues=hard_issues(candidate,state=state,mode=mode,media=media)
+                    if mode=='chat':checked_issues+=voice_issues(candidate,state)
+                    if urls and re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',candidate)!=urls:checked_issues.append('网址不一致')
+                    if (isinstance(certificate,dict) and all(certificate.get(k) is True for k in ('pass','natural','chat_fit','facts_preserved'))
+                            and candidate==original_replacement and not checked_issues and len(candidate)<=1200):
+                        self.stats['checked']+=1;self.stats['rewritten']+=int(candidate!=text)
+                        if self.history and record_id:self.history.update(record_id,approved=candidate,result='passed',ai_changed=candidate!=formatted,
+                            replacement_certified=True,elapsed_ms=round((time.monotonic()-started)*1000),finished_at=time.time())
+                        self.audit('review',{'status':'rewritten','rounds':attempt+1,'mode':mode,'replacement_certified':True,
+                            'model_rewritten':candidate!=formatted,'format_changed':formatted!=text,'elapsed_ms':round((time.monotonic()-started)*1000)})
+                        return candidate
                     if state.get('identity_scene') and candidate!=replacement and state.get('identity_guard',{}).get('original_sha256')==hashlib.sha256(replacement.encode()).hexdigest() and not hard_issues(candidate,state=state,mode=mode,media=media):
                         state['identity_guard_review_override']=True
                         self.stats['guard_rejections']+=1
@@ -260,6 +274,12 @@ class ReplyReviewer:
                         self.audit('review',{'status':'identity_guard','rounds':attempt+1,'mode':mode})
                         return candidate
                     if len(candidate)>1200:raise ValueError('Review replacement too long')
+                    if attempt==2:raise ValueError('No approved replacement')
+                    # Past feedback describes the previous candidate, not an
+                    # immutable charge against every future rewrite.
+                    feedback=list(dict.fromkeys(checked_issues))
+                    if attempt==1:
+                        budget.reschedule(execution+self.timeout+30);extended=True
         except asyncio.CancelledError:
             if self.history and record_id:self.history.update(record_id,result='cancelled',failure='cancelled',elapsed_ms=round((time.monotonic()-started)*1000))
             raise

@@ -62,11 +62,11 @@ def normalize_wav(path):
         finally:temporary.unlink(missing_ok=True)
     return {'duration_seconds':actual/rate,'sample_rate':rate,'channels':channels,'header_finalized':declared!=actual}
 
-async def synthesize(provider,text,*,explicit=False,budget=None,expression=False,instruction=''):
+async def synthesize(provider,text,*,explicit=False,budget=None,expression=False,instruction='',intensity='lively'):
     """One total deadline, including the sole possible 429/5xx retry."""
     from .voice_expression import plan,MODELS
     started=time.monotonic()
-    delivery=plan(text,enabled=expression and provider.get_model() in MODELS,instruction=instruction)
+    delivery=plan(text,enabled=expression and provider.get_model() in MODELS,instruction=instruction,intensity=intensity)
     spoken=delivery.pop('text')
     scope={'text_sha256':hashlib.sha256(text.encode()).hexdigest(),
         'bytes':len(spoken.encode('utf-8')),'transcript_bytes':len(text.encode('utf-8')),
@@ -127,6 +127,7 @@ def paragraphs(text,limit=200):
 async def transform(plugin,stage,event,*,force=False,forbidden=False):
     from astrbot.api.message_components import Plain,Record
     result=event.get_result()
+    if event.get_extra('qqbot_send_path')=='template_receipt':return
     if forbidden or not result or not result.is_llm_result():return
     cfg=stage.ctx.astrbot_config.get('provider_tts_settings',{})
     if not cfg.get('enable'):return
@@ -147,7 +148,7 @@ async def transform(plugin,stage,event,*,force=False,forbidden=False):
         for paragraph in paragraphs(merged) if force else [merged]:
             budget=15 if force and len(text)>200 else max(.001,deadline-time.monotonic())
             path,meta=await synthesize(provider,paragraph,explicit=force,budget=budget,
-                expression=expression,instruction=event.get_message_str())
+                expression=expression,instruction=event.get_message_str(),intensity=cfg.get('fish_expression_intensity','lively'))
             records.append(meta)
             if path:
                 chain.append(Record(file=path,url=path,text=paragraph))
@@ -179,7 +180,7 @@ async def replace_stale_audio(plugin,event,parts,text,origin):
             # Recompute from the approved rewrite; stale offsets cannot leak in.
             cfg=plugin.context.get_config().get('provider_tts_settings',{})
             audio,meta=await synthesize(provider,text,explicit=True,
-                expression=cfg.get('fish_expression_enabled',True),instruction=event.get_message_str())
+                expression=cfg.get('fish_expression_enabled',True),instruction=event.get_message_str(),intensity=cfg.get('fish_expression_intensity','lively'))
             event.set_extra('qqbot_voice_synthesis',history+[meta])
     replacement=(await Event._from_segment_to_dict(Record(file=audio,url=audio,text=text))) if audio else {'type':'text','data':{'text':text}}
     out=[];inserted=False

@@ -37,12 +37,20 @@ async def proactive_status(p):
     from .health_projection import runtime_health
     delivery=runtime_health(p)
     return {'enabled':p._cfg('enable',True),'quiet_now':p._quiet_now(),'scope':scopes,'rules':rules,
-        'life':p._life.activity(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
+        'life':p._life.activity(),'reflections':p._life.reflection.snapshot(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
         'pending_replies':len(p._reply_queue.pending),'delivery':delivery,
         'next_free_check':getattr(p,'_next_free_check',None),'clock':time.time()}
 
 
 def register_round2_panel(plugin):
+    async def share_experience():
+        body=await request.get_json(silent=True)
+        if not isinstance(body,dict) or body.get('confirm_public') is not True:return jsonify(status='error',message='请确认这段摘要可以公开'),400
+        try:
+            row=plugin._life.approve_public_experience(body.get('event_id'),body.get('summary'))
+            await plugin._life.store.flush('event:'+row['id'])
+            return jsonify(status='ok',data={'id':row['id'],'sent':False})
+        except ValueError as exc:return jsonify(status='error',message=str(exc)),400
     async def status():
         await plugin._targets.refresh()
         return jsonify(status='ok',data=await proactive_status(plugin))
@@ -105,5 +113,5 @@ def register_round2_panel(plugin):
             return {'mime':mime,'data':base64.b64encode(data).decode('ascii')}
         try:return jsonify(status='ok',data=await asyncio.to_thread(read))
         except (OSError,ValueError):return jsonify(status='error',message='原图不可用'),404
-    for name,handler,methods in [('panel_proactive',status,['GET']),('panel_proactive_preview',preview,['POST']),('panel_image_memory',images,['GET','POST']),('panel_reply_summary',summary,['GET']),('panel_delivery',deliveries,['GET']),('panel_image_feedback',image_feedback,['POST']),('panel_match_image',match_image,['GET'])]:
+    for name,handler,methods in [('panel_life_public',share_experience,['POST']),('panel_proactive',status,['GET']),('panel_proactive_preview',preview,['POST']),('panel_image_memory',images,['GET','POST']),('panel_reply_summary',summary,['GET']),('panel_delivery',deliveries,['GET']),('panel_image_feedback',image_feedback,['POST']),('panel_match_image',match_image,['GET'])]:
         plugin.context.register_web_api('/astrbot_plugin_proactive_agent/'+name,handler,methods,'第二轮控制面板')

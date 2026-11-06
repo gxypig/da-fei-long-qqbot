@@ -41,7 +41,7 @@ FIELDS = {
 LEGACY_FIELDS=set(FIELDS)
 FIELDS['reply_review_enabled']=False
 FIELDS.update(review_history_days=30,review_history_limit=10000)
-FIELDS.update({'proactive_life_enabled':False,'fixed_message_required':False,'fixed_qzone_required':False,
+FIELDS.update({'proactive_life_enabled':False,'life_reflection_enabled':True,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
 SECTIONS={
@@ -51,7 +51,7 @@ SECTIONS={
     'proactive':{'enable','allow_group','allow_private','allow_qzone','interval_minutes','quiet_hours','discretionary_enabled',
         'fixed_messages_enabled','fixed_group_ids','fixed_private_ids','fixed_message_interval_minutes','fixed_message_random_enabled',
         'fixed_message_min_minutes','fixed_message_max_minutes','fixed_qzone_enabled','fixed_qzone_interval_minutes',
-        'proactive_life_enabled','fixed_message_required','fixed_qzone_required','proactive_unanswered_limit','proactive_min_gap_minutes',
+        'proactive_life_enabled','life_reflection_enabled','fixed_message_required','fixed_qzone_required','proactive_unanswered_limit','proactive_min_gap_minutes',
         'group_ids','private_ids','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes'}}
 SECTIONS['performance']=set(FIELDS)-set.union(*SECTIONS.values())
 
