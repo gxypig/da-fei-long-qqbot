@@ -51,7 +51,7 @@ class MemeWikiIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_understanding_and_custom_import_survive_primary_dictionary(self):
         await self.memory.lookup('绷不住了','a')
         self.generate.return_value=json.dumps({'intent':'借失控表达忍俊不禁或崩溃','avoid':'对方认真诉苦时别嘲笑',
-                                    'adaptations':['差点笑出声'],'triggers':['笑死','心态崩了']})
+                                    'adaptations':['差点笑出声'],'examples':['对方：他又把自己锁门外了；接话：绷不住了','对方：这笑话太冷；接话：差点绷住了'],'triggers':['笑死','心态崩了']})
         await self.memory.understand('绷不住了','a')
         self.assertIn('intent',self.memory.contextual('绷不住了')[0])
         self.memory.import_entries([{'phrase':'绷不住了','meaning':'自定义含义','usage':'自定义场景'}],overwrite=True)

@@ -73,6 +73,7 @@
   field(fixedAdvanced,'proactive_min_gap_minutes','普通主动消息的最短间隔（分钟）','number',1,1440);
   const switchCard=el('div');switchCard.className='life-toggle';field(switchCard,'proactive_life_enabled','按连续生活和联系动机判断主动消息','checkbox');channelCard.append(switchCard);
   field(switchCard,'life_reflection_enabled','空闲阅读公开梗百科并整理自己的感想','checkbox');
+  field(switchCard,'life_public_auto','私聊共同经历自动脱敏作为动态素材（无需逐次确认）','checkbox');
   const actions=el('div');actions.className='toolbar';button(actions,'edit-free','编辑自由规则',()=>openEditor('free'));button(actions,'edit-fixed','编辑定时与动态规则',()=>openEditor('fixed'));
   button(actions,'refresh-proactive','刷新运行摘要',()=>loadProactive());button(actions,'preview-proactive','预览但不发送',()=>preview());
   proactive.append(actions);
@@ -82,6 +83,12 @@
   const previewResult=el('pre');previewResult.id='proactive-preview-result';previewResult.setAttribute('role','status');proactive.append(previewResult);
   const decisions=details(proactive,'查看最近决策：为什么发，为什么跳过');decisions.id='proactive-decisions';
   const lifeDetails=details(proactive,'当前生活、自己的看法与未完成事项');lifeDetails.id='life-details';
+  const imageApi=details(speed,'图片与明确请求的动图');
+  field(imageApi,'image_generation_api_enabled','使用独立 Images API 生图，保留正常聊天模型','checkbox');
+  field(imageApi,'image_generation_provider_id','生图提供商ID（留空沿用当前模型的接口）','text');
+  field(imageApi,'image_generation_model','静态图片模型','text');
+  field(imageApi,'image_animation_model','明确要求动图时使用的模型','text');
+  imageApi.append(el('p','动图模型需要接口实际支持，返回真实GIF后才发送；普通图片不会生成动图。聊天临时图片保留1小时，正式图库长期保留。'));
   const healthDelivery=el('article');healthDelivery.id='delivery-health';healthDelivery.className='card';$('health').prepend(healthDelivery);
   // Diagnostics are available on demand, not a wall of fields on the first screen.
   for(const id of ['performance-database-pool','performance-delivery-storage','performance-audit-storage','performance-timing-window']){
@@ -108,6 +115,9 @@
     for(const r of d.decisions){const row=el('article');row.className='compact-row';line(row,new Date(r.at*1000).toLocaleString(),`${r.origin||'无对象'} · ${r.decision.decision} · ${r.decision.reason}`);decisions.append(row);}
     for(const child of [...lifeDetails.children].slice(1))child.remove();line(lifeDetails,'当前虚拟活动',d.life.current_activity||'等待下次空闲检查');line(lifeDetails,'上一活动',d.life.previous_activity||'无');
     line(lifeDetails,'近期兴趣',(d.life.interests||[]).join('、')||'暂无');
+    line(lifeDetails,'自动脱敏',d.public_experiences?.enabled?'已开启，只有有依据且通过隐私检查的经历进入公开素材':'未开启');
+    line(lifeDetails,'素材处理状态',JSON.stringify(d.public_experiences?.states||{}));
+    line(lifeDetails,'已收尾或移出当前清单',d.life.retired_items||0);
     line(lifeDetails,'空闲感想',d.reflections?.state?.status==='retry'?'上次整理未完成，稍后重试':d.reflections?.state?.last_at?'已整理，正常聊天直接读取':'等待有依据的活动');
     for(const r of d.reflections?.items||[]){const item=el('article');item.className='card';line(item,'主题',r.topic);line(item,'实际依据',r.basis);line(item,'自己的看法',r.thought);line(item,'接下来想了解（尚未完成）',r.next_interest||'暂无');line(item,'可见范围',r.visibility==='public'?'公开资料':r.visibility);
       if(r.visibility!=='public'){const edit=details(item,'将这段共同经历选作动态素材');edit.append(el('p','仅公开你确认的摘要。请去掉账号、对话原文和私人信息；此操作不会立即发动态。'));

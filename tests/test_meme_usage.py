@@ -32,12 +32,12 @@ class UsageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event.get_extra('qqbot_meme_plan')['reason'],'serious_or_stop')
         other=Event('bot:GroupMessage:2')
         self.assertTrue(self.usage.choose(other,self.rows,'这个工作明天再做'))
-    async def test_seeded_twenty_percent_and_once_per_request(self):
+    async def test_seeded_forty_percent_and_once_per_request(self):
         count=0
         for i in range(100):
             self.usage.rng=lambda i=i:i/100;e=Event();result=self.usage.choose(e,self.rows,'又拖延了');count+=bool(result)
             self.usage.rng=lambda:1;self.assertEqual(self.usage.choose(e,self.rows,'又拖延了'),result)
-        self.assertEqual(count,20)
+        self.assertEqual(count,40)
     async def test_failed_unknown_and_optional_are_not_reply_counts(self):
         e=Event();self.usage.choose(e,self.rows,'又拖延了')
         for i,kw in enumerate([{'state':'failed'},{'state':'unknown'},{'optional':True},{'purpose':'error_notification'}]):self.sent(e,str(i),**kw)

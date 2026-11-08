@@ -228,7 +228,7 @@ class ReplyReviewer:
                              '原稿':text,'待发文字':candidate,'附件数':media,'审阅轮次':attempt+1,
                              '不可改变的事实':{'网址':urls,'工具':state.get('tool_facts',[]),
                                  '原样文本':state.get('verbatim_text'),'语音记录':state.get('voice_receipts',''),
-                                 '图库结果':state.get('gallery_result')},
+                                 '图库结果':state.get('gallery_result'),'角色当前生活':state.get('current_life')},
                              '交流状态':state.get('exchange',{}),'身份场景':bool(state.get('identity_scene')),
                              '必须修正的问题':list(dict.fromkeys(issues+feedback))},origin)
                         arrived()

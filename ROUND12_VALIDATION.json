@@ -1,0 +1,131 @@
+{
+  "version": "1.24.0-rc1",
+  "date_hk": "2026-11-08",
+  "automated_tests": {
+    "full_private": 1194,
+    "full_public": 1178,
+    "final_followup_private": 65,
+    "final_followup_public": 65,
+    "note": "Full suites passed before the final request-clone capture/reviewer-life-facts fixes. Both final fixes then passed the 65-case integration suite in each tree.",
+    "health_refresh": "Real handler: immediate feedback, single flight, success clock, error and retry availability passed",
+    "javascript_syntax": "app.js and round2.js passed",
+    "visual_browser_check": false
+  },
+  "live_model_replay": {
+    "initial": {
+      "samples": 16,
+      "model": "gpt-6.1-sol",
+      "qq_test_sends": 0,
+      "review_enabled": true,
+      "scope": "Interleaved same-model local replay. Includes life context and configured review, excludes queue and QQ transport. Not a 30-second end-to-end guarantee.",
+      "by_variant": {
+        "baseline": {
+          "successes": 8,
+          "median_ms": 8891.0,
+          "max_ms": 13172,
+          "review_calls": 8
+        },
+        "candidate": {
+          "successes": 7,
+          "median_ms": 10055.0,
+          "max_ms": 61079,
+          "review_calls": 8
+        }
+      }
+    },
+    "final": {
+      "samples": 16,
+      "model": "gpt-6.1-sol",
+      "qq_test_sends": 0,
+      "review_enabled": true,
+      "scope": "Interleaved same-model local replay. Includes life context and configured review, excludes queue and QQ transport. Not a 30-second end-to-end guarantee.",
+      "by_variant": {
+        "baseline": {
+          "successes": 8,
+          "median_ms": 9844.0,
+          "max_ms": 14000,
+          "review_calls": 8
+        },
+        "candidate": {
+          "successes": 8,
+          "median_ms": 8852.0,
+          "max_ms": 11406,
+          "review_calls": 8
+        }
+      }
+    },
+    "observed_median_change_percent": -10.08,
+    "initial_failure": "Initial candidate included excess life history and one review request timed out. Results retained, not discarded.",
+    "fix": "Compact current activity for ordinary/near-term questions; supply identical life facts to the already configured reviewer.",
+    "limits": "Eight inputs per variant, interleaved. Model unchanged; review remained enabled; no quality reduction or forced shortening. Excludes QQ queue/transport; not a statistical or 30-second end-to-end guarantee."
+  },
+  "private_shared_experiences": {
+    "synthetic_input": true,
+    "model_calls": 3,
+    "projection_approved": true,
+    "name_removed": true,
+    "origin_not_exported": true,
+    "own_view_present": true,
+    "final_verification_passed": true,
+    "duplicate_model_calls": 0,
+    "qq_test_sends": 0,
+    "qzone_test_posts": 0
+  },
+  "images": {
+    "static": {
+      "qq_test_sends": 0,
+      "ok": true,
+      "format": "png",
+      "bytes": 1457544,
+      "transport_bytes_unchanged": true,
+      "caption_present": true,
+      "generated_flag": true,
+      "seconds": 15.797
+    },
+    "animated": {
+      "model": "gpt-image-2.6-sunburst",
+      "real_generation_passed": false,
+      "upstream_http_status": 400,
+      "upstream_message": "GIF output is not enabled for this request.",
+      "synthetic_multiframe_transport_passed": true,
+      "actual_qq_receipt_tested": false
+    }
+  },
+  "incoming_images": {
+    "gallery_before": 768,
+    "gallery_after": 768,
+    "gallery_deleted": 0,
+    "new_chat_image_ttl_seconds": 3600,
+    "cleanup_interval_seconds": 30,
+    "durable_backups_exclude_cache": true,
+    "current_user_image_bytes_replaced_by_temporary_history_references": true,
+    "existing_history_bulk_deleted": false,
+    "ordinary_text_added_wait_ms": 0,
+    "limits": "Cleanup requires a running process and resumes at startup. Existing gallery remains under its original collection/persistence rules."
+  },
+  "learning": {
+    "entries": 220,
+    "entries_with_at_least_two_examples": 220,
+    "technical_failures_before": 36,
+    "current_job_states": {
+      "archived_unverified": 272,
+      "quarantined": 48,
+      "unverified": 3
+    },
+    "uncertainty_is_not_learning_success": true,
+    "automatic_recovery_cycles_limit": 3
+  },
+  "runtime": {
+    "checks_passed": 19,
+    "checks_total": 20,
+    "pre_existing_failed_required_deliveries": 1,
+    "new_delivery_faults": 0,
+    "settings_preserved": true,
+    "prior_failure_erased_or_resent": false
+  },
+  "external_test_writes": {
+    "qq_messages": 0,
+    "qzone_posts": 0
+  },
+  "release_privacy": "Only source, tests and aggregate validation. No accounts, private persona, configuration, logs, original chats, gallery, credentials or private proxy binaries."
+}

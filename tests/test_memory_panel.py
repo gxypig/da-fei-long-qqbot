@@ -83,7 +83,7 @@ class MemoryPanelTests(unittest.IsolatedAsyncioTestCase):
         self.memory.import_entries([ROW])
         facts=copy.deepcopy(self.memory.entries[ROW['phrase']])
         self.memory.generate.return_value=json.dumps({'intent':'用物品拟人化的反差自嘲，而不是责备对方',
-            'avoid':'真正受伤或认真求助时不用','adaptations':['今天闹钟也休假'], 'triggers':['起晚了']})
+            'avoid':'真正受伤或认真求助时不用','examples':['对方：又起晚了；接话：闹钟也想放假','对方：今天笑得停不下来；接话：彻底绷不住了'],'adaptations':['今天闹钟也休假'], 'triggers':['起晚了']})
         card=await self.memory.understand(ROW['phrase'])
         self.assertEqual(card['meaning'],facts['meaning']);self.assertEqual(card['sources'],facts['sources'])
         self.assertIn('自嘲',card['intent'])
@@ -98,7 +98,7 @@ class MemoryPanelTests(unittest.IsolatedAsyncioTestCase):
         entered,finish=asyncio.Event(),asyncio.Event()
         async def gen(*_):
             entered.set();await finish.wait()
-            return json.dumps({'intent':'旧含义的说明','avoid':'严肃时禁用','adaptations':[],'triggers':[]})
+            return json.dumps({'intent':'旧含义的说明','avoid':'严肃时禁用','examples':['对方：又起晚了；接话：闹钟也想放假','对方：今天笑得停不下来；接话：彻底绷不住了'],'adaptations':[],'triggers':[]})
         self.memory.generate.side_effect=gen
         task=asyncio.create_task(self.memory.understand(ROW['phrase']))
         await entered.wait()

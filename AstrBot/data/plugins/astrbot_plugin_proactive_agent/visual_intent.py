@@ -27,7 +27,8 @@ def generation_kind(text):
         if not re.search(r"怎么|如何|什么|为什么|是不是|能不能|有没有|会不会|是否|说的|说啥|什么意思|解释|分析|意见|想法|办法|水平|本事|实力|厉害|战绩|成绩|操作|段位|分数|在不在|有空|聊|做题|代码|报错|日志|配置|链接|文章|题目|作业|答案|表情包|梗图|图库|现成|视频|b站|哔哩|bilibili|bv[0-9a-z]{10}", subject):
             create = True
     if not create:
-        return "none"
+        from .image_generation import animated_request
+        if not animated_request(text):return "none"
     if re.search(r"自拍|你(?:自己|本人|的(?:样子|模样|样貌|脸|角|龙角|尾巴|龙尾|翅膀|照片|自拍))|(?:看看|看下|瞅瞅|瞧瞧)你(?:[呀啊呗嘛呢！!？?~～，,。 ]|$)|(?:画|拍).{0,5}(?:大肥龙|肥龙|你)", text):
         return "selfie"
     return "scene"

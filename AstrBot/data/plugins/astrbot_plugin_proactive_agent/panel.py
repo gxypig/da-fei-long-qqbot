@@ -40,7 +40,7 @@ FIELDS = {
 }
 LEGACY_FIELDS=set(FIELDS)
 FIELDS['reply_review_enabled']=False
-FIELDS.update(review_history_days=30,review_history_limit=10000)
+FIELDS.update(review_history_days=30,review_history_limit=10000,life_public_auto=False,image_generation_api_enabled=False,image_generation_provider_id='',image_generation_model='gpt-image-2.5-sunburst',image_animation_model='gpt-image-2.6-sunburst')
 FIELDS.update({'proactive_life_enabled':False,'life_reflection_enabled':True,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
@@ -51,7 +51,7 @@ SECTIONS={
     'proactive':{'enable','allow_group','allow_private','allow_qzone','interval_minutes','quiet_hours','discretionary_enabled',
         'fixed_messages_enabled','fixed_group_ids','fixed_private_ids','fixed_message_interval_minutes','fixed_message_random_enabled',
         'fixed_message_min_minutes','fixed_message_max_minutes','fixed_qzone_enabled','fixed_qzone_interval_minutes',
-        'proactive_life_enabled','life_reflection_enabled','fixed_message_required','fixed_qzone_required','proactive_unanswered_limit','proactive_min_gap_minutes',
+        'proactive_life_enabled','life_reflection_enabled','life_public_auto','fixed_message_required','fixed_qzone_required','proactive_unanswered_limit','proactive_min_gap_minutes',
         'group_ids','private_ids','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes'}}
 SECTIONS['performance']=set(FIELDS)-set.union(*SECTIONS.values())
 
@@ -245,7 +245,7 @@ class PanelMixin:
             job_cursor=int(request.args['job_cursor']) if 'job_cursor' in request.args else None
             limit=max(1,min(100,int(request.args.get('limit',50))))
         except ValueError:return jsonify({'status':'error','message':'分页参数必须为整数'}),400
-        data = learning.details(query=query, learned_only=learned in {'1','true'},cursor=cursor,job_cursor=job_cursor,limit=limit) if learning else {
+        data = learning.details(query=query, learned_only=learned in {'1','true'},cursor=cursor,job_cursor=job_cursor,limit=limit,active_only=request.args.get('active_only','0')=='1') if learning else {
             'jobs':[], 'events':[], 'rules':[], 'closed':True,
             'counts':{'jobs':0, 'events':0, 'rules':0}, 'limit':50}
         return jsonify({'status':'ok', 'data':data})

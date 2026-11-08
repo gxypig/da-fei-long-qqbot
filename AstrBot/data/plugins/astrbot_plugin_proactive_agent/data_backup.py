@@ -5,7 +5,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 
 ZONE=timezone(timedelta(hours=8))
-SKIP={'plugins','logs','temp','__pycache__','.cache'}
+SKIP={'plugins','logs','temp','__pycache__','.cache','incoming-images'}
 DATABASE={'.db','.sqlite','.sqlite3'}
 _LOCKS={};_LOCKS_GUARD=threading.Lock()
 

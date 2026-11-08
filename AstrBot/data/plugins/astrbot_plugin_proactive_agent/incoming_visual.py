@@ -130,19 +130,20 @@ class IncomingVisual:
     def companions(self,row):
         if row['has_quote'] or TOPIC_BREAK.search(row['text']):return []
         history=list(self.rows.get(row['key'],()))
-        matches=[]
-        for other in history:
-            age=abs(other['at']-row['at'])
-            if other is row or other['epoch']!=row['epoch'] or age>15:continue
-            if TOPIC_BREAK.search(other['text']) or other['has_quote']:continue
-            # Only one adjacent burst, never skip over this sender's intervening
-            # unrelated message to resurrect an older image.
-            if abs(history.index(other)-history.index(row))>1:continue
-            if bool(row['images'])==bool(other['images']):continue
-            if not row['images'] and not (LOOK.search(row['text']) or age<=6):continue
-            if row['images'] and not (LOOK.search(other['text']) or age<=6):continue
-            matches.append(other)
-        return matches[:1]
+        if row not in history:return []
+        center=history.index(row);selected=[row]
+        # A contiguous same-speaker burst, bounded by gaps, quotes, resets and
+        # topic breaks. Several images/text fragments belong to the same burst.
+        for direction in (-1,1):
+            previous=row
+            for index in range(center+direction,len(history) if direction>0 else -1,direction):
+                other=history[index];age=abs(other['at']-row['at'])
+                gap=abs(other['at']-previous['at'])
+                if (other['epoch']!=row['epoch'] or age>15 or gap>6
+                        or TOPIC_BREAK.search(other['text']) or other['has_quote']):break
+                selected.append(other);previous=other
+        if not any(x['images'] for x in selected):return []
+        return sorted((x for x in selected if x is not row),key=lambda x:x['at'])[:5]
 
     async def enrich(self,event,req):
         if not self.enabled() or event.get_extra('qqbot_visual_enriched'):return
@@ -217,6 +218,41 @@ class IncomingVisual:
 def install(plugin):
     from .reply_jobs import current_job
     service=IncomingVisual(plugin);plugin._incoming_visual=service
+    from .incoming_cache import IncomingCache
+    from astrbot.core.pipeline.preprocess_stage.stage import PreProcessStage
+    from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+    cache=IncomingCache(Path(plugin._data_dir)/'incoming-images',temp_root=get_astrbot_temp_path());service.cache=cache
+    startup=asyncio.create_task(cache.start());original_normalize=PreProcessStage._normalize_image_component
+    from astrbot.core.provider.entities import ProviderRequest
+    original_assemble=ProviderRequest.assemble_context
+    async def assemble(req):
+        message=await original_assemble(req)
+        job=current_job.get()
+        bound=job.event.get_extra('qqbot_generation_request') if job and job.event else None
+        # The native runner dataclass-replaces requests for image-only providers.
+        # Match that equivalent current turn too; never capture history by walking it.
+        same_turn=bound is req or bound is not None and req.prompt==bound.prompt and req.conversation is bound.conversation
+        if active and same_turn:
+            await startup
+            await cache.capture_message(message)
+        return message
+    ProviderRequest.assemble_context=assemble
+    manager=getattr(getattr(plugin,'context',None),'conversation_manager',None)
+    original_update=getattr(manager,'update_conversation',None)
+    async def update(*args,**kwargs):
+        if active:
+            if 'history' in kwargs:kwargs['history']=cache.portable_history(kwargs['history'])
+            elif len(args)>2:args=(*args[:2],cache.portable_history(args[2]),*args[3:])
+        return await original_update(*args,**kwargs)
+    if original_update:manager.update_conversation=update
+    async def normalize(stage,event,component):
+        await original_normalize(stage,event,component)
+        if not active:return
+        await startup
+        path=await cache.retain(component.path or component.file)
+        component.file=component.path=component.url=path
+        service.captured(event,component,path)
+    PreProcessStage._normalize_image_component=normalize
     previous=Image.convert_to_file_path;active=True
     async def capture(component):
         path=await previous(component)
@@ -229,5 +265,10 @@ def install(plugin):
     def restore():
         nonlocal active
         active=False;service.rows.clear()
+        cache.stop()
+        if not startup.done():startup.cancel()
+        if PreProcessStage._normalize_image_component is normalize:PreProcessStage._normalize_image_component=original_normalize
+        if ProviderRequest.assemble_context is assemble:ProviderRequest.assemble_context=original_assemble
+        if original_update and manager.update_conversation is update:manager.update_conversation=original_update
         if Image.convert_to_file_path is capture:Image.convert_to_file_path=previous
     return restore

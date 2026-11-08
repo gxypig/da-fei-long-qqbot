@@ -45,12 +45,14 @@ def image_refs(message) -> list[str]:
     return refs[:4]
 
 
-def install_image_compat():
+def install_image_compat(plugin=None):
     from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
     from astrbot.api.event import MessageChain
     from astrbot.api.message_components import Image
 
     original = ProviderOpenAIOfficial._parse_openai_completion
+    from .image_generation import install
+    restore_api=install(plugin) if plugin is not None else lambda:None
 
     @wraps(original)
     async def parse(provider, completion, tools):
@@ -77,6 +79,7 @@ def install_image_compat():
     ProviderOpenAIOfficial._parse_openai_completion = parse
 
     def restore():
+        restore_api()
         if ProviderOpenAIOfficial._parse_openai_completion is parse:
             ProviderOpenAIOfficial._parse_openai_completion = original
 

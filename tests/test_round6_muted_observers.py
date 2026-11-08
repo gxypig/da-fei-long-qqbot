@@ -22,7 +22,7 @@ class MutedObservers(unittest.IsolatedAsyncioTestCase):
                 await mute.change(origin,True,None,0,origin)
             observed=AsyncMock();learning=SimpleNamespace(enqueue_meme=Mock(),confirmed_job=Mock())
             profiles=SimpleNamespace(observe=Mock(),end_turn=Mock())
-            plugin=SimpleNamespace(_cfg=cfg.get,_reply_queue=q,_delivery=ledger,_mutes=mute,
+            plugin=SimpleNamespace(_data_dir=Path(folder),_cfg=cfg.get,_reply_queue=q,_delivery=ledger,_mutes=mute,
                 _platform=lambda:None,_audit=Mock(),_ai_profiles=profiles,_learning=learning,track_session=observed,
                 context=SimpleNamespace(conversation_manager=SimpleNamespace(get_curr_conversation_id=AsyncMock(return_value='cid'))))
             generated=[]

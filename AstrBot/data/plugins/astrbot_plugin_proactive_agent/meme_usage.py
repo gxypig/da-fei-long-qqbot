@@ -40,7 +40,7 @@ class MemeUsage:
                 eligible=[r for r in rows if fold(r.get('phrase')) not in used|reserved]
                 if sequence-last<3:reason='confirmed_reply_gap'
                 elif not eligible:reason='recent_twenty_repeat'
-                elif self.rng()>=.2:reason='natural_opportunity_not_drawn'
+                elif self.rng()>=.4:reason='natural_opportunity_not_drawn'
                 else:candidates=eligible[:3];mode='active';reason='natural_opportunity'
         job=event.get_extra('qqbot_reply_job')
         plan={'id':uuid.uuid4().hex,'origin':origin,'job_id':getattr(job,'id',None),'at':time.time(),

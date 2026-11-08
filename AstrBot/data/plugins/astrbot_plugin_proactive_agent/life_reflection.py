@@ -60,7 +60,7 @@ class LifeReflection:
         if meta.get('next_at',0)>now:return
         try:
             await self.public_read()
-            rows=[r for r in life.store.rows.values() if r.get('record_type')=='event' and r.get('source')=='tool'
+            rows=[r for r in life.store.rows.values() if r.get('record_type')=='event' and r.get('source') in {'tool','chat_confirmed'}
                 and r.get('completed') and r.get('expires_at',0)>now and not r.get('reflected_at')]
             if not rows:return
             event=max(rows,key=lambda r:r['at']);origin=event['visibility']
@@ -85,6 +85,9 @@ class LifeReflection:
                     'visibility':origin,'event_id':event['id'],'basis':quote,'topic':topic,'thought':thought,
                     'next_interest':intent,'keywords':keywords,'source':'opinion','previous_thought':old.get('thought') if old else None})
                 self.refresh()
+                if origin=='public' and intent:
+                    state=life.activity()
+                    life.store.put('life',{**state,'chapter':topic,'chapter_intention':intent,'chapter_basis':event['id']})
             life.store.put('event:'+event['id'],{**life.store.rows['event:'+event['id']],'reflected_at':now})
             life.store.put('reflection:state',{'sequence':int(meta.get('sequence',0))+1,'last_at':now,'next_at':now+1800,'status':'skipped' if data.get('skip') else 'ready'})
         except BackgroundPaused:self.next_check=now+10

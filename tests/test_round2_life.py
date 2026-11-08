@@ -62,7 +62,8 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unrelated_chat_keeps_persona_focus_but_life_questions_and_private_items_remain(self):
         self.life.advance()
-        self.assertEqual(self.life.context(self.origin,'下班了，奖励自己一杯奶茶'),'')
+        note=self.life.context(self.origin,'下班了，奖励自己一杯奶茶')
+        self.assertIn('current_activity',note);self.assertLess(len(note),400)
         self.assertIn('current_activity',self.life.context(self.origin,'你今天在干嘛'))
         self.life.event('chat_confirmed','聊过的画稿还没整理好',visibility=self.origin,source_ids=['pending'],extra={'kind':'open_item'})
         self.assertIn('画稿',self.life.context(self.origin,'后来整理好了吗'))

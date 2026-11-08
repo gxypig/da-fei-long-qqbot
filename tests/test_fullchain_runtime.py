@@ -20,7 +20,7 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.ledger=DeliveryLedger(Path(self.temp.name)/'ledger.db');await self.ledger.start();self.addAsyncCleanup(self.ledger.close)
         self.platform=SimpleNamespace(bot=object());self.cfg={'platform_id':'p','reply_queue_enabled':True,'reply_queue_concurrency':2}
         self.queue=ReplyQueue(self.cfg.get);self.audit=[]
-        self.plugin=SimpleNamespace(_cfg=self.cfg.get,_platform=lambda:self.platform,_reply_queue=self.queue,_delivery=self.ledger,
+        self.plugin=SimpleNamespace(_data_dir=Path(self.temp.name),_cfg=self.cfg.get,_platform=lambda:self.platform,_reply_queue=self.queue,_delivery=self.ledger,
             _audit=lambda kind,value:self.audit.append((kind,value)),context=SimpleNamespace(conversation_manager=SimpleNamespace(get_curr_conversation_id=AsyncMock(return_value='cid'))))
 
     async def test_raw_entry_to_receipt_records_owner_and_all_terminal_states(self):

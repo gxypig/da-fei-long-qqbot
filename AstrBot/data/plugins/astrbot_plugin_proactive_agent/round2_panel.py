@@ -37,7 +37,7 @@ async def proactive_status(p):
     from .health_projection import runtime_health
     delivery=runtime_health(p)
     return {'enabled':p._cfg('enable',True),'quiet_now':p._quiet_now(),'scope':scopes,'rules':rules,
-        'life':p._life.activity(),'reflections':p._life.reflection.snapshot(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
+        'life':p._life.activity(),'public_experiences':p._life.public.snapshot(),'reflections':p._life.reflection.snapshot(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
         'pending_replies':len(p._reply_queue.pending),'delivery':delivery,
         'next_free_check':getattr(p,'_next_free_check',None),'clock':time.time()}
 

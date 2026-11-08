@@ -170,7 +170,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         except (OSError, ValueError) as exc:
             self.logger.warning('即时对话页面补丁未启用：%s', str(exc))
         if self._cfg("image_fallback", True):
-            self._restore_images = install_image_compat()
+            self._restore_images = install_image_compat(self)
         self._restore_context_window = install_context_window(self)
         self._restore_chat_lane = install_chat_lane(self._cfg, self._audit)
         self._restore_review = install_outbound_guard(self, self._reviewer)
@@ -329,6 +329,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     # ==================== 配置与小工具 ====================
 
     async def _generate_json(self, system, payload, origin, *, timeout=40):
+        from .work_scheduler import _kind
+        if timeout==40 and _kind.get()=='background':timeout=75
         prediction = system.startswith(PREDICTION_SYSTEM)
         provider_id = self.review_settings()['prediction_provider_id'] if prediction else ''
         provider = self.context.get_provider_by_id(provider_id) if provider_id else await self.context.get_using_provider_async(umo=None if origin == "qzone" else origin)
@@ -1035,7 +1037,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         req.system_prompt += generation_example(event.get_message_str() or '',state)
         event.set_extra('qqbot_generation_request',req)
         life=getattr(self,'_life',None)
-        if life:req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())
+        if life:
+            req.system_prompt+=life.context(event.unified_msg_origin,event.get_message_str())
+            state['current_life']={k:life.activity().get(k) for k in ('current_activity','since')}
+            state['current_life']['source']='角色虚拟日常，不是现实工具执行结果'
         # Group attribution is already persisted in req.prompt + speaker_note.
         # Do not repeat the entire current message in the system prompt: it is
         # supplied verbatim as the final user turn by the native runner.

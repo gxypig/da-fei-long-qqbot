@@ -118,7 +118,7 @@ class HookTests(unittest.IsolatedAsyncioTestCase):
         from astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal import InternalAgentSubStage
         with tempfile.TemporaryDirectory() as folder:
             ledger=DeliveryLedger(Path(folder)/'ledger.db');await ledger.start();queue=ReplyQueue(lambda k,d=None:d)
-            p=SimpleNamespace(_cfg=lambda k,d=None:d,_reply_queue=queue,_delivery=ledger,_audit=Mock(),context=SimpleNamespace(conversation_manager=None))
+            p=SimpleNamespace(_data_dir=Path(folder),_cfg=lambda k,d=None:d,_reply_queue=queue,_delivery=ledger,_audit=Mock(),context=SimpleNamespace(conversation_manager=None))
             original=AsyncMock()
             with patch.object(InternalAgentSubStage,'_send_llm_error_message',original):
                 restore=install_fullchain(p);e=Event('哈哈这也行');job=ReplyJob(e.unified_msg_origin,e.sender,'1',e.text,event=e,passive=True);token=current_job.set(job)

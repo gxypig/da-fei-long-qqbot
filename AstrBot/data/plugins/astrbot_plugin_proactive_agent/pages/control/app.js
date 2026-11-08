@@ -8,9 +8,9 @@
   const booleans = ['meme_understanding_enabled','fixed_message_random_enabled','history_recall_enabled','group_flow_enabled','chat_low_latency','context_window_enabled','auto_quote_enabled','group_wake_anywhere','enable','allow_group','allow_private','allow_qzone','discretionary_enabled','fixed_messages_enabled','fixed_qzone_enabled','latency_optimization_enabled','idle_learning_enabled','style_learning_enabled'];
   const numbers = ['review_history_days','review_history_limit','fixed_message_min_minutes','fixed_message_max_minutes','father_address_probability','meme_separate_probability','group_passive_max_age','group_chat_probability','interval_minutes','fixed_message_interval_minutes','fixed_qzone_interval_minutes','emoji_probability','reply_audit_sample_percent','emoji_late_grace_seconds','reply_latency_target_seconds','model_concurrency','reply_hedge_after_seconds','context_recent_turns','context_recent_tokens'];
   const strings = ['group_chat_ids','group_wake_words','quiet_hours','fixed_group_ids','fixed_private_ids','father_qq','father_nickname','review_policy','prediction_provider_id'];
-  booleans.push('proactive_life_enabled','life_reflection_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
+  booleans.push('life_public_auto','image_generation_api_enabled','proactive_life_enabled','life_reflection_enabled','fixed_message_required','fixed_qzone_required','reply_review_enabled');
   numbers.push('learning_record_limit','learning_record_days','proactive_unanswered_limit','proactive_min_gap_minutes','min_action_gap_minutes','group_min_gap_minutes','private_min_gap_minutes');
-  strings.push('group_ids','private_ids');
+  strings.push('group_ids','private_ids','image_generation_provider_id','image_generation_model','image_animation_model');
   const fieldValue=k=>booleans.includes(k)?$(k).checked:numbers.includes(k)?Number($(k).value):$(k).value;
   const notice = (text, error=false) => { $('notice').textContent=text; $('notice').className=error?'error':''; };
   async function capabilities(){const badge=$('capabilities');if(!badge)return;try{const d=await api('panel_capabilities');for(const [view,key] of [['persona','persona_editor'],['sessions','session_mute']]){const b=document.querySelector('[data-subview='+view+']');if(b)b.disabled=!d.features?.[key];}const missing=Object.entries(d.features||{}).filter(([,v])=>!v).map(([k])=>({persona_editor:'人格编辑器',session_mute:'会话静默',meme_usage:'梗使用记录',delivery_history:'投递历史'}[k]||k));badge.textContent=missing.length?'功能待就绪：'+missing.join('、'):'本版管理功能已就绪';}catch{document.querySelectorAll('[data-subview]').forEach(b=>b.disabled=true);badge.textContent='功能接口尚未提供，连接状态单独显示';}}
@@ -174,7 +174,7 @@
     const learning=isRecord(data)?data:{};
     if($('learning-truth')){
       const s=learning.stats||{},e=learning.style_evidence||[];
-      $('learning-truth').textContent=`累计处理 ${s.processed||0} · 新增知识 ${s.knowledge_added||0} · 已有命中 ${s.knowledge_hits||0} · 待办 ${learning.pending||0} · 失败待重试 ${learning.failed_jobs||0} · 未核实 ${learning.unverified_jobs||0} · 现存过程记录 ${learning.records||0} / ${learning.record_limit||2000}；最长 ${learning.record_days||30} 天。${learning.historical_metrics_incomplete?'升级前累计指标不完整，已删除的旧记录不补造。':''}最后进展：${learning.last_progress_at?new Date(learning.last_progress_at*1000).toLocaleString():'暂无新进展'}；风格证据：${e.length?e.map(r=>r.category+' '+r.count+' / '+r.required).join('；'):'尚无同类合格案例 0 / 4'}；隔离原因：${JSON.stringify(learning.quarantine_reasons||{})}`;
+      $('learning-truth').textContent=`累计处理 ${s.processed||0} · 新增知识 ${s.knowledge_added||0} · 已有命中 ${s.knowledge_hits||0} · 待办 ${learning.pending||0} · 失败待重试 ${learning.failed_jobs||0} · 未核实 ${learning.unverified_jobs||0}（历史归档 ${learning.archived_unverified_jobs||0}） · 例句完善 ${learning.examples_ready||0}/${learning.examples_total||0} · 现存过程记录 ${learning.records||0} / ${learning.record_limit||2000}；最长 ${learning.record_days||30} 天。${learning.historical_metrics_incomplete?'升级前累计指标不完整，已删除的旧记录不补造。':''}最后进展：${learning.last_progress_at?new Date(learning.last_progress_at*1000).toLocaleString():'暂无新进展'}；风格证据：${e.length?e.map(r=>r.category+' '+r.count+' / '+r.required).join('；'):'尚无同类合格案例 0 / 4'}；隔离原因：${JSON.stringify(learning.quarantine_reasons||{})}`;
     }
     const current=learning.current_version ?? learning.active_version ?? learning.version;
     const worker=learning.worker_running===true?'学习后台运行中':learning.worker_running===false?'学习后台未运行':'学习状态已刷新';
@@ -268,7 +268,18 @@
     });
     return running;
   }
-  async function refreshHealth(){try{return renderHealth(await api('panel_health'));}catch(e){notice('暂时无法读取状态，服务可能正在重连',true);return true;}}
+  let healthRefreshPromise=null;
+  async function refreshHealth(){
+    if(healthRefreshPromise)return healthRefreshPromise;
+    const button=$('refresh-health');button.disabled=true;button.textContent='正在刷新…';button.setAttribute('aria-busy','true');
+    $('job-status').textContent='已收到，正在读取最新检查结果…';
+    healthRefreshPromise=(async()=>{try{
+      const running=renderHealth(await api('panel_health'));
+      button.textContent='已刷新 '+new Date().toLocaleTimeString('zh-CN');return running;
+    }catch(e){button.textContent='刷新失败，点击重试';notice('暂时无法读取状态，服务可能正在重连',true);return false;}
+    finally{button.disabled=false;button.removeAttribute('aria-busy');healthRefreshPromise=null;}})();
+    return healthRefreshPromise;
+  }
   async function poll() {
     if(polling)return;polling=true;
     const deadline=Date.now()+900000;
@@ -333,7 +344,7 @@
   }catch(e){if(serial===memeRequest)notice(e.message,true);}finally{if(serial===memeRequest)memeLoading=false;}}
   let learningRequest=0,learningLoading=false,eventCursors=[null],jobCursors=[null],nextEvent=null,nextJob=null;
   async function loadLearningContent(paging=false,requestedEvents=eventCursors,requestedJobs=jobCursors){if(paging!==true){requestedEvents=[null];requestedJobs=[null];}const serial=++learningRequest;learningLoading=true;try{
-    const params={q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0'};
+    const params={q:$('learning-search').value,learned_only:$('learning-only-learned').checked?'1':'0',active_only:$('learning-show-history').checked?'0':'1'};
     if(requestedEvents.at(-1)!==null)params.cursor=requestedEvents.at(-1);if(requestedJobs.at(-1)!==null)params.job_cursor=requestedJobs.at(-1);
     const d=await api('learning_content',undefined,params);
     if(serial!==learningRequest)return;
@@ -345,10 +356,10 @@
     $('learning-jobs-prev').disabled=jobCursors.length===1;$('learning-jobs-next').disabled=nextJob==null;
     $('learning-content-count').textContent=`匹配：任务${counts.jobs}条，学习记录${counts.events}条，生效策略${counts.rules}条；记录第${eventCursors.length}页，任务第${jobCursors.length}页，每页${d.limit||50}条`;
     for(const r of d.rules||[])contentLine(root,'当前生效策略',r.rule);
-    for(const j of d.jobs||[])contentLine(root,`待办 #${j.id} · ${{meme:'识别与查证梗',usage:'理解梗的语境',review:'观察回复风格',validate:'验证表达策略'}[j.kind]||j.kind} · ${{pending:'等待空闲',running:'正在学习'}[j.status]||j.status}`,j.text+(j.phrases?.length?' · 已识别：'+j.phrases.join('、'):''));
-    for(const j of d.jobs||[])if(['failed','unverified'].includes(j.status)){const b=document.createElement('button');b.type='button';b.textContent=`重试任务 #${j.id}`;b.onclick=async()=>{b.disabled=true;try{await api('learning_action',{action:'retry',job_id:j.id});await loadLearningContent(true);}catch(e){notice(e.message,true);b.disabled=false;}};root.append(b);}
+    for(const j of d.jobs||[])contentLine(root,`任务 #${j.id} · ${{meme:'识别与查证梗',usage:'理解梗的语境',review:'观察回复风格',validate:'验证表达策略'}[j.kind]||j.kind} · ${{pending:'等待空闲',running:'正在学习',failed:'技术失败，等待恢复或重试',unverified:'证据不足，未入库',archived_unverified:'证据不足，已归档',quarantined:'已隔离，不参与学习'}[j.status]||j.status}`,j.text+(j.phrases?.length?' · 已识别：'+j.phrases.join('、'):'')+(j.last_error?' · 最近原因：'+j.last_error:'')+(j.status==='pending'&&j.retry_at>Date.now()/1000?' · 可重试时间：'+new Date(j.retry_at*1000).toLocaleString('zh-CN'):''));
+    for(const j of d.jobs||[])if(['failed','unverified','archived_unverified'].includes(j.status)){const b=document.createElement('button');b.type='button';b.textContent=`重试任务 #${j.id}`;b.onclick=async()=>{b.disabled=true;try{await api('learning_action',{action:'retry',job_id:j.id});await loadLearningContent(true);}catch(e){notice(e.message,true);b.disabled=false;}};root.append(b);}
     for(const e of d.events||[]){const card=document.createElement('article');card.className='card';contentLine(card,new Date(e.created*1000).toLocaleString('zh-CN'),e.kind==='meme'?'梗查证':'回复风格学习');
-      if(e.kind==='meme'){contentLine(card,e.phrase,({learned:'已核实并入库',remembered:'已有记忆',unverified:'证据不足，未入库',understood:'已整理表达意图与反例',none:'无需学习'}[e.status]||e.status));if(e.entry)contentLine(card,'学到的内容',[e.entry.meaning,e.entry.usage,e.entry.intent,e.entry.avoid].filter(Boolean).join('；'));}
+      if(e.kind==='meme'){contentLine(card,e.phrase,({learned:'已核实并入库',remembered:'已有记忆',unverified:'证据不足，未入库',understood:'已整理表达意图与反例',none:'无需学习'}[e.status]||e.status));if(e.entry)contentLine(card,'学到的内容',[e.entry.meaning,e.entry.usage,e.entry.intent,e.entry.avoid,...(e.entry.examples||[])].filter(Boolean).join('；'));}
       else if(e.kind==='failure'||e.kind==='isolation'){contentLine(card,'状态',e.status);contentLine(card,'原因',e.error||e.reason);}
       else {contentLine(card,'状态','已观察，不代表策略已生效');contentLine(card,'原话',e.before);contentLine(card,'审阅后',e.after);contentLine(card,'观察类别',e.category);}
       root.append(card);
@@ -364,7 +375,7 @@
   $('search-learning').addEventListener('click',loadLearningContent);
   $('learning-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();return loadLearningContent();}});
   $('learning-search').addEventListener('search',loadLearningContent);
-  $('learning-only-learned').addEventListener('change',loadLearningContent);
+  $('learning-only-learned').addEventListener('change',loadLearningContent);$('learning-show-history').addEventListener('change',loadLearningContent);
   $('refresh-memes').addEventListener('click',loadMemes);
   $('search-memes').addEventListener('click',()=>{memeOffset=0;loadMemes();});
   $('meme-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();memeOffset=0;loadMemes();}});

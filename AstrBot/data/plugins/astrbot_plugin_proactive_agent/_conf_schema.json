@@ -352,7 +352,7 @@
     "default": false
   },
   "life_reflection_enabled": {
-    "description": "空闲整理实际活动的感想；普通回复只读取，公开动态不使用私聊资料",
+    "description": "空闲整理实际活动的感想；普通回复直接读取",
     "type": "bool",
     "default": true
   },
@@ -451,5 +451,30 @@
     "type": "bool",
     "default": true,
     "hint": "可独立回退，不改变模型、回复概率或权限"
+  },
+  "life_public_auto": {
+    "type": "bool",
+    "default": false,
+    "description": "私聊共同经历自动脱敏为公开动态素材；敏感或无依据内容跳过，无需逐次确认"
+  },
+  "image_generation_api_enabled": {
+    "type": "bool",
+    "default": false,
+    "description": "明确生图请求使用独立Images API，普通聊天不变"
+  },
+  "image_generation_provider_id": {
+    "type": "string",
+    "default": "",
+    "description": "生图提供商ID，留空沿用当前接口"
+  },
+  "image_generation_model": {
+    "type": "string",
+    "default": "gpt-image-2.5-sunburst",
+    "description": "静态生图模型"
+  },
+  "image_animation_model": {
+    "type": "string",
+    "default": "gpt-image-2.6-sunburst",
+    "description": "明确请求动图时使用的模型，接口必须支持GIF"
   }
 }

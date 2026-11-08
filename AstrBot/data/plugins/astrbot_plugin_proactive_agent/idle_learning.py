@@ -374,6 +374,33 @@ class IdleLearning:
             self._db.execute('DELETE FROM learning_events WHERE created<=? OR id NOT IN (SELECT id FROM learning_events ORDER BY id DESC LIMIT ?)',(now-self._event_ttl,self._event_limit))
         self._next_prune = now + 60
 
+    def _recover_backlog(self):
+        now=time.time()
+        if now<getattr(self,'_next_recovery',0):return
+        self._next_recovery=now+60
+        transient={'TimeoutError','InternalServerError','APIConnectionError','RateLimitError','ReviewUnavailable','RuntimeError'}
+        # Legacy jobs stored errors only in the event log. Recover that evidence
+        # once; never classify evidence-insufficient/quarantined jobs as failures.
+        errors={}
+        for r in self._db.execute("SELECT details,created FROM learning_events WHERE kind='failure' ORDER BY id"):
+            item=json.loads(r[0]);errors[item.get('job_id')]=(item.get('error'),r['created'])
+        with self._db:
+            sequence=0
+            for r in self._db.execute("SELECT * FROM jobs WHERE status IN ('failed','pending') AND expires>? ORDER BY id",(now,)).fetchall():
+                progress=json.loads(r['progress']);legacy=errors.get(r['id'],(None,r['created']));error=progress.get('last_error') or legacy[0]
+                cycles=progress.get('recovery_cycles',0)
+                if r['status']=='pending' and (not cycles or progress.get('recovery_scheduled_v2')):continue
+                if error not in transient or r['status']=='failed' and cycles>=3:continue
+                attempt=cycles+1 if r['status']=='failed' else cycles
+                failed_at=progress.get('last_failed_at') or legacy[1]
+                ready=max(now+min(sequence*5,180),failed_at+min(21600,1800*2**max(0,attempt-1)));sequence+=1
+                progress.update(last_error=error,recovery_cycles=attempt,recovery_scheduled_v2=True,recovery_reason='临时服务故障，空闲时自动恢复')
+                self._db.execute("UPDATE jobs SET status='pending',attempts=0,ready=?,progress=? WHERE id=?",
+                    (ready,_json(progress),r['id']))
+            # Preserve the diagnostic and retryable job, but keep settled
+            # uncertainty out of the actionable queue after a day.
+            self._db.execute("UPDATE jobs SET status='archived_unverified' WHERE status='unverified' AND created<?",(now-DAY,))
+
     @staticmethod
     def _case(text, recent, origin, state=None):
         state = state if isinstance(state, dict) else {}
@@ -550,6 +577,7 @@ class IdleLearning:
         try:
             while True:
                 self._prune()
+                self._recover_backlog()
                 if self.busy() or self._mutating or not self._cfg("latency_optimization_enabled", False):
                     self._idle_since = None
                 elif self._idle_since is None:
@@ -557,21 +585,15 @@ class IdleLearning:
                 self._maybe_candidate()
                 ready = self._idle_since is not None and time.monotonic() - self._idle_since >= IDLE_SECONDS
                 if ready:
+                    self._enqueue_examples()
                     enabled = [k for k in ("meme", "review", "validate", 'usage') if self._enabled(k)]
                     placeholders = ",".join("?" for _ in enabled)
                     job = self._db.execute(
-                        f"SELECT * FROM jobs WHERE status='pending' AND ready<=? AND kind IN ({placeholders}) ORDER BY id LIMIT 1",
+                        f"SELECT * FROM jobs WHERE status='pending' AND ready<=? AND kind IN ({placeholders}) ORDER BY CASE WHEN kind='usage' THEN 0 ELSE 1 END,id LIMIT 1",
                         (time.time(), *enabled)).fetchone() if enabled else None
                     if job is not None:
                         await self._run_job(dict(job))
                         continue
-                    if self._enabled('usage') and time.monotonic() >= getattr(self, '_usage_scan_after', 0):
-                        self._usage_scan_after = time.monotonic()+60
-                        for row in list(self.memory.entries.values()):
-                            if not row.get('intent') and self.memory.fresh(row):
-                                if self._enqueue('usage', {'text':row['phrase']}, key='usage:'+_hash(row)):
-                                    self._usage_scan_after = time.monotonic()+5
-                                    break
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), POLL_SECONDS)
@@ -579,6 +601,15 @@ class IdleLearning:
                     pass
         finally:
             await self._cancel_active()
+
+    def _enqueue_examples(self):
+        if not self._enabled('usage') or time.monotonic()<getattr(self,'_usage_scan_after',0):return
+        self._usage_scan_after=time.monotonic()+30
+        if self._db.execute("SELECT 1 FROM jobs WHERE kind='usage' AND key LIKE 'usage-v2:%' AND status IN ('pending','running')").fetchone():return
+        rows=[r for r in self.memory.entries.values() if self.memory.fresh(r) and (not r.get('intent') or len(r.get('examples',[]))<2)]
+        for start in range(0,len(rows),4):
+            batch=rows[start:start+4];names=[r['phrase'] for r in batch]
+            if self._enqueue('usage',{'text':names[0],'phrases':names},key='usage-v2:'+_hash([(r['phrase'],r.get('source_hash'),r.get('verified_at')) for r in batch])):break
 
     async def _run_job(self, job):
         with self._db:
@@ -616,12 +647,16 @@ class IdleLearning:
                     with self._db:
                         self._count("failures")
                         self._set_meta("last_error", type(exc).__name__)
+                        stored=self._db.execute('SELECT progress FROM jobs WHERE id=?',(job['id'],)).fetchone()
+                        progress=json.loads(stored[0]) if stored else {}
+                        progress.update(last_error=type(exc).__name__,last_failed_at=time.time())
+                        self._db.execute('UPDATE jobs SET progress=? WHERE id=?',(_json(progress),job['id']))
                         if attempt >= 3:
                             self._db.execute("UPDATE jobs SET status='failed',attempts=? WHERE id=?", (attempt,job["id"]))
                             self._processed(job)
                         else:
                             self._db.execute("UPDATE jobs SET status='pending',attempts=?,ready=? WHERE id=?",
-                                             (attempt, time.time() + 5 * 2 ** (attempt - 1), job["id"]))
+                                             (attempt, time.time() + 60 * 2 ** (attempt - 1), job["id"]))
                     self.record_detail('failure',{'job_id':job['id'],'kind':job['kind'],'error':type(exc).__name__,
                         'status':'failed' if attempt>=3 else 'retrying','attempt':attempt},time.time()+self._event_ttl)
                     self.audit("idle_learning", {"status": "failed", "kind": job["kind"], "error": type(exc).__name__, "attempt": attempt})
@@ -645,9 +680,12 @@ class IdleLearning:
             if job["kind"] == "meme":
                 await self._learn_meme(job, payload, progress)
             elif job['kind'] == 'usage':
-                row = await self._call(self.memory.understand, payload['text'])
-                if row:
-                    self.record_detail('meme', {'phrase':payload['text'],'status':'understood','entry':row},job['expires'])
+                if payload.get('phrases') and hasattr(self.memory,'understand_many'):
+                    rows=await self._call(self.memory.understand_many,payload['phrases'])
+                else:
+                    row=await self._call(self.memory.understand,payload['text']);rows=[row] if row else []
+                for row in rows:self.record_detail('meme',{'phrase':row.get('phrase',payload['text']),'status':'understood','entry':row},job['expires'])
+                if not rows:raise UnverifiedKnowledge('词条已删除或来源发生变化，不能空记成功')
             elif job["kind"] == "review":
                 await self._learn_review(job, payload, progress)
             else:
@@ -934,7 +972,7 @@ class IdleLearning:
 
     async def retry(self,job_id):
         async with self._control:
-            row=self._db.execute("SELECT * FROM jobs WHERE id=? AND status IN ('failed','unverified')",(int(job_id),)).fetchone()
+            row=self._db.execute("SELECT * FROM jobs WHERE id=? AND status IN ('failed','unverified','archived_unverified')",(int(job_id),)).fetchone()
             if row is None:raise ValueError('没有可重试的保留任务')
             with self._db:
                 self._db.execute("UPDATE jobs SET status='pending',attempts=0,ready=?,expires=? WHERE id=?",(time.time(),time.time()+self._ttl,row['id']))
@@ -999,7 +1037,7 @@ class IdleLearning:
             elif kind=='meme' and status=='remembered':self._count('knowledge_hits')
             elif kind=='meme' and status=='understood':self._count('knowledge_enriched')
 
-    def details(self, query='', learned_only=False, cursor=None, job_cursor=None,limit=50):
+    def details(self, query='', learned_only=False, cursor=None, job_cursor=None,limit=50,active_only=False):
         # Panel-only local reads: filter all retained rows BEFORE display limits.
         query = unicodedata.normalize('NFKC', str(query)[:100]).strip().casefold()
         tokens = query.split()
@@ -1015,8 +1053,10 @@ class IdleLearning:
         jobs = []
         pending = () if learned_only else self._db.execute('SELECT * FROM jobs WHERE expires>? ORDER BY id DESC', (now,))
         for r in pending:
+            if active_only and r['status'] in {'archived_unverified','quarantined'}:continue
             payload, progress = json.loads(r['payload']), json.loads(r['progress'])
             row = {'id':r['id'], 'kind':r['kind'], 'status':r['status'], 'created':r['created'],
+                'retry_at':r['ready'],'last_error':progress.get('last_error'),'recovery_cycles':progress.get('recovery_cycles',0),
                 'text':str(payload.get('text',''))[:800], 'phrases':progress.get('phrases',[]),
                 'stage':progress.get('stage'), 'attempts':r['attempts'],'source':payload.get('source',{'kind':'legacy_unverified'}),
                 'send_state':payload.get('send_state','unverified'),'automated_chain':payload.get('automated_chain',False)}
@@ -1066,6 +1106,9 @@ class IdleLearning:
                              for r in self._db.execute("SELECT * FROM versions ORDER BY id DESC")],
                 "stats": {k: self._meta(k) for k in ("completed", "paused", "failures", "dropped",'processed','knowledge_added','knowledge_hits','knowledge_enriched')},
                 'failed_jobs':grouped.get('failed',0),'unverified_jobs':grouped.get('unverified',0),
+                'archived_unverified_jobs':grouped.get('archived_unverified',0),
+                'examples_ready':sum(len(r.get('examples',[]))>=2 for r in getattr(self.memory,'entries',{}).values()),
+                'examples_total':len(getattr(self.memory,'entries',{})),
                 'records':self._db.execute('SELECT count(*) FROM learning_events WHERE expires>?',(time.time(),)).fetchone()[0],
                 'record_limit':self._event_limit,'record_days':self._event_ttl//DAY,
                 'metrics_since':self._meta('metrics_since'),'historical_metrics_incomplete':self._meta('historical_metrics_incomplete',True),

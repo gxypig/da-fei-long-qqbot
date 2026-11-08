@@ -49,7 +49,7 @@ class MemeIndex:
             self.rows[name]=copy.deepcopy(row)
             aliases=list(dict.fromkeys([row['phrase']]+strings(row.get('aliases'))))
             self.aliases[name]=aliases
-            fields={k:tokens(' '.join(strings(row.get(k)))) for k in ('meaning','usage','intent','tags','triggers','adaptations')}
+            fields={k:tokens(' '.join(strings(row.get(k)))) for k in ('meaning','usage','intent','tags','triggers','adaptations','examples')}
             fields['title']=tokens(' '.join(aliases));self.features[name]=fields
             for word in set().union(*fields.values()):self.postings[word].add(name)
         self.idf={word:1+math.log(1+len(self.rows)/(1+len(ids))) for word,ids in self.postings.items()}
@@ -70,7 +70,7 @@ class MemeIndex:
             concrete_scene='@起床过晚' in concepts
             # A category synonym alone does not make an unrelated joke relevant.
             if not direct and not triggers and not (len(literal)>=2 or concepts and literal or concrete_scene):continue
-            scene=query&(fields['usage']|fields['intent']|fields['triggers']|fields['tags'])
+            scene=query&(fields['usage']|fields['intent']|fields['triggers']|fields['tags']|fields['examples'])
             if not direct and not triggers and not scene:continue
             score=sum(self.idf.get(t,0)*(2 if t in scene else 1) for t in overlap)+.2*len(context&allwords)
             if not direct and not triggers and not concrete_scene and (score<3 or len(literal)/max(1,len(query))<.15):continue

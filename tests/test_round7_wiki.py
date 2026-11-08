@@ -51,7 +51,7 @@ class UpdateTests(fixtures.MemeWikiIntegration):
 
     async def test_source_revision_invalidates_understanding_and_late_result(self):
         await self.memory.lookup('绷不住了','a')
-        self.generate.return_value=json.dumps({'intent':'借失控表达情绪','avoid':'认真求助不用','adaptations':['笑得不行'],'triggers':['笑死']})
+        self.generate.return_value=json.dumps({'intent':'借失控表达情绪','avoid':'认真求助不用','examples':['对方：又起晚了；接话：闹钟也想放假','对方：今天笑得停不下来；接话：彻底绷不住了'],'adaptations':['笑得不行'],'triggers':['笑死']})
         await self.memory.understand('绷不住了','a');self.assertIn('intent',self.memory.contextual('绷不住了')[0])
         data,sha=self.package();await self.up.begin(offline=data,sha256=sha);await self.complete()
         self.assertNotIn('intent',self.memory.contextual('绷不住了')[0])
