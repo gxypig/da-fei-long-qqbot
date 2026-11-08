@@ -17,7 +17,12 @@ class SettledTemporaryDirectory(OriginalTemporaryDirectory):
                 try:
                     # Nested directories can also remain delete-pending on
                     # Windows. Retry an empty directory tree, never live files.
-                    if root.exists() and any(not p.is_dir() or p.is_symlink() for p in root.rglob('*')):raise exc
+                    # rmtree may fail on an empty child before attempting its
+                    # siblings. Those untouched sibling files are not a writer
+                    # racing the failed child directory.
+                    failed=Path(exc.filename).resolve() if exc.filename else root.resolve()
+                    if not failed.is_relative_to(root.resolve()):raise exc
+                    if failed.exists() and any(not p.is_dir() or p.is_symlink() for p in failed.rglob('*')):raise exc
                 except FileNotFoundError:return
                 time.sleep(.02)
 

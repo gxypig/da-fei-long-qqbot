@@ -29,7 +29,6 @@ async def generate(plugin,provider,event):
     from .visual_intent import generation_kind
     from . import image_spec
     from .image_animation import frames_to_gif,sample_sheet
-    from .conversation_review import json_object
     from .work_scheduler import model_work
     from .image_transport import ImageWait
     wait=ImageWait(plugin,event);wait.phase('preparing')
@@ -42,15 +41,14 @@ async def generate(plugin,provider,event):
     req=event.get_extra('qqbot_generation_request');material=image_spec.context_material(event,req)
     canonical=await asyncio.to_thread(image_spec.identity,plugin)
     checked=plugin._cfg('image_quality_check_enabled',False)
-    async def analyze(system,payload,images=()):
-        import json
+    async def analyze(system,payload,images=(),*,planning=False):
         # Only image requests enter here. Auxiliary kind prevents recursion into
         # this image route; ordinary text replies gain no new model work.
+        # Preparation has no external side effects. A transient connection
+        # failure may retry it once; rendering and content refusals never retry.
+        from .image_transport import analyze_image
         with model_work('auxiliary'):
-            async with asyncio.timeout(55):
-                result=await text_provider.text_chat(system_prompt=system,prompt=json.dumps(payload,ensure_ascii=False),
-                    image_urls=list(images),request_max_retries=1)
-        return json_object(result.completion_text)
+            return await analyze_image(plugin,text_provider,system,payload,images,planning=planning)
     # No blind retries of parameter errors or ambiguous timeouts: image
     # generation may already have consumed work when the connection drops.
     files=[];reference_uris=[];user_files=[];user_uris=[]
@@ -72,14 +70,20 @@ async def generate(plugin,provider,event):
             return (f'reference-{index}.png',raw,'image/png'),'data:image/png;base64,'+base64.b64encode(raw).decode()
         canonical_file=canonical_uri=None
         if canonical:canonical_file,canonical_uri=await load_reference(canonical['path'],'identity')
-        unavailable=0
-        for index,path in enumerate(image_spec.reference_paths(event,req,plugin)):
+        unavailable=0;waited_reference=False
+        service=getattr(plugin,'_incoming_visual',None)
+        from .image_followup import reset_reference
+        paths=image_spec.reference_paths(event,req,plugin)
+        preceding=service.preceding_reference(event) if service and hasattr(service,'preceding_reference') and image_spec.REFERENCE_CUE.search(text) and not reset_reference(text) else None
+        if preceding and service.reference_loading(preceding):
+            wait.phase('waiting_reference')
+            waited_reference=True
+            paths=await service.wait_reference(event)
+        for index,path in enumerate(dict.fromkeys(paths)):
             try:
                 file,uri=await load_reference(path,index);user_files.append(file);user_uris.append(uri)
             except (OSError,ValueError,TimeoutError):unavailable+=1
-        service=getattr(plugin,'_incoming_visual',None)
-        from .image_followup import reset_reference
-        if not user_files and service and image_spec.REFERENCE_CUE.search(text) and not reset_reference(text):
+        if not user_files and service and not waited_reference and image_spec.REFERENCE_CUE.search(text) and not reset_reference(text):
             wait.phase('waiting_reference')
             for index,path in enumerate(await service.wait_reference(event)):
                 try:
@@ -88,10 +92,12 @@ async def generate(plugin,provider,event):
         planner_views=([canonical_uri] if canonical_uri else [])+user_uris
         wait.phase('planning')
         layout=([{'index':1,'role':'identity'}] if canonical_uri else [])+[{'index':i+1+bool(canonical_uri),'role':'user_reference'} for i in range(len(user_uris))]
+        plugin._audit('image_reference_selection',{'available':len(user_uris),'unavailable':unavailable,
+            'reference_expected':bool(image_spec.REFERENCE_CUE.search(text)),'followup':bool(event.get_extra('qqbot_visual_followup_request'))})
         # Intent/extraction is required even when optional post-render review is
         # disabled. It replaces the old extraction call, not an added preflight.
         plan=image_spec.normalize_plan(await analyze(image_spec.PLAN,{**material,'identity':canonical['description'] if canonical else role_text('image',state)[:6000],
-            'reference_layout':layout,'unavailable_references':unavailable,'caption_style':role_text('image',state)[:1800]},planner_views),material,canonical)
+            'reference_layout':layout,'unavailable_references':unavailable,'caption_style':role_text('image',state)[:1800]},planner_views,planning=True),material,canonical)
         event.set_extra('qqbot_visual_route',plan['intent'])
         if plan['intent']=='none':
             state['visual_intent']='none'

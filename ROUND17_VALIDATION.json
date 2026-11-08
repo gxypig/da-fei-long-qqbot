@@ -1,0 +1,88 @@
+{
+  "version": "1.24.5-rc1",
+  "date_hong_kong": "2026-11-08",
+  "status": "deployed_and_QQ_acceptance_passed",
+  "regression": {
+    "private-tests-final": {
+      "tests": 1281,
+      "seconds": 313.232,
+      "passed": true
+    },
+    "public-tests-final": {
+      "tests": 1265,
+      "seconds": 295.224,
+      "passed": true
+    },
+    "targeted-final": {
+      "tests": 23,
+      "seconds": 4.011,
+      "passed": true
+    },
+    "cache-cleanup-check": {
+      "tests": 30,
+      "seconds": 6.261,
+      "passed": true
+    },
+    "temp-cleanup-regression": {
+      "tests": 2,
+      "seconds": 0.041,
+      "passed": true
+    }
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true
+  },
+  "pre_release_finding": "Actual-reference replay exposed conflicting third-person requirements and forced selfie camera; corrected before deployment",
+  "live_provider": {
+    "case": "latest_non_refused_reference",
+    "passed": true,
+    "seconds": 93.75,
+    "first_render_passed": true,
+    "QQ_sends": 0
+  },
+  "slow_preparation": {
+    "kind": "real_timer_simulation_no_remote_model",
+    "elapsed_seconds": 57.015,
+    "calls": 1,
+    "passed": true,
+    "QQ_sends": 0
+  },
+  "QQ_acceptance": [
+    {
+      "case": "image_then_deictic_reference_request",
+      "confirmed_seconds": 123.938,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "images": 1,
+      "format": "PNG",
+      "frames": 1,
+      "character_pose_camera_and_object_verified": true
+    },
+    {
+      "case": "cancel_then_recall_sent_reference_image",
+      "confirmed_seconds": 10.906,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "images": 0
+    }
+  ],
+  "QQ_reference_source": "The newly generated and inspected dragon/witch picture from the successful provider replay; the original incoming cache expired normally",
+  "excluded_setup_attempt": {
+    "reason": "Original image had expired while waiting in the QQ draft and was not actually sent; text alone reused the prior duck selfie",
+    "retained_in_private_evidence": true,
+    "counted_as_reference_acceptance": false
+  },
+  "ordinary_chat_added_model_calls": 0,
+  "rollback_source_only_preflight_passed": true,
+  "limitations": [
+    "Actual image times exceeded 30 seconds",
+    "Finite acceptance does not establish a zero-failure guarantee or a latency distribution",
+    "Genuine moderation refusals are retained; no automatic bypass or retry of refused renders",
+    "Delayed normalization and its timing permutations are fault simulations; actual QQ acceptance uses natural delivery timing",
+    "No additional live GIF was sent in this round"
+  ],
+  "privacy": "No account IDs, credentials, chats, runtime configuration or reference/generated artwork included"
+}

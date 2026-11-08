@@ -173,6 +173,11 @@ def install_fullchain(plugin):
             except ReplyCancelled:
                 queue.finish(job,'cancelled','会话静默，未进入执行队列');event.stop_event();yield False;return
         command=is_command(event)
+        visual=event.get_extra('qqbot_incoming_visual') or {}
+        if (not command and not (event.get_message_str() or '').strip() and visual.get('images')
+                and not visual.get('has_quote') and visual.get('generation_claimed_by')):
+            queue.finish(job,'ignored','reference_joined_existing_image_request')
+            event.stop_event();yield False;return
         if not command and not queue.precheck(job):event.stop_event();yield False;return
         work=getattr(plugin,'_work',None)
         with work.reply_work(event) if work else nullcontext():

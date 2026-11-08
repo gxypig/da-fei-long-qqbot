@@ -3,6 +3,22 @@ import asyncio
 import time
 import httpx
 
+async def analyze_image(plugin,provider,system,payload,images,*,planning=False,timeout_seconds=90):
+    """Bounded read-only preparation; never retry a submitted image render."""
+    import json
+    from .conversation_review import json_object
+    deadline=time.monotonic()+(timeout_seconds if planning else 55)
+    for attempt in range(2 if planning else 1):
+        try:
+            async with asyncio.timeout(max(.01,deadline-time.monotonic())):
+                result=await provider.text_chat(system_prompt=system,prompt=json.dumps(payload,ensure_ascii=False),
+                    image_urls=list(images),request_max_retries=1)
+            return json_object(result.completion_text)
+        except Exception as exc:
+            transient=isinstance(exc,(TimeoutError,httpx.TransportError)) or type(exc).__name__ in {'APITimeoutError','APIConnectionError'} or getattr(exc,'status_code',None) in {502,503,504}
+            if not planning or attempt or not transient or deadline-time.monotonic()<5:raise
+            plugin._audit('image_preparation_retry',{'attempt':attempt+2,'error':type(exc).__name__,'remaining_seconds':round(deadline-time.monotonic(),1)})
+
 
 def rejection_details(exc):
     """Keep only public, finite moderation categories, never provider prose."""
@@ -70,6 +86,8 @@ def failure(exc,progress):
         body=body.get('error',body)
     rejection=body.get('code') if isinstance(body,dict) else None
     if rejection in {'content_policy_violation','moderation_blocked','safety_violation'}:
+        if rejection_details(exc).get('moderation_stage')=='output':
+            return 'content_rejected','rejected','这次图片服务生成的结果未通过内容审核，没有返回可发送的图片；这不代表缺少生图工具'
         return 'content_rejected','rejected','图片服务的内容审核拒绝了这次请求，未返回图片；这不是缺少生图工具，请换一张合适的参考图或重新描述新的画面'
     if code in {401,403}:
         return 'authorization_failed','failed','图片服务的授权暂时不可用，需要检查接口配置'
@@ -84,6 +102,7 @@ def failure(exc,progress):
     if (timed or network or code in {408,502,503,504}) and progress.get('submitted') and not progress.get('received'):
         return 'render_timeout' if timed else 'render_connection_lost','unknown','这次等了较久，仍没收到图片结果；无法确认服务端是否已完成，没有重复提交'
     if timed or network:
+        if timed:return 'preparation_unavailable','failed','这次整理画面要求超时了，尚未提交生图；可以重新发来本次参考图继续'
         return 'preparation_unavailable','failed','这次整理画面要求时连接中断，还没拿到可发送的图片'
     if code==400:
         return 'request_rejected','rejected','图片服务拒绝了这次请求，暂时没有可发送的图片'

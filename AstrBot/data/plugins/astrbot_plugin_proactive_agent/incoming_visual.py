@@ -85,6 +85,9 @@ class IncomingVisual:
         components=list(event.get_messages())
         direct=[c for c in components if isinstance(c,Image)]
         quoted=[(c,str(r.sender_id or 'unknown')) for r in components if isinstance(r,Reply) for c in (r.chain or []) if isinstance(c,Image)]
+        # QQ notifications are not conversation turns; they must not evict the
+        # actual photo from the short same-sender burst buffer.
+        if not direct and not quoted and not (event.get_message_str() or '').strip():return None
         now=self.clock();key=self.key(event);epoch=self.epoch(event)
         ttl=max(5,min(120,int(self.plugin._cfg('incoming_visual_context_seconds',45))))
         for old in list(self.rows):
@@ -94,7 +97,7 @@ class IncomingVisual:
         row={'id':str(getattr(event.message_obj,'message_id','')), 'at':now, 'time':int(time.time()),
              'sender':key[1], 'text':(event.get_message_str() or '')[:1200], 'images':direct,
              'quoted':quoted, 'has_quote':any(isinstance(c,Reply) for c in components),
-             'local':{}, 'epoch':epoch, 'key':key}
+             'local':{}, 'epoch':epoch, 'key':key, 'loading':set(), 'ready':asyncio.Event()}
         history.append(row);self.rows.move_to_end(key)
         while len(self.rows)>128:self.rows.popitem(last=False)
         event.set_extra('qqbot_incoming_visual',row)
@@ -110,6 +113,33 @@ class IncomingVisual:
                 elif row['text'].strip():future.set_result(None)
         return row
 
+    def preceding_reference(self,event):
+        row=self.observe(event)
+        if not row or row['has_quote'] or TOPIC_BREAK.search(row['text']):return None
+        for other in reversed(self.rows.get(row['key'],())):
+            if other is row or other['at']>row['at']:continue
+            if other['epoch']!=row['epoch'] or row['at']-other['at']>30:break
+            if other['has_quote'] or TOPIC_BREAK.search(other['text']):break
+            if other['images']:return other
+        return None
+
+    async def ready_reference(self,row,owner,seconds):
+        # Reuse the original normalizer's download instead of racing another
+        # short download against it and then reporting a missing original.
+        row['generation_claimed_by']=owner['id']
+        if self.reference_loading(row):
+            try:
+                async with asyncio.timeout(seconds):await row['ready'].wait()
+            except TimeoutError:return []
+        return [row['local'].get(id(c)) or c.path or c.file or c.url for c in row['images']][:3]
+
+    @staticmethod
+    def reference_loading(row):
+        # An ingress image can be observed just before its normalizer starts.
+        # Remote media with no captured path is still pending in that gap.
+        return bool(row.get('loading') or any(id(c) not in row['local'] and
+            any(str(v or '').startswith(('https://','http://')) for v in (c.path,c.file,c.url)) for c in row['images']))
+
     async def wait_reference(self,event,seconds=20):
         """QQ may deliver a large image after its caption. Wait only for an
         explicit unresolved reference, never for ordinary text or another actor.
@@ -117,20 +147,22 @@ class IncomingVisual:
         """
         row=self.observe(event)
         if not row or row['has_quote'] or TOPIC_BREAK.search(row['text']):return []
+        preceding=self.preceding_reference(event)
+        if preceding:return await self.ready_reference(preceding,row,seconds)
         for other in self.rows.get(row['key'],()):
             if other['at']<=row['at']:continue
             if other['epoch']!=row['epoch'] or other['at']-row['at']>30 or other['has_quote'] or other['text'].strip():return []
             if other['images']:
-                other['generation_claimed_by']=row['id']
-                return [other['local'].get(id(c)) or c.path or c.file or c.url for c in other['images']][:3]
+                return await self.ready_reference(other,row,seconds)
         key=row['key'];future=asyncio.get_running_loop().create_future()
         previous=self.reference_waiters.get(key)
         if previous and not previous[1].done():previous[1].set_result(None)
         self.reference_waiters[key]=(row,future)
+        started=self.clock()
         try:
             async with asyncio.timeout(seconds):result=await future
             if not result:return []
-            return [result['local'].get(id(c)) or c.path or c.file or c.url for c in result['images']][:3]
+            return await self.ready_reference(result,row,max(.01,seconds-(self.clock()-started)))
         except TimeoutError:return []
         finally:
             if self.reference_waiters.get(key)==(row,future):self.reference_waiters.pop(key,None)
@@ -322,12 +354,19 @@ def install(plugin):
         return await original_update(*args,**kwargs)
     if original_update:manager.update_conversation=update
     async def normalize(stage,event,component):
-        await original_normalize(stage,event,component)
-        if not active:return
-        await startup
-        path=await cache.retain(component.path or component.file)
-        component.file=component.path=component.url=path
-        service.captured(event,component,path)
+        row=service.observe(event) if active else None
+        if row:row['loading'].add(id(component));row['ready'].clear()
+        try:
+            await original_normalize(stage,event,component)
+            if not active:return
+            await startup
+            path=await cache.retain(component.path or component.file)
+            component.file=component.path=component.url=path
+            service.captured(event,component,path)
+        finally:
+            if row:
+                row['loading'].discard(id(component))
+                if not row['loading']:row['ready'].set()
     PreProcessStage._normalize_image_component=normalize
     previous=Image.convert_to_file_path;active=True
     async def capture(component):
