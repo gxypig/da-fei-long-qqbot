@@ -31,6 +31,8 @@ async def generate(plugin,provider,event):
     from .image_animation import frames_to_gif,sample_sheet
     from .conversation_review import json_object
     from .work_scheduler import model_work
+    from .image_transport import ImageWait
+    wait=ImageWait(plugin,event);wait.phase('preparing')
     text=event.get_extra('qqbot_visual_followup_request') or event.get_message_str();state=event.get_extra('qqbot_character') or {};animated=animated_request(text)
     text_provider=provider
     chosen=plugin._cfg('image_generation_provider_id','')
@@ -51,7 +53,6 @@ async def generate(plugin,provider,event):
         return json_object(result.completion_text)
     # No blind retries of parameter errors or ambiguous timeouts: image
     # generation may already have consumed work when the connection drops.
-    client=client.with_options(timeout=150,max_retries=0)
     files=[];reference_uris=[];user_files=[];user_uris=[]
     try:
         from pathlib import Path
@@ -76,7 +77,15 @@ async def generate(plugin,provider,event):
             try:
                 file,uri=await load_reference(path,index);user_files.append(file);user_uris.append(uri)
             except (OSError,ValueError,TimeoutError):unavailable+=1
+        service=getattr(plugin,'_incoming_visual',None)
+        if not user_files and service and image_spec.REFERENCE_CUE.search(text):
+            wait.phase('waiting_reference')
+            for index,path in enumerate(await service.wait_reference(event)):
+                try:
+                    file,uri=await load_reference(path,index);user_files.append(file);user_uris.append(uri)
+                except (OSError,ValueError,TimeoutError):unavailable+=1
         planner_views=([canonical_uri] if canonical_uri else [])+user_uris
+        wait.phase('planning')
         layout=([{'index':1,'role':'identity'}] if canonical_uri else [])+[{'index':i+1+bool(canonical_uri),'role':'user_reference'} for i in range(len(user_uris))]
         # Intent/extraction is required even when optional post-render review is
         # disabled. It replaces the old extraction call, not an added preflight.
@@ -99,8 +108,8 @@ async def generate(plugin,provider,event):
             if frames:args['size']='1536x1024'
             elif animated:args['extra_body']={'frame_count':9,'frame_duration_ms':200}
             async def call():
-                async with asyncio.timeout(155):
-                    return await client.images.edit(image=list(files),**args) if files else await client.images.generate(**args)
+                return await wait.request(client,files,args)
+            wait.phase('waiting_slot')
             scheduler=getattr(getattr(plugin,'_work',None),'scheduler',None)
             result=await scheduler.run(provider,call,kind='interactive') if scheduler else await call()
             row=result.data[0] if result.data else None
@@ -110,7 +119,9 @@ async def generate(plugin,provider,event):
             else:
                 url=getattr(row,'url',None)
                 if not isinstance(url,str) or not url.startswith(('https://','http://')):raise ValueError('empty_image_result')
-                local=await Image(file=url).convert_to_file_path();raw=await asyncio.to_thread(Path(local).read_bytes)
+                wait.phase('downloading')
+                async with asyncio.timeout(45):
+                    local=await Image(file=url).convert_to_file_path();raw=await asyncio.to_thread(Path(local).read_bytes)
             await asyncio.to_thread(validate_image,raw,animated and not frames)
             return raw
         fallback=animated and plugin._cfg('image_animation_frames_fallback',False)
@@ -126,6 +137,7 @@ async def generate(plugin,provider,event):
                 capability[cache_key]=time.monotonic()+1800;plugin._image_gif_unavailable=capability
                 frames=True;data=await request(True,failures)
             if checked:
+                wait.phase('verifying')
                 preview=await asyncio.to_thread(sample_sheet,data) if animated and not frames else data
                 views=['data:image/png;base64,'+base64.b64encode(preview).decode()]
                 views.extend(reference_uris)
@@ -141,6 +153,7 @@ async def generate(plugin,provider,event):
             if frames:data=await asyncio.to_thread(frames_to_gif,data)
             break
         fmt=await asyncio.to_thread(validate_image,data,animated)
+        wait.phase('ready')
         caption=photo_caption('selfie' if plan['camera_mode'] in {'selfie','mirror_selfie'} else 'scene',state=state)
         proposed=plan.get('caption','').strip()
         # The semantic planner already composed a persona-aware success caption.
@@ -184,6 +197,10 @@ def install(plugin):
         if previous is not None:return previous
         try:response=await generate(plugin,provider,event)
         except asyncio.CancelledError:
+            progress=event.get_extra('qqbot_image_progress') or {}
+            event.set_extra('qqbot_image_progress',{**progress,'stage':'cancelled'})
+            plugin._audit('image_generation',{'status':'cancelled','stage':progress.get('stage'),
+                'outcome':'unknown' if progress.get('submitted') and not progress.get('received') else 'not_sent'})
             event.set_extra('qqbot_image_api_cancelled',True);raise
         except Exception as exc:
             from astrbot.core.provider.entities import LLMResponse
@@ -191,7 +208,14 @@ def install(plugin):
             unsupported=animated and code==400 and 'gif output is not enabled' in str(exc).lower()
             reason=str(exc)
             known=bool(re.fullmatch(r'(?:image|animation|reference|identity)_[a-z_]{1,60}',reason))
-            plugin._audit('image_generation',{'status':'failed','animated':animated,'error':type(exc).__name__,'http_status':code,'reason':'gif_not_enabled' if unsupported else reason if known else 'generation_failed'})
+            from .image_transport import failure
+            progress=event.get_extra('qqbot_image_progress') or {}
+            detail=failure(exc,progress) if not unsupported else None
+            outcome=detail[1] if detail else 'failed'
+            plugin._audit('image_generation',{'status':'failed','outcome':outcome,'stage':progress.get('stage'),
+                'animated':animated,'error':type(exc).__name__,'http_status':code,
+                'reason':detail[0] if detail else 'gif_not_enabled' if unsupported else reason if known else 'generation_failed'})
+            event.set_extra('qqbot_image_progress',{**progress,'stage':'finished','outcome':outcome})
             job=current_job.get()
             if job:job.reply_purpose='error_notification'
             message=('这次画出来的内容没通过检查，先不给你发错图' if reason=='image_quality_rejected'
@@ -200,6 +224,7 @@ def install(plugin):
                 else '这张动作参考图现在读不到了，再发一下原图，本龙照着拍' if reason in {'image_reference_missing','image_reference_expired'}
                 else '这条接口还没开放动图，暂时画不了会动的；静态图可以正常画' if unsupported
                 else '动图接口这次没接通，没生成成功' if animated else '图片这次没生成成功，稍后再试一下')
+            if detail:message=detail[2]
             response=LLMResponse(role='assistant',completion_text=message)
             response.qqbot_status_receipt=message
         event.set_extra('qqbot_image_api_result',response);return response

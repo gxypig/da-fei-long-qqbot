@@ -42,6 +42,7 @@ LEGACY_FIELDS=set(FIELDS)
 FIELDS['reply_review_enabled']=False
 FIELDS.update(review_history_days=30,review_history_limit=10000,life_public_auto=False,image_generation_api_enabled=False,image_generation_provider_id='',image_generation_model='gpt-image-2.5-sunburst',image_animation_model='gpt-image-2.6-sunburst')
 FIELDS.update(image_identity_enabled=False,image_quality_check_enabled=True,image_animation_frames_fallback=True)
+FIELDS['image_generation_timeout_seconds']=600
 FIELDS.update({'proactive_life_enabled':False,'life_reflection_enabled':True,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})
@@ -151,6 +152,8 @@ def validate(data):
     words = values["group_wake_words"]
     if len(words) > 200 or any(len(w) > 40 for w in re.split(r"[,，\s]+", words)):
         raise ValueError("唤醒词过长，单个不超过40字、总共不超过200字")
+    if not 180<=values['image_generation_timeout_seconds']<=900:
+        raise ValueError('图片等待期限须为180至900秒')
     quiet = values["quiet_hours"].strip()
     if quiet and not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d", quiet):
         raise ValueError("免打扰请填写23:00-07:00这样的时间段，或留空")

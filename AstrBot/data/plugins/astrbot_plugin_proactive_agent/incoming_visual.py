@@ -64,6 +64,7 @@ class IncomingVisual:
     def __init__(self, plugin, clock=time.monotonic):
         self.plugin, self.clock = plugin, clock
         self.rows = OrderedDict()
+        self.reference_waiters = {}
         self.gate = asyncio.Semaphore(1)
         self.stats = {'joined':0,'detail_images':0,'tiles':0,'unavailable':0,'max_prepare_ms':0}
 
@@ -97,7 +98,42 @@ class IncomingVisual:
         history.append(row);self.rows.move_to_end(key)
         while len(self.rows)>128:self.rows.popitem(last=False)
         event.set_extra('qqbot_incoming_visual',row)
+        waiting=self.reference_waiters.get(key)
+        if waiting:
+            owner,future=waiting
+            if not future.done():
+                if row['epoch']!=owner['epoch'] or row['has_quote'] or TOPIC_BREAK.search(row['text']):future.set_result(None)
+                elif row['images'] and not row['text'].strip() and now-owner['at']<=30:
+                    row['generation_claimed_by']=owner['id']
+                    event.set_extra('qqbot_visual_reference_for',owner['id'])
+                    future.set_result(row)
+                elif row['text'].strip():future.set_result(None)
         return row
+
+    async def wait_reference(self,event,seconds=20):
+        """QQ may deliver a large image after its caption. Wait only for an
+        explicit unresolved reference, never for ordinary text or another actor.
+        A later standalone image cannot also resume the same pending request.
+        """
+        row=self.observe(event)
+        if not row or row['has_quote'] or TOPIC_BREAK.search(row['text']):return []
+        for other in self.rows.get(row['key'],()):
+            if other['at']<=row['at']:continue
+            if other['epoch']!=row['epoch'] or other['at']-row['at']>30 or other['has_quote'] or other['text'].strip():return []
+            if other['images']:
+                other['generation_claimed_by']=row['id']
+                return [other['local'].get(id(c)) or c.path or c.file or c.url for c in other['images']][:3]
+        key=row['key'];future=asyncio.get_running_loop().create_future()
+        previous=self.reference_waiters.get(key)
+        if previous and not previous[1].done():previous[1].set_result(None)
+        self.reference_waiters[key]=(row,future)
+        try:
+            async with asyncio.timeout(seconds):result=await future
+            if not result:return []
+            return [result['local'].get(id(c)) or c.path or c.file or c.url for c in result['images']][:3]
+        except TimeoutError:return []
+        finally:
+            if self.reference_waiters.get(key)==(row,future):self.reference_waiters.pop(key,None)
 
     def captured(self,event,component,path):
         row=self.observe(event)
@@ -305,6 +341,9 @@ def install(plugin):
     def restore():
         nonlocal active
         active=False;service.rows.clear()
+        for _,future in service.reference_waiters.values():
+            if not future.done():future.cancel()
+        service.reference_waiters.clear()
         cache.stop()
         if not startup.done():startup.cancel()
         if PreProcessStage._normalize_image_component is normalize:PreProcessStage._normalize_image_component=original_normalize

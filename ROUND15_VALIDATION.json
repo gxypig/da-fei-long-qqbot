@@ -1,0 +1,81 @@
+{
+  "version": "1.24.3-rc1",
+  "date_hong_kong": "2026-11-08",
+  "status": "locally_deployed_and_final_QQ_acceptance_passed",
+  "regression": {
+    "private": {"tests": 1245, "seconds": 326.227, "passed": true},
+    "public": {"tests": 1229, "seconds": 326.194, "passed": true}
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true,
+    "current_delivery_faults": 0
+  },
+  "slow_transport": {
+    "kind": "local_HTTP_fault_simulation_using_installed_SDK",
+    "seconds": 152.218,
+    "posts": 1,
+    "passed": true,
+    "real_generation": false,
+    "QQ_sends": 0
+  },
+  "delayed_reference": {
+    "kind": "offline_replay",
+    "delay_seconds": 18,
+    "reference_joined_before_planning": true,
+    "passed": true,
+    "scope": ["same_actor", "different_actor_isolation", "topic_change", "quoted_message", "cancellation", "arrival_during_preparation"],
+    "real_QQ_reordering_timing_claimed": false
+  },
+  "live_provider": [
+    {"case": "adult_dragon_casual_hoodie_apple_selfie", "seconds": 44.594, "passed": true, "QQ_sends": 0},
+    {"case": "outfit_reference_selfie", "seconds": 59.875, "passed": true, "QQ_sends": 0}
+  ],
+  "QQ_acceptance": [
+    {
+      "case": "static_selfie_using_prior_outfit_reference",
+      "confirmed_seconds": 65.328,
+      "format": "PNG",
+      "frames": 1,
+      "QQ_visually_verified": true,
+      "selfie_identity_outfit_apple_verified": true,
+      "role_caption_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "video_wording_to_blinking_closeup_selfie",
+      "confirmed_seconds": 50.407,
+      "format": "GIF",
+      "frames": 6,
+      "QQ_playback_visually_verified": true,
+      "download_matches_submitted_bytes": true,
+      "selfie_identity_outfit_apple_verified": true,
+      "role_caption_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "cancel_photography_then_recall_outfit_color",
+      "confirmed_seconds": 13.719,
+      "correct_color_recalled": true,
+      "submitted_images": 0,
+      "QQ_visually_verified": true,
+      "history_saved": true
+    }
+  ],
+  "pre_release_findings_fixed": [
+    "Client imposed a 150-second deadline on potentially longer image requests",
+    "Outfit deixis omitted from reference lookup",
+    "Image-text processing order could report missing reference before image became available"
+  ],
+  "preserved": ["existing_models", "high_image_quality", "post_render_validation", "ordinary_chat_has_no_added_model_call", "existing_features"],
+  "limitations": [
+    "Finite cases do not establish a zero-failure guarantee or a response latency distribution",
+    "Image acceptance times exceeded 30 seconds",
+    "Current video wording yields short looping GIF, not MP4 or long video",
+    "The configured Images API has no supported task lookup for retrieving an unknown result after disconnection",
+    "Original upstream internal cause of slow generation was not available"
+  ],
+  "privacy": "No account IDs, credentials, runtime configuration, source images, captions or chat archives included"
+}

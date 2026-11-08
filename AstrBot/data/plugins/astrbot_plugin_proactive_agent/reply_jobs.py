@@ -83,7 +83,9 @@ class ReplyJob:
             self.sources=[{'id':self.source_id,'text':self.text,'sender':self.sender}]
 
     def public(self, now):
+        progress=self.event.get_extra('qqbot_image_progress') if self.event else None
         return {'id':self.id,'origin':self.origin,'sender':self.sender,'message_id':self.source_id,
+                'image_progress':dict(progress) if isinstance(progress,dict) else None,
                 'summary':self.text[:300],'source_count':len(self.sources),'state':self.state,
                 'stage':self.stage,'reason':self.reason,'force_quote':self.force_quote,
                 'execution_result':self.execution_result,'delivery_result':self.delivery_result,'reply_purpose':self.reply_purpose,
@@ -119,7 +121,7 @@ class ReplyQueue:
             event._extras=dict(event._extras)
             for key in ('qqbot_reply_job','_qqbot_work_state','qqbot_character','qqbot_native_persona','qqbot_unified_admitted','qqbot_flow_started','qqbot_model_started',
                         'qqbot_review_settings','qqbot_reply_prediction','qqbot_prediction_version','qqbot_prediction_persona','qqbot_send_path','qqbot_emoji_selection','qqbot_generation_request','qqbot_local_repair_used',
-                        'qqbot_visual_route','qqbot_visual_followup_request','qqbot_image_api_lock','qqbot_image_api_result','qqbot_image_api_cancelled','qqbot_image_projected_context','qqbot_requested_animation','qqbot_generated_format','qqbot_image_provenance'):
+                        'qqbot_visual_route','qqbot_visual_followup_request','qqbot_image_api_lock','qqbot_image_api_result','qqbot_image_api_cancelled','qqbot_image_projected_context','qqbot_requested_animation','qqbot_generated_format','qqbot_image_provenance','qqbot_image_progress','qqbot_visual_reference_for'):
                 event._extras.pop(key,None)
         job=ReplyJob(str(event.unified_msg_origin),str(event.get_sender_id()),
             str(getattr(getattr(event,'message_obj',None),'message_id','') or ''),event.get_message_str() or '',event,

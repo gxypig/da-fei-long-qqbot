@@ -87,6 +87,7 @@
   field(imageApi,'image_generation_api_enabled','使用独立 Images API 生图，保留正常聊天模型','checkbox');
   field(imageApi,'image_generation_provider_id','生图提供商ID（留空沿用当前模型的接口）','text');
   field(imageApi,'image_generation_model','静态图片模型','text');
+  field(imageApi,'image_generation_timeout_seconds','图片等待期限（秒，180–900，默认600）','number',180,900);
   field(imageApi,'image_animation_model','明确要求动图时使用的模型','text');
   field(imageApi,'image_identity_enabled','使用本机固定角色参考（安装参考后启用）','checkbox');
   field(imageApi,'image_quality_check_enabled','发送前检查自拍视角、形象、物件和动作；最多纠正重画一次','checkbox');
