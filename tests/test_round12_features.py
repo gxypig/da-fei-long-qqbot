@@ -142,7 +142,7 @@ class ImageRoute(unittest.IsolatedAsyncioTestCase):
         with patch.object(ProviderOpenAIOfficial,'_query',AsyncMock(return_value='ordinary')) as ordinary:
             restore=install(plugin);token=current_job.set(job)
             try:
-                provider=SimpleNamespace(client=client)
+                provider=SimpleNamespace(client=client,text_chat=AsyncMock(return_value=SimpleNamespace(completion_text=json.dumps({'intent':'animation','scene':'眨眼','requirements':[]}))))
                 a=await ProviderOpenAIOfficial._query(provider);b=await ProviderOpenAIOfficial._query(provider)
                 self.assertIn('还没开放动图',a.completion_text);self.assertIs(a,b);self.assertEqual(create.await_count,1)
                 self.assertEqual(job.reply_purpose,'error_notification');ordinary.assert_not_awaited()
@@ -165,7 +165,8 @@ class ImageRoute(unittest.IsolatedAsyncioTestCase):
         client=SimpleNamespace(images=SimpleNamespace(generate=create),with_options=lambda **_:client)
         plugin=SimpleNamespace(_cfg=lambda k,d:d,context=SimpleNamespace(),_audit=Mock())
         event=visual_base.Event('生成眨眼动图')
-        response=await generate(plugin,SimpleNamespace(client=client),event)
+        provider=SimpleNamespace(client=client,text_chat=AsyncMock(return_value=SimpleNamespace(completion_text=json.dumps({'intent':'animation','scene':'眨眼','requirements':[]}))))
+        response=await generate(plugin,provider,event)
         self.assertEqual(event.get_extra('qqbot_generated_format'),'gif');self.assertTrue(response.qqbot_generated_image)
         sent=response.result_chain.chain[-1].file;self.assertEqual(base64.b64decode(sent.removeprefix('base64://')),out.getvalue())
         from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent

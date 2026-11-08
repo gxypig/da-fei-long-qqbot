@@ -15,7 +15,9 @@ class SettledTemporaryDirectory(OriginalTemporaryDirectory):
                 root=Path(self.name)
                 if os.name!='nt' or getattr(exc,'winerror',None)!=145 or attempt==5:raise
                 try:
-                    if root.exists() and any(root.iterdir()):raise exc
+                    # Nested directories can also remain delete-pending on
+                    # Windows. Retry an empty directory tree, never live files.
+                    if root.exists() and any(not p.is_dir() or p.is_symlink() for p in root.rglob('*')):raise exc
                 except FileNotFoundError:return
                 time.sleep(.02)
 

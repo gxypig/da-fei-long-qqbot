@@ -485,7 +485,7 @@
   "image_quality_check_enabled": {
     "type": "bool",
     "default": true,
-    "description": "生图前整理本轮要求，发图前检查形象、自拍视角和物件；不合格最多重画一次，普通聊天不调用"
+    "description": "发图前检查形象、自拍视角、物件和动作；不合格最多重画一次。关闭后仍理解本轮要求并区分图片与动图，普通聊天不调用"
   },
   "image_animation_frames_fallback": {
     "type": "bool",

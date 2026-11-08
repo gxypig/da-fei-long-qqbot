@@ -1120,6 +1120,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             event.set_extra('qqbot_model_started', None)
         if self._cfg('latency_optimization_enabled', False) and getattr(self, '_work', None):
             self._work.mark(event, 'model_done')
+        from .image_generation import apply_status_receipt
+        if apply_status_receipt(self,event,run_context,response):return
         mode = self.review_mode(event.unified_msg_origin)
         state = self.character_context(event) if mode != "management" else {}
         chain = response.result_chain
@@ -1172,6 +1174,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
     @filter.on_agent_done(priority=-1000)
     async def review_agent_reply(self, event: AstrMessageEvent, run_context, response):
         """Keep the final model answer AND its persisted history consistent with the review."""
+        from .image_generation import apply_status_receipt
+        if apply_status_receipt(self,event,run_context,response):
+            self._audit('review_status_receipt',{'status':'factual_receipt_preserved','model_review':False})
+            return
         usage=getattr(self,'_meme_usage',None)
         if usage and response and not getattr(response,'tools_call_name',None):
             usage.stage(event,'draft',getattr(response,'completion_text',''))

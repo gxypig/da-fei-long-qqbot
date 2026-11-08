@@ -39,7 +39,7 @@ class IncomingCache:
                 self.stats['retained']+=1
                 return str(target)
             return await asyncio.to_thread(copy)
-    async def capture_message(self,message):
+    async def capture_message(self,message,*,fresh=False):
         """Only CURRENT incoming content. Persist bytes once, never an extra model call."""
         if message.get('role')!='user' or not isinstance(message.get('content'),list):return
         parts=[p for p in message['content'] if p.get('type')=='image_url']
@@ -51,28 +51,31 @@ class IncomingCache:
                     uri=part.get('image_url',{}).get('url','')
                     if not isinstance(uri,str) or not uri.startswith('data:image/') or ';base64,' not in uri:continue
                     key=hashlib.sha256(uri.encode()).hexdigest()
-                    if key in self.uri_keys:continue
+                    if key in self.uri_keys and not fresh:continue
                     head,encoded=uri.split(';base64,',1)
                     if len(encoded)>34*1024*1024:continue
                     raw=base64.b64decode(encoded,validate=True);digest=hashlib.sha256(raw).hexdigest()
                     existing=next((n for n in self.rows if n.startswith(digest+'.')),None)
                     suffix={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp'}.get(head[5:],'img')
                     name=existing or digest+'.'+suffix;path=self.root/name
-                    if not existing:
-                        path.write_bytes(raw);self.rows[name]={'expires_at':self.clock()+3600,'bytes':len(raw),'sources':[]}
-                    row=self.rows[name];row.setdefault('uri_keys',[]).append(key);self.uri_keys[key]=name;changed=True
+                    if not existing or fresh:
+                        if not path.exists():path.write_bytes(raw)
+                        self.rows[name]={**self.rows.get(name,{}),'expires_at':self.clock()+3600,'bytes':len(raw),'sources':self.rows.get(name,{}).get('sources',[]),'removed':False}
+                    row=self.rows[name]
+                    if key not in row.setdefault('uri_keys',[]):row['uri_keys'].append(key)
+                    self.uri_keys[key]=name;changed=True
                 if changed:self._save()
             await asyncio.to_thread(capture)
     def portable_history(self,history):
         """Replace only registered incoming bytes; keep gallery/assistant images intact."""
-        if not isinstance(history,list) or not self.uri_keys:return history
+        if not isinstance(history,list) or not self.rows:return history
         result=[]
         for message in history:
             if message.get('role')!='user' or not isinstance(message.get('content'),list):result.append(message);continue
             parts=[]
             for part in message['content']:
                 uri=part.get('image_url',{}).get('url') if part.get('type')=='image_url' else None
-                name=self.uri_keys.get(hashlib.sha256(uri.encode()).hexdigest()) if isinstance(uri,str) and uri.startswith('data:image/') else None
+                name=self.uri_keys.get(hashlib.sha256(uri.encode()).hexdigest()) if isinstance(uri,str) and uri.startswith('data:image/') else self.local_name(uri)
                 if name:
                     row=self.rows[name]
                     part=({'type':'image_url','image_url':{**part['image_url'],'url':str(self.root/name)}}
@@ -80,6 +83,15 @@ class IncomingCache:
                 parts.append(part)
             result.append({**message,'content':parts})
         return result
+    def local_name(self,uri):
+        if not isinstance(uri,str) or not uri.startswith(str(self.root)):return None
+        try:
+            path=Path(uri).resolve()
+            return path.name if path.parent==self.root and path.name in self.rows else None
+        except (OSError,ValueError):return None
+    def expired_ref(self,uri):
+        name=self.local_name(uri)
+        return bool(name and self.rows[name]['expires_at']<=self.clock())
     async def cleanup(self):
         async with self.lock:
             def clean():

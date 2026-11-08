@@ -1,0 +1,114 @@
+{
+  "version": "1.24.2-rc1",
+  "status": "local_deployed_and_QQ_acceptance_passed",
+  "semantic_cases": {
+    "total": 55,
+    "passed": 55
+  },
+  "pose_replay": {
+    "qq_test_sends": 0,
+    "ok": true,
+    "format": "png",
+    "frames": 1,
+    "transport_bytes_unchanged": true,
+    "seconds": 95.125
+  },
+  "expired_history_replay": {
+    "ok": true,
+    "history_messages": 8,
+    "invalid_local_urls": 0,
+    "seconds": 3.031,
+    "qq_sends": 0
+  },
+  "routing_cost": {
+    "scope": "local admission only, not end-to-end model timing",
+    "ordinary_new_model_calls": 0,
+    "before": {
+      "median_ms_per_message": 0.00778,
+      "p95_ms_per_message": 0.01097
+    },
+    "after": {
+      "median_ms_per_message": 0.01366,
+      "p95_ms_per_message": 0.02042
+    }
+  },
+  "privacy": "No accounts, credentials, source images or chat archives included",
+  "regression": {
+    "private": {
+      "tests": 1232,
+      "seconds": 320.829,
+      "passed": true
+    },
+    "public": {
+      "tests": 1216,
+      "seconds": 315.773,
+      "passed": true
+    }
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true
+  },
+  "pre_release_findings_fixed": [
+    "Reference lookup outside short burst before history commit",
+    "Resent image compressed bytes retained expired tombstone",
+    "Review rewrote factual reference error as capability denial",
+    "Static caption used a technical fallback instead of the persona-aware planned caption"
+  ],
+  "final_caption_regression": {
+    "private": 129,
+    "public": 129,
+    "passed": true
+  },
+  "qq_acceptance": [
+    {
+      "case": "resent_expired_reference_then_pose_request",
+      "image_text_gap_seconds": 96.811,
+      "image_received_and_visually_checked": true,
+      "confirmed_seconds": 65.453,
+      "history_saved": true,
+      "caption_found_technical_and_fixed_after_this_case": true
+    },
+    {
+      "case": "video_wording_to_blinking_selfie",
+      "confirmed_seconds": 56.281,
+      "format": "GIF",
+      "frames": 6,
+      "qq_download_matches_submitted_bytes": true,
+      "QQ_playback_visually_verified": true,
+      "identity_apple_selfie_verified": true,
+      "role_caption_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "explicit_static_selfie_after_video",
+      "confirmed_seconds": 49.75,
+      "format": "PNG",
+      "frames": 1,
+      "QQ_image_visually_verified": true,
+      "identity_apple_selfie_verified": true,
+      "role_caption_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "cancel_video_then_recall_held_object",
+      "confirmed_seconds": 18.171,
+      "new_images": 0,
+      "correct_object_recalled": true,
+      "history_saved": true
+    }
+  ],
+  "cache_resend_acceptance": {
+    "original_and_compressed_renewed": true,
+    "persisted_current_history_has_image": true,
+    "same_original_resent_after_expiry": true
+  },
+  "account_coverage": "Live authorized QQ session; separate original failing account request and image replayed through real provider; synthetic multi-account/group isolation regressions",
+  "limitations": [
+    "Video wording produces a short six-frame GIF, not MP4 or audio video",
+    "External image generation remains dependent on provider availability; measured image latency is not a 30-second guarantee",
+    "OneBot get_image returned no usable download location; the actual GIF was saved via the QQ viewer and byte-compared instead"
+  ]
+}

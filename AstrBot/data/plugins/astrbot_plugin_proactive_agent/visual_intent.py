@@ -2,8 +2,24 @@
 import re
 
 
+def media_candidate(text):
+    """Cheap admission only; the model decides creation vs discussion and format."""
+    text=str(text or '').strip().lower()
+    if re.search(r'代码|脚本|函数|语音|音频|录音|音乐|文案|报告|文章|提示词',text) and not re.search(r'图片|照片|视频|短片|动图|gif|自拍|动画',text):return False
+    if re.search(r'拍一拍|拍拍我|拍桌子|拍马屁|拍卖|拍脑袋',text):return False
+    # Existing videos/search, analysis, and instructions are not new capture.
+    if re.search(r'(?:找|搜|转发|分享|播放|下载|剪辑).{0,15}(?:视频|短片)|(?:视频|短片).{0,12}(?:链接|教程|怎么做)|视频通话|监控|摄像头.{0,5}(?:打开|开启)|打开.{0,5}摄像头',text):return False
+    if re.search(r'^(?:什么是|怎么|如何|为什么)|(?:会|能)(?:拍|录)(?:视频|短片)吗[？?]?$',text):return False
+    positive=re.sub(r'(?:不要|别|不用|不需要)[^，,。；;]*','',text)
+    return bool(re.search(r'(?:拍|录|摄|来|给|发|做|生成|整).{0,22}(?:视频|短片|小片段|一段|几秒|动态|动图|gif)|(?:让|把).{0,30}(?:图|照片|自拍|你).{0,20}(?:动起来|动一动|动一下)|(?:动起来|活动一下|眨眨眼|挥挥手).{0,8}(?:看看|给我看)|(?:拍|录)(?:段|个|一下)|来[张幅].{0,12}(?:照片|自拍|合照|漫画)|(?:video|clip|animation).{0,16}(?:of you|selfie)|(?:record|film|animate).{0,40}',positive,re.I))
+
+
 def generation_kind(text):
     text = str(text or "").strip().lower()
+    if re.search(r'拍一拍|拍拍我|拍桌子|拍马屁|拍卖|拍脑袋',text) and not re.search(r'照片|自拍|视频|图片|动图',text):return 'none'
+    if media_candidate(text):
+        from .image_spec import self_subject
+        return 'selfie' if self_subject(text) or re.search(r'你|yourself|your selfie',text) else 'scene'
     if (re.search(r'(?:生成|制作|写).{0,12}(?:代码|脚本|函数|语音|音频|音乐|视频|文案|报告|文章|提示词)',text)
         and not re.search(r'图片|动图|gif|海报|壁纸|头像|插画|漫画|照片|截图',text)):
         return 'none'
@@ -44,9 +60,9 @@ def generation_note(kind,state=None):
     if state is not None and 'persona_status' in state:
         from .persona_authority import role_text
         subject='依据当前人格的外观生成虚拟自拍；人格未给外观时保持未指定，不能自行套用其他人物。' if kind=='selfie' else '按请求的主体和构图创作。'
-        return ('\n本次是实际新生图请求，不是图库搜索。'+subject+'使用可用生图能力生成并返回图片附件，不能用旧图代替。'
+        return ('\n仅当本轮确实要求创作新图片或动图时，才进入生图；讲过去、引用、取消或询问能力不代表要创作。'+subject+'实际创作使用可用生图能力并返回图片附件，不能用旧图代替。'
             '附图成功后的台词依照本轮图片人格；没有成功就如实说明，不能无图声称已拍好。\n'+role_text('image',state))
     subject = "主体固定为大肥龙本人：成年二次元白色长发龙娘，明显龙角和龙尾，可爱的傲娇表情，虚拟自拍构图。" if kind == "selfie" else "按这次请求的主体和构图创作。"
-    return ("\n本次是实际新生图请求，不是图库搜索或文字问答。" + subject +
+    return ("\n仅当本轮确实要求创作新图片或动图时才进入生图；讲过去、引用、取消或询问能力按正常文字问答处理。" + subject +
             "默认二次元插画画风，禁止把龙娘画成真人照片。使用可用生图能力生成并返回图片附件；不要调用表情包检索替代、只复述提示词或只承诺稍后生成。"
             "成功附图后配一句本龙拍的/自拍的角色台词，不写工具说明；失败如实说明，不能无图声称拍好了。")

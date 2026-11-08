@@ -96,7 +96,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         p=self.plugin();e=event("看看你");req=SimpleNamespace(prompt="看看你",system_prompt="原有提示")
         await p.enrich_conversation(e,req)
         self.assertEqual(e.get_extra('qqbot_character')['persona_status'],'error')
-        self.assertIn("实际新生图请求",req.system_prompt)
+        self.assertIn("仅当本轮确实要求创作",req.system_prompt)
         self.assertTrue(e.get_extra("qqbot_character")["is_father"])
         before=e.get_extra("qqbot_character")
         await p.enrich_conversation(e,req)

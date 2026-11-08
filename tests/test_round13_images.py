@@ -18,7 +18,7 @@ def picture(sheet=False):
 def answer(raw):return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(raw).decode())])
 def llm(data):return SimpleNamespace(completion_text=json.dumps(data,ensure_ascii=False))
 PASS={'pass':True,'identity_ok':True,'requirements_ok':True,'camera_ok':True,'motion_ok':True,'failures':[]}
-PLAN={'subject_self':True,'scene':'成年白毛龙娘拿着一颗红苹果','requirements':['手里有一颗红苹果']}
+PLAN={'intent':'image','subject_self':True,'scene':'成年白毛龙娘拿着一颗红苹果','requirements':['手里有一颗红苹果']}
 
 class Specifications(unittest.TestCase):
     def test_huge_archive_never_reaches_images_api(self):
@@ -33,7 +33,7 @@ class Specifications(unittest.TestCase):
         for s in ('你帮我画一只猫','不要自拍，画一颗苹果','不要画你，画苹果'):
             self.assertFalse(spec.self_subject(s),s)
         from data.plugins.astrbot_plugin_proactive_agent.visual_intent import generation_kind
-        for s in ('生成一段代码','生成语音','制作一段视频','帮我写画图脚本','生成提示词'):
+        for s in ('生成一段代码','生成语音','剪辑一段视频','帮我写画图脚本','生成提示词'):
             self.assertEqual(generation_kind(s),'none',s)
     def test_explicit_current_request_is_not_silently_cut(self):
         with self.assertRaisesRegex(ValueError,'request_too_long'):spec.context_material(Event('画'+('字'*12000)),None)
@@ -105,6 +105,7 @@ class Flow(unittest.IsolatedAsyncioTestCase):
     async def test_gif_preview_denial_falls_back_to_real_generated_frames(self):
         class Preview(Exception):status_code=400
         self.setup_flow([Preview('GIF output is not enabled for this request.'),answer(picture(True))],[PASS])
+        self.provider.text_chat.side_effect=[llm({**PLAN,'intent':'animation'}),llm(PASS)]
         event=Event('生成你拿苹果挥手的动图');result=await generate(self.plugin,self.provider,event)
         self.assertEqual(self.create.await_count,2)
         self.assertEqual([x.kwargs['output_format'] for x in self.create.call_args_list],['gif','png'])
