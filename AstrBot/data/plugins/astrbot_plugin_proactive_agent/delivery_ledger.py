@@ -134,6 +134,12 @@ class DeliveryLedger:
             if job.event.get_extra('qqbot_gallery_result'):row['gallery_result']=job.event.get_extra('qqbot_gallery_result')
             plan=job.event.get_extra('qqbot_meme_plan')
             if plan:row['meme_plan']=plan
+            visual=job.event.get_extra('qqbot_image_provenance')
+            # Bind only the actual generated attachment, never a separate emoji
+            # or caption-only segment sent in the same reply job.
+            if isinstance(visual,dict) and visual.get('content_hash') and any(a.get('kind')=='image' and
+                    visual['content_hash'] in {a.get('content_hash'),a.get('original_hash')} for a in attachments):
+                row['visual']=copy.deepcopy(visual)
         if emoji_delivery.get():row['emoji_match']=emoji_delivery.get()
         operation=(delivery_scope.get() or {}).get('external_operation')
         from .send_checks import snapshot
@@ -262,6 +268,8 @@ class DeliveryLedger:
         messages=[
             {'消息编号':r['message_id'],'时间':r['at'],'文字':r['text'] if not r.get('history_saved') else '',
              **({'发送形式':'语音'} if any(a.get('kind')=='record' for a in r.get('attachments',[])) else {}),
+             **({'已发送作品':{'类型':r['visual'].get('intent'),'方式':r['visual'].get('method'),
+                              '画面':str(r['visual'].get('scene',''))[:240]}} if r.get('visual') else {}),
              '附件':[compact(a) for a in r.get('attachments',[])]} for r in rows]
         return ('\n当前会话平台已确认发送的记录（仅表示发送成功，不表示对方已读；图片用途推断不是图片原文'+voice+'）：\n'
                 +json.dumps(messages,ensure_ascii=False)+ ('\n图片编号对应的首次识别资料（同图复用，不是再次识别）：'+json.dumps(assets,ensure_ascii=False) if assets else ''))

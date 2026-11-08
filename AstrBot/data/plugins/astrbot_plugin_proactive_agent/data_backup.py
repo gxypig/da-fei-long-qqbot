@@ -62,7 +62,12 @@ def remove_snapshot(path,root):
     if path.parent!=root or path.is_symlink() or not (path/'manifest.json').is_file():raise ValueError('invalid owned snapshot directory')
     manifest=json.loads((path/'manifest.json').read_text('utf-8'))
     if manifest.get('format')!='qqbot-data-snapshot-v1':raise ValueError('unrecognized snapshot')
-    shutil.rmtree(path)
+    def vanished_child(function,filename,exc):
+        # SQLite/Windows can remove a sidecar after rmtree enumerates it.
+        # Missing descendants are already cleaned; every other error matters.
+        if isinstance(exc,FileNotFoundError) and Path(filename).resolve().is_relative_to(path) and Path(filename).resolve()!=path:return
+        raise exc
+    shutil.rmtree(path,onexc=vanished_child)
 
 def retain(root):
     with backup_lock(root):return _retain(root)

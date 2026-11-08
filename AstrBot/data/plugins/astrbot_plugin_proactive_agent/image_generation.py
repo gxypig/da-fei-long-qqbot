@@ -1,5 +1,5 @@
 """Explicit Images API route; unchanged text model, same receipt/send pipeline."""
-import asyncio,base64,io,re,time
+import asyncio,base64,hashlib,io,re,time
 from functools import wraps
 
 def animated_request(text):
@@ -38,7 +38,7 @@ async def generate(plugin,provider,event):
     provider=plugin.context.get_provider_by_id(chosen) if chosen else provider
     client=getattr(provider,'client',None)
     if client is None or not hasattr(client,'images'):raise ValueError('请选择兼容 Images API 的生图提供商')
-    req=event.get_extra('qqbot_generation_request');material=image_spec.context_material(event,req)
+    req=event.get_extra('qqbot_generation_request');material=image_spec.context_material(event,req,plugin)
     canonical=await asyncio.to_thread(image_spec.identity,plugin)
     checked=plugin._cfg('image_quality_check_enabled',False)
     async def analyze(system,payload,images=(),*,planning=False):
@@ -173,6 +173,7 @@ async def generate(plugin,provider,event):
         response.qqbot_generated_image=True
         event.set_extra('qqbot_generated_format',fmt)
         event.set_extra('qqbot_image_provenance',{'method':'generated_action_frames' if frames else 'native_gif' if animated else 'static',
+            'intent':plan['intent'],'scene':plan['scene'],'content_hash':hashlib.sha256(data).hexdigest(),
             'requirements':plan['requirements'],'camera_mode':plan['camera_mode'],'identity_sha256':canonical['sha256'] if canonical and plan['subject_self'] else None,'checked':checked})
         plugin._audit('image_generation',{'status':'ok','animated':animated,'format':fmt,'method':'generated_action_frames' if frames else 'native','checked':checked})
         return response
@@ -184,14 +185,36 @@ def install(plugin):
     from .reply_jobs import current_job
     from .visual_intent import generation_kind
     cls=ProviderOpenAIOfficial;old=cls._query;old_stream=cls._query_stream;active=True
+    pending={}
+    def task_key(event):
+        from .session_fence import get_fence
+        req=event.get_extra('qqbot_generation_request')
+        fence=get_fence(getattr(plugin.context,'conversation_manager',None))
+        return (event.unified_msg_origin,str(event.get_sender_id()),getattr(getattr(req,'conversation',None),'cid',None),
+                fence.epoch(event.unified_msg_origin) if fence else 0)
+    def active_for(event):
+        key=task_key(event)
+        if any(other is not event for other in pending.get(key,{}).values()):return True
+        # Generation can finish before final review and the QQ receipt. Keep
+        # the real reply job as the owner throughout that submission gap.
+        from .reply_jobs import TERMINAL
+        for job in getattr(getattr(plugin,'_reply_queue',None),'jobs',{}).values():
+            other=getattr(job,'event',None)
+            if not other or other is event or job.state in TERMINAL:continue
+            progress=other.get_extra('qqbot_image_progress')
+            if not progress or progress.get('stage') in {'finished','cancelled'}:continue
+            if (job.origin,str(job.sender),job.cid,job.session_epoch)==key:return True
+        return False
     def selected():
         from .work_scheduler import _kind
         job=current_job.get();event=getattr(job,'event',None)
         if (active and plugin._cfg('image_generation_api_enabled',False) and event and event.get_extra('qqbot_visual_route')!='none'
             and _kind.get() not in {'background','review','auxiliary','scheduled'}):
             if generation_kind(event.get_message_str())!='none':return event
-            from .image_followup import continuation
-            if continuation(event,event.get_extra('qqbot_generation_request')):
+            from .image_followup import continuation,repeated_confirmation,completed_execution
+            if repeated_confirmation(event) and active_for(event):return event
+            if completed_execution(plugin,event,event.get_extra('qqbot_generation_request')):return event
+            if continuation(event,event.get_extra('qqbot_generation_request'),plugin):
                 event.set_extra('qqbot_visual_continuation',True)
                 return event
             from .image_spec import followup_request
@@ -202,7 +225,32 @@ def install(plugin):
         if lock is None:lock=asyncio.Lock();event.set_extra('qqbot_image_api_lock',lock)
         async with lock:
             if event.get_extra('qqbot_image_api_cancelled'):raise asyncio.CancelledError()
-            return await once(provider,event)
+            previous=event.get_extra('qqbot_image_api_result')
+            if previous is not None:return previous
+            from .image_followup import repeated_confirmation,completed_execution
+            if repeated_confirmation(event) and active_for(event):
+                from astrbot.core.provider.entities import LLMResponse
+                message='这次拍摄还在处理中，还没有可发送的新画面'
+                response=LLMResponse(role='assistant',completion_text=message)
+                response.qqbot_status_receipt=message
+                event.set_extra('qqbot_image_api_result',response)
+                plugin._audit('image_generation',{'status':'existing_task','resubmitted':False})
+                return response
+            completed=completed_execution(plugin,event,event.get_extra('qqbot_generation_request'))
+            if completed:
+                from astrbot.core.provider.entities import LLMResponse
+                message=('刚才那段会动的画面已经发出去了，就在上面那条' if completed['visual'].get('intent')=='animation'
+                         else '刚才那张图已经发出去了，就在上面那条')
+                response=LLMResponse(role='assistant',completion_text=message)
+                response.qqbot_status_receipt=message
+                event.set_extra('qqbot_image_api_result',response)
+                plugin._audit('image_generation',{'status':'already_confirmed','resubmitted':False})
+                return response
+            key=task_key(event);pending.setdefault(key,{})[id(event)]=event
+            try:return await once(provider,event)
+            finally:
+                pending[key].pop(id(event),None)
+                if not pending[key]:pending.pop(key,None)
     async def once(provider,event):
         if event.get_extra('qqbot_visual_route')=='none':return None
         previous=event.get_extra('qqbot_image_api_result')

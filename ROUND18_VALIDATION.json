@@ -1,0 +1,111 @@
+{
+  "version": "1.24.6-rc1",
+  "date_hong_kong": "2026-11-09",
+  "status": "deployed_and_QQ_acceptance_passed",
+  "regression": {
+    "private-tests-final": {
+      "tests": 1299,
+      "seconds": 141.28,
+      "passed": true
+    },
+    "public-tests-final": {
+      "tests": 1283,
+      "seconds": 141.249,
+      "passed": true
+    },
+    "targeted-final": {
+      "tests": 52,
+      "seconds": 2.386,
+      "passed": true
+    }
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true
+  },
+  "live_intent_cases": {
+    "total": 8,
+    "passed": 8
+  },
+  "live_provider": {
+    "case": "independent_ordinary_outfit_animation_amendment",
+    "passed": true,
+    "seconds": 54.75,
+    "first_content_attempt_passed": true,
+    "native_unsupported_used_existing_frame_fallback": true,
+    "QQ_sends": 0
+  },
+  "QQ_acceptance": [
+    {
+      "case": "fresh_static_selfie",
+      "confirmed_seconds": 55.312,
+      "first_confirmed_seconds": 55.312,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "format": "PNG",
+      "frames": 1,
+      "character_camera_outfit_and_object_verified": true
+    },
+    {
+      "case": "photo_to_video_inheritance",
+      "confirmed_seconds": 75.984,
+      "first_confirmed_seconds": 75.984,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "format": "GIF",
+      "frames": 6,
+      "character_camera_outfit_and_object_verified": true
+    },
+    {
+      "case": "amendment_without_generation_verb",
+      "confirmed_seconds": 62.14,
+      "first_confirmed_seconds": 62.14,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "format": "GIF",
+      "frames": 6,
+      "character_camera_outfit_and_object_verified": true
+    },
+    {
+      "case": "completed_impatient_receipt",
+      "confirmed_seconds": 1.375,
+      "first_confirmed_seconds": 1.375,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "completion_acknowledgement",
+      "confirmed_seconds": 12.609,
+      "first_confirmed_seconds": 12.609,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true
+    },
+    {
+      "case": "cancel_and_recall",
+      "confirmed_seconds": 15.016,
+      "first_confirmed_seconds": 15.016,
+      "segments": 1,
+      "QQ_visually_verified": true,
+      "history_saved": true
+    }
+  ],
+  "ordinary_chat_added_model_calls": 0,
+  "rollback_source_only_preflight_passed": true,
+  "runtime_restarted_between_artwork_and_final_recall": true,
+  "live_acceptance_finding": "An impatient message initially produced an incorrect claim that another video remained undelivered after the GIF had arrived. Added receipt-based completion handling, including voice/caption split, and rechecked after deployment.",
+  "limitations": [
+    "Image generation exceeded 30 seconds; finite cases do not establish a latency distribution or zero-failure guarantee",
+    "Video means short looping GIF, not long-form or MP4 video",
+    "Real content refusals and unknown results retain their safeguards; no automatic resubmission to bypass them",
+    "QQ raw media URL readback was unavailable; verified confirmed platform image receipts, local submitted GIF bytes and visible QQ playback",
+    "Concurrent reminders and the review-to-send gap additionally covered by offline fault tests"
+  ],
+  "privacy": "No account IDs, credentials, chats, runtime configuration or artwork included"
+}

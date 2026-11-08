@@ -1007,7 +1007,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         if self._cfg('image_generation_api_enabled',False):
             from .image_followup import continuation,CAPABILITY_NOTE
             req.system_prompt=(req.system_prompt or '')+CAPABILITY_NOTE
-            if continuation(event,req):state['visual_intent']='scene'
+            if continuation(event,req,self):state['visual_intent']='scene'
         optimized = self._cfg('latency_optimization_enabled', False)
         self.prepare_reply_prediction(event)
         if optimized:
