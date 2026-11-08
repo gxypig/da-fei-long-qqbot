@@ -1,0 +1,106 @@
+{
+  "version": "1.24.4-rc1",
+  "date_hong_kong": "2026-11-08",
+  "status": "locally_deployed_and_final_QQ_acceptance_passed",
+  "regression": {
+    "private": {
+      "tests": 1258,
+      "seconds": 293.699,
+      "passed": true
+    },
+    "public": {
+      "tests": 1242,
+      "seconds": 293.523,
+      "passed": true
+    }
+  },
+  "runtime": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true,
+    "current_delivery_faults": 0
+  },
+  "semantic_acceptance": {
+    "cases": 12,
+    "passed": 12,
+    "model_calls": 8,
+    "cases_with_zero_model_calls": 4
+  },
+  "routing_cpu_only": {
+    "scope": "local routing CPU only, not model or end-to-end reply latency",
+    "samples": {
+      "ordinary": {
+        "median_ms": 0.0211,
+        "p95_ms": 0.0412
+      },
+      "acknowledgement": {
+        "median_ms": 0.0872,
+        "p95_ms": 0.1614
+      },
+      "visual_confirmation": {
+        "median_ms": 0.0822,
+        "p95_ms": 0.1392
+      }
+    }
+  },
+  "QQ_acceptance": [
+    {
+      "case": "discuss_selfie_but_hold_creation",
+      "confirmed_seconds": 20.891,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "submitted_images": 0
+    },
+    {
+      "case": "short_confirmation_of_pending_selfie",
+      "confirmed_seconds": 77.516,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "submitted_images": 1,
+      "format": "PNG",
+      "frames": 1,
+      "selfie_character_outfit_object_verified": true,
+      "role_caption_verified": true
+    },
+    {
+      "case": "independent_new_selfie_excluding_previous_reference",
+      "confirmed_seconds": 56.922,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "submitted_images": 1,
+      "format": "PNG",
+      "frames": 1,
+      "selfie_character_outfit_object_verified": true,
+      "role_caption_verified": true
+    },
+    {
+      "case": "cancel_creation_and_recall_last_sent_object",
+      "confirmed_seconds": 11.094,
+      "QQ_visually_verified": true,
+      "history_saved": true,
+      "submitted_images": 0
+    }
+  ],
+  "rollback": {
+    "source_only_preflight_passed": true,
+    "restores_chat_databases": false,
+    "replays_confirmed_sends": false
+  },
+  "preserved": [
+    "existing_models",
+    "high_image_quality",
+    "post_render_validation",
+    "ordinary_chat_has_no_added_model_call",
+    "existing_GIF_pipeline",
+    "meme_probability"
+  ],
+  "limitations": [
+    "Finite cases do not establish a zero-failure guarantee or an end-to-end latency distribution",
+    "Image acceptance times exceeded 30 seconds",
+    "This round did not send another live GIF; previous-round playback evidence and full regression are retained",
+    "Genuine provider content refusals are not bypassed; refused inputs were not resubmitted in acceptance",
+    "The configured Images API cannot retrieve an unknown remote result after disconnection"
+  ],
+  "privacy": "No account IDs, credentials, runtime settings, reference images, captions or chat archives included"
+}

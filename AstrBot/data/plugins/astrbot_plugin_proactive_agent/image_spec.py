@@ -10,6 +10,7 @@ PLAN='''你是图片与动图请求理解器，只返回JSON，不创作聊天�
 本轮请求优先。recent仅用于消解“刚才那张/再来/同样动作”等明确指代，不能将旧话题当新要求。
 返回 {"intent":"image|animation|none","reference_needed":布尔,"subject_self":布尔,"camera_mode":"selfie|mirror_selfie|third_person|scene","scene":"忠实保留主体、拍摄视角、动作、物件、数量、颜色、排除要求的画面说明，最多1800字", "requirements":["逐项可从图片直接检查的要求，最多12项"],"caption":"可省略的简短配文"}。
 先判断是否真的要求现在创作，以及静态或动态。拍个视频、录一段你挥手、想看会动的自拍、拍个小短片、让这张照片动起来等是animation，使用短循环动图表现动作；不用用户非得说GIF。拍照片、画图、静态自拍是image。转发/找已有视频、分析图片、问制作方法、只问有无能力、讲以前拍过、否定或取消创作、拍桌子/录音等无关动作是none，不执行创作。none只需返回intent，不能为凑图编造请求。礼貌请求“能不能给我拍一段挥手视频”仍是animation。不要动图但要照片是image，不要照片只拍视频是animation。确实未要求动态时，不因历史谈过视频就自动变动图。
+短句“好就这么着/按你说的来/换成这个”可能是在确认刚才待执行的画面方案，必须结合同一人的recent确认；确认明确的新方案后执行，不要求用户再重复生图动词。普通赞同、收到已发送图片后的回应、拒绝后的原样重试、引用别人说法不自动创作。图片服务拒绝的原要求不能换说法继续提交；新的独立画面要求按新要求理解。reference_reset=true时用户已明确不用先前参考，只按当前文字要求，不得回填旧画面细节。
 reference_layout标注本次实际附带的图及用途。identity图只参考外观，user_reference图才是用户提供的动作/物件/构图参考；必须亲自看图描述所需动作，不能只写“相同动作”而不说明动作是什么。只有用户要求参照原图细节且本次没有该图时reference_needed=true，不能猜测旧图；仅继承刚才的文字要求无需原图。
 要求打开真实摄像头、监控、视频通话属于设备操作，是none；不要擅自用创作图片替代设备操作。没有明确创作对象时，拍个视频/录一段默认展示当前虚拟角色，不能随意换成陌生人。
 caption是成功附上作品时的角色台词，依照caption_style自然简短说“本龙拍的/刚录的/自拍”等；不要说生成、合成、渲染、AI制作或接口。这里是二次元角色演出，不虚构现实地点或真实现场拍摄经历。失败时不会使用这条成功台词。
@@ -51,17 +52,18 @@ def camera_mode(text,own,proposed=''):
 def context_material(event,req):
     text=event.get_extra('qqbot_visual_followup_request') or event.get_message_str() or ''
     if len(text)>MAX_REQUEST:raise ValueError('image_request_too_long')
+    from .image_followup import continuation,reset_reference,scoped_messages
+    reset=reset_reference(text)
+    use_recent=not reset and (bool(FOLLOW.search(text)) or continuation(event,req) or bool(event.get_extra('qqbot_visual_followup_request')))
     recent=[]
     # The provider payload is already projected by ContextWindow. Only the
     # requirement-extraction model receives this view; image rendering never does.
     projected=event.get_extra('qqbot_image_projected_context')
-    if isinstance(projected,list):
+    if use_recent and isinstance(projected,list):
         used=0
-        for message in reversed(projected):
+        for message in reversed(list(scoped_messages(event,projected))):
             if message.get('role') not in {'user','assistant'}:continue
             value=message.get('content','')
-            if not same_speaker(event,value):
-                if ':GroupMessage:' in event.unified_msg_origin:continue
             if isinstance(value,list):value=' '.join(p.get('text','') for p in value if p.get('type')=='text')
             value=re.sub(r'<system_reminder>.*?</system_reminder>','',str(value),flags=re.S)
             value=re.sub(r'\[Image \d+[^\]]*\]','',value)
@@ -69,15 +71,14 @@ def context_material(event,req):
             if used+len(value)>16000:continue
             recent.append({'role':message['role'],'text':value});used+=len(value)
         recent.reverse()
-    elif req is not None and FOLLOW.search(text):
-        for message in (getattr(req,'contexts',[]) or [])[-8:]:
-            if message.get('role')!='user':continue
+    elif use_recent and req is not None:
+        for message in scoped_messages(event,(getattr(req,'contexts',[]) or [])[-8:]):
+            if message.get('role') not in {'user','assistant'}:continue
             value=message.get('content','')
-            if not same_speaker(event,value):continue
             if isinstance(value,list):value=' '.join(p.get('text','') for p in value if p.get('type')=='text')
             value=re.sub(r'<system_reminder>.*?</system_reminder>','',str(value),flags=re.S)
             value=re.sub(r'\[Image \d+[^\]]*\]','',value)
-            if value:recent.append(value[:800])
+            if value:recent.append({'role':message['role'],'text':value[:1800]})
     adjacent=[]
     for part in getattr(req,'extra_user_content_parts',[]) or []:
         value=part.get('text','') if isinstance(part,dict) else getattr(part,'text','')
@@ -85,7 +86,7 @@ def context_material(event,req):
             try:rows=json.loads(value.split('] ',1)[1])
             except ValueError:continue
             adjacent.extend(str(r.get('原话',''))[:1200] for r in rows[:5])
-    return {'request':text,'recent':recent if isinstance(projected,list) else recent[-3:],'adjacent_same_sender':adjacent}
+    return {'request':text,'recent':recent if isinstance(projected,list) else recent[-6:],'adjacent_same_sender':[] if reset else adjacent,'reference_reset':reset}
 
 def followup_request(event,req):
     """A newly supplied original resumes a request explicitly waiting for it."""
@@ -107,6 +108,8 @@ def followup_request(event,req):
     return None
 
 def reference_paths(event,req,plugin=None):
+    from .image_followup import reset_reference
+    if reset_reference(event.get_message_str()):return []
     current=list(getattr(req,'image_urls',[]) or [])[:3]
     if current or not FOLLOW.search(event.get_message_str() or ''):return current
     # Explicit "this picture's pose" can arrive after the short chat burst but

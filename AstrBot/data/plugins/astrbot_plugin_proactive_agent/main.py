@@ -1004,6 +1004,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         await prepare_voice_state(self,event,state)
         if ledger and state.get('voice_capability'):
             state['voice_receipts']=ledger.voice_context(event.unified_msg_origin,getattr(getattr(req,'conversation',None),'cid',None),event.get_sender_id())
+        if self._cfg('image_generation_api_enabled',False):
+            from .image_followup import continuation,CAPABILITY_NOTE
+            req.system_prompt=(req.system_prompt or '')+CAPABILITY_NOTE
+            if continuation(event,req):state['visual_intent']='scene'
         optimized = self._cfg('latency_optimization_enabled', False)
         self.prepare_reply_prediction(event)
         if optimized:

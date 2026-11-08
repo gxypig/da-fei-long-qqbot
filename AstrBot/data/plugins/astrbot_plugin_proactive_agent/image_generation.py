@@ -78,7 +78,8 @@ async def generate(plugin,provider,event):
                 file,uri=await load_reference(path,index);user_files.append(file);user_uris.append(uri)
             except (OSError,ValueError,TimeoutError):unavailable+=1
         service=getattr(plugin,'_incoming_visual',None)
-        if not user_files and service and image_spec.REFERENCE_CUE.search(text):
+        from .image_followup import reset_reference
+        if not user_files and service and image_spec.REFERENCE_CUE.search(text) and not reset_reference(text):
             wait.phase('waiting_reference')
             for index,path in enumerate(await service.wait_reference(event)):
                 try:
@@ -96,6 +97,7 @@ async def generate(plugin,provider,event):
             state['visual_intent']='none'
             return None
         animated=plan['intent']=='animation';event.set_extra('qqbot_requested_animation',animated)
+        state['visual_intent']='selfie' if plan['subject_self'] else 'scene'
         if not plan['identity'] and plan['subject_self']:plan['identity']=role_text('image',state)[:6000]
         model=plugin._cfg('image_animation_model','gpt-image-2.6-sunburst') if animated else plugin._cfg('image_generation_model','gpt-image-2.5-sunburst')
         base_args={'model':model,'n':1,'size':'auto','quality':'high'}
@@ -182,6 +184,10 @@ def install(plugin):
         if (active and plugin._cfg('image_generation_api_enabled',False) and event and event.get_extra('qqbot_visual_route')!='none'
             and _kind.get() not in {'background','review','auxiliary','scheduled'}):
             if generation_kind(event.get_message_str())!='none':return event
+            from .image_followup import continuation
+            if continuation(event,event.get_extra('qqbot_generation_request')):
+                event.set_extra('qqbot_visual_continuation',True)
+                return event
             from .image_spec import followup_request
             resumed=followup_request(event,event.get_extra('qqbot_generation_request'))
             if resumed:event.set_extra('qqbot_visual_followup_request',resumed);return event
@@ -208,13 +214,13 @@ def install(plugin):
             unsupported=animated and code==400 and 'gif output is not enabled' in str(exc).lower()
             reason=str(exc)
             known=bool(re.fullmatch(r'(?:image|animation|reference|identity)_[a-z_]{1,60}',reason))
-            from .image_transport import failure
+            from .image_transport import failure,rejection_details
             progress=event.get_extra('qqbot_image_progress') or {}
             detail=failure(exc,progress) if not unsupported else None
             outcome=detail[1] if detail else 'failed'
             plugin._audit('image_generation',{'status':'failed','outcome':outcome,'stage':progress.get('stage'),
                 'animated':animated,'error':type(exc).__name__,'http_status':code,
-                'reason':detail[0] if detail else 'gif_not_enabled' if unsupported else reason if known else 'generation_failed'})
+                'reason':detail[0] if detail else 'gif_not_enabled' if unsupported else reason if known else 'generation_failed',**rejection_details(exc)})
             event.set_extra('qqbot_image_progress',{**progress,'stage':'finished','outcome':outcome})
             job=current_job.get()
             if job:job.reply_purpose='error_notification'

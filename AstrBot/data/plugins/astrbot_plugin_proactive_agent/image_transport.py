@@ -4,6 +4,23 @@ import time
 import httpx
 
 
+def rejection_details(exc):
+    """Keep only public, finite moderation categories, never provider prose."""
+    body=getattr(exc,'body',None)
+    if isinstance(body,dict):body=body.get('error',body)
+    if not isinstance(body,dict):return {}
+    code=body.get('code')
+    if code not in {'content_policy_violation','moderation_blocked','safety_violation'}:return {}
+    value={'provider_code':code}
+    details=body.get('moderation_details')
+    if isinstance(details,dict):
+        stage=details.get('moderation_stage')
+        if stage in {'input','output','unknown'}:value['moderation_stage']=stage
+        categories=details.get('categories')
+        if isinstance(categories,list):value['moderation_categories']=sorted({x for x in categories if isinstance(x,str) and x in {'sexual','violence','harassment','self-harm','hate','illicit'}})
+    return value
+
+
 def wait_seconds(cfg):
     value=cfg('image_generation_timeout_seconds',600)
     return value if type(value) is int and 180<=value<=900 else 600
@@ -53,7 +70,7 @@ def failure(exc,progress):
         body=body.get('error',body)
     rejection=body.get('code') if isinstance(body,dict) else None
     if rejection in {'content_policy_violation','moderation_blocked','safety_violation'}:
-        return 'content_rejected','rejected','这次画面请求被图片服务拒绝了，请换一种合适的画面要求'
+        return 'content_rejected','rejected','图片服务的内容审核拒绝了这次请求，未返回图片；这不是缺少生图工具，请换一张合适的参考图或重新描述新的画面'
     if code in {401,403}:
         return 'authorization_failed','failed','图片服务的授权暂时不可用，需要检查接口配置'
     if code==429:
