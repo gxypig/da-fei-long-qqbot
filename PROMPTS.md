@@ -32,6 +32,8 @@ AstrBot 面板中的人格提示词只是最终请求的一部分。实际聊天
 | 标点 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/chat_punctuation.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/chat_punctuation.py#L4) | 日常句末标点约定；同文件还执行本地清理 |
 | 短回复与用梗 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/local_recall.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/local_recall.py#L46) | BRIEF_RULE允许合适的极短句；MEME_RULE让模型理解可选梗的语境；`retrieve()`构造旧聊天检索片段 |
 | 生图与自拍 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/visual_intent.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/visual_intent.py#L29) | 画图、拍照、看看形象等意图的生成要求；只在相应图片意图出现时加入 |
+| 生图需求与画面验收 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/image_spec.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/image_spec.py) | PLAN整理本次要求；VERIFY核对身份、物件、自拍镜头与动作。图片模型只读取prompt()组合的紧凑要求，不读取聊天历史 |
+| 本地固定形象 | `AstrBot/data/plugin_data/astrbot_plugin_proactive_agent/visual-identity/profile.json` | 部署者自备参考图及外观描述，不随仓库上传；安装、摘要校验和开关见ROUND13.md。只作用于画面外观，不修改聊天人格 |
 | 主聊天组装入口 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/main.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/main.py#L798) | 将人设补充、本轮角色、当前发言人、旧话记忆、学习策略、梗卡及群聊进度合并进实际请求；`remember_meme`的工具说明也会给模型看 |
 | 发送前二次审查 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/conversation_review.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/conversation_review.py#L20) | 审阅系统提示；`ReplyReviewer.review()`另外拼入标点、短句、角色口吻、近期回复和必须修正的问题。只改REVIEW_SYSTEM不等于改完审查规则 |
 | 并行预判 | [AstrBot/data/plugins/astrbot_plugin_proactive_agent/reply_pipeline.py](AstrBot/data/plugins/astrbot_plugin_proactive_agent/reply_pipeline.py#L20) | 输入风险与表情候选选择；LOCAL_MEMORY_RULE要求命中本地记忆时复用、陌生梗放入后台学习。不是实际最终回复审阅 |

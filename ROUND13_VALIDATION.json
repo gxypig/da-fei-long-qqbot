@@ -1,0 +1,64 @@
+{
+  "version": "1.24.1-rc1",
+  "validated_date_hong_kong": "2026-11-08",
+  "automated": {
+    "private_full_suite": {"tests": 1213, "passed": true},
+    "public_full_suite": {"tests": 1197, "passed": true},
+    "final_camera_and_prompt_corrections": {"private_tests": 58, "public_tests": 58, "passed": true},
+    "public_source_audit": {"plugin_files": 177, "passed": true},
+    "control_panel_javascript_syntax": "passed",
+    "note": "完整回归后，最后的镜头识别及误拒自拍修正另经两侧专项回归；不把专项数量重复计入完整回归"
+  },
+  "live_generation": {
+    "same_configured_models": true,
+    "static_selfie_with_apple": {"passed": true, "seconds": 59.406, "semantic_attempts": 1},
+    "selfie_blink_gif": {"passed": true, "seconds": 53.578, "frames": 6, "semantic_attempts": 1, "method": "generated_action_frames"},
+    "non_character_apple_scene": {"passed": true, "seconds": 23.437},
+    "earlier_motion_fixture": {"passed_for_motion_and_transport": true, "passed_for_selfie": false},
+    "failures_retained_in_private_report": [
+      "一次上游连接失败，未自动重发结果未知的请求",
+      "镜头误判为镜子，修正前的静态和动图验收失败",
+      "擅自要求单眼眨动及角尖全部入框造成误拒，修正后重新生成通过"
+    ]
+  },
+  "real_qq_acceptance": {
+    "explicitly_authorized_owner_account_only": true,
+    "previous_artifact_sends": 2,
+    "owner_client_requests": 2,
+    "bot_replies_confirmed": 2,
+    "bot_replies_saved_to_context": 2,
+    "static_selfie": {"confirmed": true, "image_visible_in_owner_client": true, "selfie_view_and_apple_visually_checked": true, "receipt_elapsed_seconds": 76.0},
+    "context_followup_animation": {"confirmed": true, "same_selfie_requirements_and_apple_preserved": true, "gif_playback_observed_in_owner_client": true, "receipt_elapsed_seconds": 67.422},
+    "semantic_checks_first_attempt": true,
+    "limitations": "仅在获授权的私聊实际发送；群聊和不同账号隔离由模拟测试覆盖。接入端get_image未返回可下载原图URL，客户端播放另行目视验收。未发送群消息或动态"
+  },
+  "context_and_performance": {
+    "context_compression_preserved": true,
+    "real_request_history_before": 401,
+    "real_request_history_after": 42,
+    "normal_text_additional_model_calls": 0,
+    "ordinary_text_passthrough_test": "passed",
+    "image_only_requirement_and_visual_checks": true,
+    "ordinary_text_timing_benchmark_rerun": false,
+    "image_requests_under_30_seconds": false,
+    "note": "本轮生图含需求整理、图片生成、画面验收及原有台词审阅，真实两次总耗时约67至76秒；不宣称生图30秒达标或普通聊天整体提速"
+  },
+  "deployment": {
+    "enabled_locally": true,
+    "durable_stop_and_independent_backup": true,
+    "unrelated_settings_preserved": true,
+    "existing_gallery_preserved": true,
+    "source_rollback_dry_run": "passed",
+    "runtime_checks_passed": 19,
+    "runtime_checks_total": 20,
+    "current_delivery_faults": 0,
+    "note": "保留一条更新前的历史必要投递失败提示，不清除旧记录伪造全绿"
+  },
+  "upstream_capability": {
+    "native_gif_preview_enabled": false,
+    "native_denial": "GIF output is not enabled for this request.",
+    "working_path": "configured animation model generates six action frames; local GIF encoding; original bytes passed to OneBot",
+    "animation_quality_limit": "六帧循环不是完整视频模型；视觉验收不能保证模型永不出错"
+  },
+  "privacy": "公开资料只含源码、通用说明与汇总验收；不含账号、密钥、本机配置、聊天、参考原画、生成图片及运行日志"
+}

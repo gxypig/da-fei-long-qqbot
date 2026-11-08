@@ -475,6 +475,21 @@
   "image_animation_model": {
     "type": "string",
     "default": "gpt-image-2.6-sunburst",
-    "description": "明确请求动图时使用的模型，接口必须支持GIF"
+    "description": "明确请求动图时使用的模型；支持原生GIF，或启用后备方式生成连续动作帧"
+  },
+  "image_identity_enabled": {
+    "type": "bool",
+    "default": false,
+    "description": "启用已安装的固定形象参考，自拍跨会话使用同一形象；参考图仅在本机保存"
+  },
+  "image_quality_check_enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "生图前整理本轮要求，发图前检查形象、自拍视角和物件；不合格最多重画一次，普通聊天不调用"
+  },
+  "image_animation_frames_fallback": {
+    "type": "bool",
+    "default": true,
+    "description": "原生GIF未开放时生成连续动作帧并合成真GIF，不用静态图平移冒充动作"
   }
 }

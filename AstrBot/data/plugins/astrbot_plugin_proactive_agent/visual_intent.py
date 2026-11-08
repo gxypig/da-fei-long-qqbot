@@ -4,6 +4,9 @@ import re
 
 def generation_kind(text):
     text = str(text or "").strip().lower()
+    if (re.search(r'(?:生成|制作|写).{0,12}(?:代码|脚本|函数|语音|音频|音乐|视频|文案|报告|文章|提示词)',text)
+        and not re.search(r'图片|动图|gif|海报|壁纸|头像|插画|漫画|照片|截图',text)):
+        return 'none'
     text = re.sub(r"(?:不要|别|不用|不需要)(?:再|给我|帮我)?(?:生成|画|绘制|创作|制作|拍|给我看)[^，,。；;]*", "", text)
     # Narrating a completed picture is not asking for another. Remove only that
     # clause, so a later explicit request ("画过猫，再画张狗") still works.
@@ -29,7 +32,8 @@ def generation_kind(text):
     if not create:
         from .image_generation import animated_request
         if not animated_request(text):return "none"
-    if re.search(r"自拍|你(?:自己|本人|的(?:样子|模样|样貌|脸|角|龙角|尾巴|龙尾|翅膀|照片|自拍))|(?:看看|看下|瞅瞅|瞧瞧)你(?:[呀啊呗嘛呢！!？?~～，,。 ]|$)|(?:画|拍).{0,5}(?:大肥龙|肥龙|你)", text):
+    from .image_spec import self_subject
+    if self_subject(text) or re.search(r"自拍|你(?:自己|本人|的(?:样子|模样|样貌|脸|角|龙角|尾巴|龙尾|翅膀|照片|自拍))|(?:看看|看下|瞅瞅|瞧瞧)你(?:[呀啊呗嘛呢！!？?~～，,。 ]|$)|(?:画|拍).{0,5}(?:大肥龙|肥龙|你)", text):
         return "selfie"
     return "scene"
 

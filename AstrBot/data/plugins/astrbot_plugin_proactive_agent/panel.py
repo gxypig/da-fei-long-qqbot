@@ -41,6 +41,7 @@ FIELDS = {
 LEGACY_FIELDS=set(FIELDS)
 FIELDS['reply_review_enabled']=False
 FIELDS.update(review_history_days=30,review_history_limit=10000,life_public_auto=False,image_generation_api_enabled=False,image_generation_provider_id='',image_generation_model='gpt-image-2.5-sunburst',image_animation_model='gpt-image-2.6-sunburst')
+FIELDS.update(image_identity_enabled=False,image_quality_check_enabled=True,image_animation_frames_fallback=True)
 FIELDS.update({'proactive_life_enabled':False,'life_reflection_enabled':True,'fixed_message_required':False,'fixed_qzone_required':False,
     'proactive_unanswered_limit':2,'proactive_min_gap_minutes':5,'learning_record_limit':2000,'learning_record_days':30,
     'group_ids':'','private_ids':'','min_action_gap_minutes':60,'group_min_gap_minutes':120,'private_min_gap_minutes':180})

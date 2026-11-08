@@ -88,7 +88,10 @@
   field(imageApi,'image_generation_provider_id','生图提供商ID（留空沿用当前模型的接口）','text');
   field(imageApi,'image_generation_model','静态图片模型','text');
   field(imageApi,'image_animation_model','明确要求动图时使用的模型','text');
-  imageApi.append(el('p','动图模型需要接口实际支持，返回真实GIF后才发送；普通图片不会生成动图。聊天临时图片保留1小时，正式图库长期保留。'));
+  field(imageApi,'image_identity_enabled','使用本机固定角色参考（安装参考后启用）','checkbox');
+  field(imageApi,'image_quality_check_enabled','发送前检查自拍视角、形象、物件和动作；最多纠正重画一次','checkbox');
+  field(imageApi,'image_animation_frames_fallback','原生GIF未开放时，生成连续动作帧并合成动图','checkbox');
+  imageApi.append(el('p','固定参考在本机 visual-identity 中，不能被聊天改写。连续动作帧方式生成真实多帧GIF，能力和画质取决于生成模型；不合格不发。普通图片不会生成动图，普通聊天不增加检查。聊天临时图片保留1小时，正式图库长期保留。'));
   const healthDelivery=el('article');healthDelivery.id='delivery-health';healthDelivery.className='card';$('health').prepend(healthDelivery);
   // Diagnostics are available on demand, not a wall of fields on the first screen.
   for(const id of ['performance-database-pool','performance-delivery-storage','performance-audit-storage','performance-timing-window']){
