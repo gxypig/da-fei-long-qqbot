@@ -1,0 +1,49 @@
+{
+  "version": "1.24.7-rc1",
+  "date": "2026-11-09",
+  "timezone": "Asia/Hong_Kong",
+  "tests": {
+    "private": 1315,
+    "public": 1299,
+    "targeted": 16,
+    "final_suites_passed": true,
+    "source_unchanged_during_final_suites": true,
+    "pressure_repeat": {
+      "observed_failure": "One intermediate full-suite run exceeded the existing 3-second passive-message flood deadline",
+      "threshold_changed": false,
+      "isolated_admission_suite_passed": 11,
+      "subsequent_full_suite_passed": true
+    }
+  },
+  "same_provider_review_replay": {
+    "cases": 6,
+    "passed": 6,
+    "review_calls_per_case": [1, 1, 1, 1, 1, 1],
+    "seconds": [17.485, 7.75, 4.797, 3.938, 2.625, 8.453],
+    "timing_scope": "Review operation only, not end-to-end delivery"
+  },
+  "qq_acceptance": {
+    "authorized_private_test_session": true,
+    "native_qq_ui_observed": true,
+    "receipt_confirmed": true,
+    "cases": [
+      {"kind": "text_followup", "necessary_confirmed_seconds": 10.515, "optional_emoji_confirmed_seconds": 21.687},
+      {"kind": "image_action_reaction", "necessary_confirmed_seconds": 12.141, "input_images": 1, "review_calls": 1},
+      {"kind": "original_surprise_sticker", "necessary_confirmed_seconds": 14.453, "input_images": 1, "review_calls": 1}
+    ],
+    "original_drafts_preserved": true,
+    "duplicate_transport_review": false
+  },
+  "runtime": {
+    "healthy_checks": 20,
+    "settings_preserved": true,
+    "gallery_preserved": true,
+    "source_rollback_preflight": true,
+    "rollback_restores_conversation_databases": false
+  },
+  "limitations": [
+    "Finite examples do not establish a universal latency bound or perfect semantic judgement",
+    "Images accompany the existing review request when needed and still incur vision input cost",
+    "Private records, account identifiers, configurations and images are excluded"
+  ]
+}

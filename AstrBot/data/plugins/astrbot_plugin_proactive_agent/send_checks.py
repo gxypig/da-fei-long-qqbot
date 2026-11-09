@@ -71,9 +71,11 @@ def normalize(text,state=None,mode='chat'):
     # Preserve quotation bytes while cleaning our own punctuation.
     pieces=[];at=0
     for match in _QUOTES.finditer(text or ''):
-        pieces.extend((casual_punctuation(text[at:match.start()],mode),match[0]));at=match.end()
-    pieces.append(casual_punctuation((text or '')[at:],mode))
-    return ''.join(pieces)
+        # These edges are INSIDE the message. Trimming each fragment glues
+        # sentences to quotations and destroys an editor-approved line break.
+        pieces.extend((casual_punctuation(text[at:match.start()],mode,strip_edges=False),match[0]));at=match.end()
+    pieces.append(casual_punctuation((text or '')[at:],mode,strip_edges=False))
+    return ''.join(pieces).strip() or text
 
 def own_style(text,state=None,mode='chat'):
     """Formatting/count limits apply to authored speech, never quoted bytes."""

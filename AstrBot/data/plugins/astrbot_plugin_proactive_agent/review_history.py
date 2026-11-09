@@ -163,6 +163,7 @@ class ReviewHistory:
              'source_id':getattr(job,'source_id',''),'sender':getattr(job,'sender',''),
              'trigger':getattr(job,'text','') or str(scope.get('trigger','')),
              'context':copy.deepcopy(list(scope.get('recent',[]))[-6:]),'persona_version':state.get('persona_version'),
+             'incoming':copy.deepcopy(scope.get('incoming',{})),
              'mode':mode,'review_settings':copy.deepcopy(settings),'original':text,'formatted':formatted,
              'original_sha256':hashlib.sha256(text.encode()).hexdigest(),
              'approved':None,'rounds':[],'result':kind,'format_changed':formatted!=text,'ai_changed':False,

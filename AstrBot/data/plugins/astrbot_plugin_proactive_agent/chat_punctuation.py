@@ -4,7 +4,7 @@ import re
 PUNCTUATION_RULE = "日常聊天和动态不要用句号收尾；相邻短句可换行。保留问号、感叹号、省略号；网址、小数、文件名及管理回执保持准确。"
 
 
-def casual_punctuation(text, mode="chat"):
+def casual_punctuation(text, mode="chat", *, strip_edges=True):
     if mode == "management" or "```" in text:
         return text
     # Chinese full stops delimit prose; preserve punctuation inside a URL/token.
@@ -15,7 +15,8 @@ def casual_punctuation(text, mode="chat"):
         chunks.append(match.group())
         start = match.end()
     chunks.append(_prose(text[start:]))
-    return "".join(chunks).strip() or text
+    result = "".join(chunks)
+    return (result.strip() or text) if strip_edges else result
 
 
 def _prose(text):

@@ -328,7 +328,7 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
 
     # ==================== 配置与小工具 ====================
 
-    async def _generate_json(self, system, payload, origin, *, timeout=40):
+    async def _generate_json(self, system, payload, origin, *, timeout=40, image_urls=None):
         from .work_scheduler import _kind
         if timeout==40 and _kind.get()=='background':timeout=75
         prediction = system.startswith(PREDICTION_SYSTEM)
@@ -355,6 +355,8 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
                 prompt=json.dumps(payload, ensure_ascii=False, separators=(",", ":")), system_prompt=system,
                 request_max_retries=1,
             )
+            if image_urls:
+                kwargs['image_urls']=list(image_urls)
             if stage=='review_model':
                 # Same frozen text-only review, same model/reasoning and shared
                 # one-backup-per-turn budget. The provider hook strips marker.
@@ -893,7 +895,9 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             from .conversation_controls import explicit_quote_requested
             if explicit_quote_requested(text):
                 event.set_extra('qqbot_explicit_quote',True)
-            if not text or str(event.get_sender_id()) == str(event.get_self_id()):
+            from .review_input import current_message,bind_current
+            incoming=current_message(event)
+            if (not text and not incoming['attachments'] and not incoming['quoted']) or str(event.get_sender_id()) == str(event.get_self_id()):
                 return
             umo = event.unified_msg_origin
             # Cancel only unsent stale pictures when the same interlocutor moves
@@ -909,13 +913,14 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
             command = any(isinstance(f, CommandFilter)
                           for handler in (event.get_extra("activated_handlers") or [])
                           for f in handler.event_filters)
-            rows.append({"time": time.time(), "text": text[:300], "management": command,
+            rows.append({"time": time.time(), "text": text[:300] or '[本条仅含附件：'+','.join(incoming['attachments'])+']', "management": command,
                          "sender": str(event.get_sender_id()), "name":str(getattr(event,'get_sender_name',lambda:'')() or '')[:64], "role": "user"})
             life=getattr(self,'_life',None)
             if life and not command:
                 life.observe(umo,str(getattr(event.message_obj,'message_id','')),text,str(event.get_sender_id()))
             from .speaker_context import recent_speakers
             bind_request(umo, recent_speakers([r for r in rows if time.time()-r['time']<7200][-6:],bool(getattr(event,'get_group_id',lambda:'')())),rows[-1]['management'],review_settings=self.review_settings(event))
+            bind_current(event)
             snapshot = [dict(r) for r in rows if time.time() - r["time"] < 7200]
             event.set_extra("qqbot_meme_recent", snapshot)
             if (not command and getattr(event, "is_at_or_wake_command", False)

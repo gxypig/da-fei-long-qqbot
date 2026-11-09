@@ -51,7 +51,7 @@ def approve_once(origin, text, *, policy_version=None):
     _approved.set((origin, text, time.monotonic(), scope.get('request_id'), policy_version,approval_context(scope)))
 
 def approval_context(scope):
-    return hashlib.sha256(json.dumps({k:scope.get(k) for k in ('recent','management','character')},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+    return hashlib.sha256(json.dumps({k:scope.get(k) for k in ('recent','management','character','incoming','incoming_images')},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
 
 
 def consume_approval(origin, text, *, policy_version=None):
@@ -168,7 +168,7 @@ class ReplyReviewer:
         scope=request_scope(origin) or {}
         from .review_modes import snapshot
         key=hashlib.sha256(json.dumps([scope.get('request_id') or getattr(job,'id',None) or id(asyncio.current_task()),
-            origin,text,list(recent),mode,media,list(prior_replies),character or scope.get('character'),snapshot()],
+            origin,text,list(recent),mode,media,list(prior_replies),character or scope.get('character'),snapshot(),approval_context(scope)],
             sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
         if not hasattr(self,'_inflight'):self._inflight={}
         async with parking:
@@ -205,6 +205,8 @@ class ReplyReviewer:
             state=character if character is not None else (request_scope(origin) or {}).get('character',{})
             candidate=own_style(text,state,mode)
             formatted=candidate;feedback=[];extended=False
+            from .review_input import evidence,RULE as INPUT_RULE
+            incoming,input_images=evidence(origin,mode)
             if self.history and record_id:self.history.update(record_id,formatted=formatted,format_changed=hashlib.sha256(formatted.encode()).hexdigest()!=self.history.store.rows.get(record_id,{}).get('original_sha256',hashlib.sha256(text.encode()).hexdigest()))
             urls=re.findall(r'https://www\.bilibili\.com/video/BV[0-9A-Za-z]{10}',text)
             async with asyncio.timeout_at(execution+self.timeout) as budget:
@@ -218,19 +220,19 @@ class ReplyReviewer:
                     from .work_scheduler import review_verdict_observer
                     with review_verdict_observer(on_verdict) as arrived:
                         from .identity_expression import RULE as IDENTITY_RULE
-                        raw=await self.generate(REVIEW_FUNCTIONAL+"\n"+PUNCTUATION_RULE+
+                        raw=await self.generate(REVIEW_FUNCTIONAL+"\n"+PUNCTUATION_RULE+(INPUT_RULE if incoming else '')+
                             ('\n'+IDENTITY_RULE+'符合此规则的角色短答视为切题，不得因为未解释型号而改写。' if state.get('identity_scene') else '')+
                             (voice_note(state)+speaker_note(state) if mode=='chat' else '')+
                             (review_persona(state) if mode!='management' else '')+
                             ('\n主动联系只能依据已有生活事件或待办；没有合适话题允许放弃，不编造新话题填满机会。' if state.get('proactive') else ''),
-                            {'mode':mode,'同一会话近期消息':list(recent)[-6:],
+                            {'mode':mode,'当前收到的消息':incoming,'同一会话近期消息':list(recent)[-6:],
                              '同一会话最近机器人回复（避免重复句式）':[str(x)[:200] for x in list(prior_replies)[-3:]],
                              '原稿':text,'待发文字':candidate,'附件数':media,'审阅轮次':attempt+1,
                              '不可改变的事实':{'网址':urls,'工具':state.get('tool_facts',[]),
                                  '原样文本':state.get('verbatim_text'),'语音记录':state.get('voice_receipts',''),
                                  '图库结果':state.get('gallery_result'),'角色当前生活':state.get('current_life')},
                              '交流状态':state.get('exchange',{}),'身份场景':bool(state.get('identity_scene')),
-                             '必须修正的问题':list(dict.fromkeys(issues+feedback))},origin)
+                             '必须修正的问题':list(dict.fromkeys(issues+feedback))},origin,**({'image_urls':input_images} if input_images else {}))
                         arrived()
                     data=json_object(raw)
                     if self.history and record_id:self.history.round(record_id,candidate,data,round((time.monotonic()-round_started)*1000))
@@ -284,7 +286,7 @@ class ReplyReviewer:
             if self.history and record_id:self.history.update(record_id,result='cancelled',failure='cancelled',elapsed_ms=round((time.monotonic()-started)*1000))
             raise
         except Exception as exc:
-            if self.history and record_id:self.history.update(record_id,result='failed',failure=type(exc).__name__,elapsed_ms=round((time.monotonic()-started)*1000))
+            if self.history and record_id:self.history.update(record_id,result='failed',failure=type(exc).__name__,failure_reason=str(exc)[:180] if isinstance(exc,ValueError) else None,elapsed_ms=round((time.monotonic()-started)*1000))
             self.stats['failed']+=1
             self.audit('review',{'status':'blocked','mode':mode,'error':type(exc).__name__,'elapsed_ms':round((time.monotonic()-started)*1000)})
             raise ReviewUnavailable('发送前审阅暂不可用，原稿未发送') from exc
