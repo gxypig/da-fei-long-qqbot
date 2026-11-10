@@ -132,7 +132,9 @@ class ProactiveLife:
 
     def events(self,origin):
         now=self.clock()
+        extension=getattr(self.plugin,'_memory_life',None)
         return sorted((r for r in self.store.rows.values() if r.get('record_type')=='event'
+            and (not r.get('extended_material') or extension and extension.material_enabled(r))
             and r.get('visibility') in {origin,'public'} and r.get('expires_at',0)>now),key=lambda r:r['at'],reverse=True)
 
     def approve_public_experience(self,event_id,summary):
@@ -199,6 +201,8 @@ class ProactiveLife:
     async def _worker(self):
         while True:
             await asyncio.sleep(1)
+            extension=getattr(self.plugin,'_memory_life',None)
+            if extension:await extension.step()
             if not self.enabled() or self.plugin._work.busy():continue
             if self.clock()>=self.next_advance:
                 self.advance();self.next_advance=self.clock()+max(5,int(self.plugin._cfg('interval_minutes',30)))*60
@@ -250,11 +254,14 @@ class ProactiveLife:
                 self.store.put('inbox:'+due,{**row,'attempts':attempt,'last_error':type(exc).__name__})
                 self.pending[due]=self.clock()+min(1800,30*2**min(attempt,6))
 
-    def candidate(self,origin,mode='free',required=False):
+    def candidate(self,origin,mode='free',required=False,*,preview=False,extended_only=False):
         now=self.clock();contact=self.store.rows.get('contact:'+origin,{})
         used=set(contact.get('consumed_events',[]));events=[r for r in self.events(origin) if r['id'] not in used and not r.get('resolved_at') and not r.get('archived_at') and (origin!='qzone' or not r.get('published_at'))]
         # Private follow-up beats public fictional activity. A future promise is not yet due.
         events=[r for r in events if not r.get('due_at') or r['due_at']<=now]
+        extension=getattr(self.plugin,'_memory_life',None)
+        events=[r for r in events if (not extended_only or r.get('extended_material')) and
+            (not r.get('extended_material') or extension and extension.share_allowed(r,origin,preview=preview))]
         def available(event):
             id_=hashlib.sha256((origin+':'+event['id']).encode()).hexdigest()[:24]
             previous=self.store.rows.get('candidate:'+id_,{})
@@ -273,6 +280,10 @@ class ProactiveLife:
         p=self.plugin;now=self.clock()
         if not candidate:return {'decision':'drop','reason':'没有新的事件依据或到期事项'}
         origin=candidate['origin'];required=candidate['required'];contact=self.store.rows.get('contact:'+origin,{})
+        if candidate.get('basis',{}).get('extended_material'):
+            extension=getattr(p,'_memory_life',None)
+            if not extension or not extension.share_allowed(candidate['basis'],origin,preview=candidate.get('preview',False)):
+                return {'decision':'drop','reason':'新分享未启用、仅预览或对象没有获得许可'}
         if not self.enabled() or not p._cfg('enable',True):return {'decision':'drop','reason':'主动消息已关闭'}
         if now>=candidate['expires_at']:return {'decision':'drop','reason':'联系依据已经过期'}
         if p._quiet_now():return {'decision':'defer','reason':'免打扰时段','retry_at':now+300}
@@ -321,7 +332,8 @@ class ProactiveLife:
     @recipient_task(lambda self,origin,*a,**kw:origin)
     async def opportunity(self,origin,mode='free',required=False,dry_run=False,check=None):
         if dry_run:
-            candidate=self.candidate(origin,mode,required)
+            candidate=self.candidate(origin,mode,required,preview=True)
+            if candidate:candidate={**candidate,'preview':True}
             return {'candidate':candidate,**self.decide(candidate),'preview':True,'sent':False}
         async with self.locks.setdefault(origin,asyncio.Lock()):
             self.advance()

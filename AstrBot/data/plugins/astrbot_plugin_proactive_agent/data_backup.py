@@ -58,6 +58,7 @@ def atomic_json(path,value):
     finally:temp.unlink(missing_ok=True)
 
 def remove_snapshot(path,root):
+    if Path(path).is_symlink():raise ValueError('invalid owned snapshot symlink')
     path=path.resolve();root=root.resolve()
     if path.parent!=root or path.is_symlink() or not (path/'manifest.json').is_file():raise ValueError('invalid owned snapshot directory')
     manifest=json.loads((path/'manifest.json').read_text('utf-8'))
@@ -67,7 +68,17 @@ def remove_snapshot(path,root):
         # Missing descendants are already cleaned; every other error matters.
         if isinstance(exc,FileNotFoundError) and Path(filename).resolve().is_relative_to(path) and Path(filename).resolve()!=path:return
         raise exc
-    shutil.rmtree(path,onexc=vanished_child)
+    for attempt in range(4):
+        try:
+            shutil.rmtree(path,onexc=vanished_child)
+            return
+        except OSError as exc:
+            # Windows can still expose a just-deleted SQLite sidecar briefly.
+            # Retry this already-validated snapshot only, never a parent path.
+            if getattr(exc,'winerror',None)!=145 or attempt==3:raise
+            if not path.exists():return
+            if path.is_symlink() or path.resolve().parent!=root:raise ValueError('snapshot changed during cleanup')
+            time.sleep(.03*(attempt+1))
 
 def retain(root):
     with backup_lock(root):return _retain(root)

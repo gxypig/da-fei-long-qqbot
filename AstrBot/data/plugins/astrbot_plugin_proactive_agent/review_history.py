@@ -89,6 +89,7 @@ class HistoryStore(AsyncRecordStore):
                 original_summary TEXT,approved_summary TEXT,search TEXT)''')
             db.execute('CREATE INDEX IF NOT EXISTS history_time ON history(at,seq)')
             db.execute('CREATE INDEX IF NOT EXISTS history_origin ON history(origin,seq)')
+            db.execute('CREATE TABLE IF NOT EXISTS regression_samples(review_id TEXT PRIMARY KEY,at REAL,body TEXT NOT NULL)')
             self._expire(db)
             return {k:(rev,json.loads(body)) for k,rev,body in db.execute('SELECT id,revision,body FROM records ORDER BY rowid DESC LIMIT 257')}
 
@@ -98,6 +99,9 @@ class HistoryStore(AsyncRecordStore):
                 changed=db.execute('INSERT INTO records VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>records.revision',
                     (key,revision,json.dumps(row,ensure_ascii=False))).rowcount
                 if not changed or key.startswith('__'):continue
+                if row.get('regression_sample') or row.get('feedback'):
+                    db.execute('INSERT INTO regression_samples VALUES(?,?,?) ON CONFLICT(review_id) DO UPDATE SET body=excluded.body',
+                        (key,row['at'],json.dumps(sanitize(row),ensure_ascii=False)))
                 values=(key,row['at'],row['origin'],row['result'],delivery_state(row),int(row.get('ai_changed',False)),int(row.get('format_changed',False)),
                         row['original'][:120],(row.get('approved') or '')[:120],
                         '\n'.join([row.get('trigger',''),row['original'],row.get('approved') or '']))
@@ -117,6 +121,7 @@ class HistoryStore(AsyncRecordStore):
 class ReviewHistory:
     def __init__(self,path,cfg=lambda k,d:d):
         self.store=HistoryStore(path,cfg);self.cfg=cfg;self.missing=0;self.closed=False;self.ready=False;self.recovery=None;self.cold={};self.retention_task=None
+        self.action_lock=asyncio.Lock();self.preview_tasks=set()
 
     async def start(self):
         try:await self.store.start()
@@ -169,6 +174,9 @@ class ReviewHistory:
              'approved':None,'rounds':[],'result':kind,'format_changed':formatted!=text,'ai_changed':False,
              'sends':{},'exchange':copy.deepcopy(state.get('exchange',{})),'elapsed_ms':None,
              'local_guard':copy.deepcopy(state.get('identity_guard'))}
+        from .persona_authority import role_text
+        row['persona_snapshot']={'persona_version':state.get('persona_version'),'persona_status':state.get('persona_status'),
+                                'persona_prompt':role_text('chat',state),'persona_variants':{'review':role_text('review',state)}}
         if state.get('identity_guard'):row['format_changed']=False
         result=self._put(id_,row)
         if result:
@@ -188,10 +196,15 @@ class ReviewHistory:
     def round(self,id_,candidate,verdict,elapsed_ms):
         row=self.store.rows.get(id_,{})
         # Structured explanations only; never retain a model's chain of thought.
-        evidence={k:copy.deepcopy(verdict[k]) for k in ('pass','natural','chat_fit','reason','replacement','dimensions') if k in verdict}
+        evidence={k:copy.deepcopy(verdict[k]) for k in ('pass','natural','chat_fit','reason','replacement','dimensions','problems') if k in verdict}
         if isinstance(verdict.get('replacement_check'),dict):
             evidence['replacement_check']={k:verdict['replacement_check'].get(k) is True for k in ('pass','natural','chat_fit','facts_preserved')}
         self.update(id_,rounds=row.get('rounds',[])+[{'input':candidate,'verdict':evidence,'elapsed_ms':elapsed_ms}])
+
+    def rewrite(self,id_,text,elapsed_ms):
+        row=self.store.rows.get(id_,{})
+        self.update(id_,rewrites=row.get('rewrites',[])+[{'text':text,'elapsed_ms':elapsed_ms}],
+                    independent_review=False)
 
     def delivered(self,row):
         id_=row.get('review_id')
@@ -273,7 +286,65 @@ class ReviewHistory:
         if row and row.get('at',0)<time.time()-max(1,min(365,int(self.cfg('review_history_days',30))))*86400:return None
         if row:row['delivery_state']=delivery_state(row)
         return row
+
+    async def action(self,body,plugin):
+        if not isinstance(body,dict):raise ValueError('操作格式不正确')
+        action=body.get('action');rid=body.get('request_id');id_=body.get('review_id')
+        if action not in {'ai_flavor','worse','better','regression','preview'} or not isinstance(rid,str) or not 8<=len(rid)<=100:raise ValueError('操作或请求编号无效')
+        from .reply_jobs import QueueConflict
+        signature=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        async with self.action_lock:
+            row=await self.detail(id_)
+            if not row:raise ValueError('记录已不存在')
+            saved=row.get('feedback_requests',{}).get(rid)
+            if saved:
+                if saved!=signature:raise QueueConflict('请求编号不能用于不同内容')
+                return row
+            if type(body.get('feedback_version')) is not int or body['feedback_version']!=row.get('feedback_version',0):raise QueueConflict('反馈已变更，请刷新详情')
+            if action=='preview' and not row.get('persona_snapshot'):raise ValueError('旧记录没有完整人格版本，不能伪造历史重生成')
+            row.pop('delivery_state',None)
+            # Re-read after awaiting disk; never overwrite an arriving receipt.
+            row={**row,**self.store.rows.get(id_,{})}
+            requests={**row.get('feedback_requests',{}),rid:signature}
+            row.update(feedback_version=row.get('feedback_version',0)+1,feedback_requests=dict(list(requests.items())[-100:]))
+            if action=='preview':row['preview']={'request_id':rid,'state':'pending','at':time.time(),'sent':False}
+            else:
+                row['feedback']=[*row.get('feedback',[]),{'action':action,'at':time.time(),'note':str(body.get('note',''))[:1000]}][-100:]
+                if action=='regression':row['regression_sample']=True
+            self._put(id_,row);await self.store.flush(id_)
+            if action=='preview':
+                task=asyncio.create_task(self._preview(plugin,id_,rid),name='review-preview-only');self.preview_tasks.add(task);task.add_done_callback(self.preview_tasks.discard)
+            return await self.detail(id_)
+
+    async def _preview(self,plugin,id_,request_id):
+        from .review_contract import WRITER
+        from .conversation_review import json_object
+        from .work_scheduler import model_work,BackgroundPaused
+        row=await self.detail(id_)
+        if not row or not row.get('persona_snapshot'):return
+        state=row['persona_snapshot']
+        payload={'mode':row['mode'],'当前收到的消息':row.get('incoming',{}),'同一会话近期消息':row.get('context',[]),
+                 '可信状态':row.get('trusted_facts',{}),'人格版本':row.get('persona_version'),'修正目标':[{'goal':'按原始语境重新作答，保留必要事实，不输出工作过程'}]}
+        try:
+            # Explicit preview uses normal shared background admission and never
+            # reaches transport, cooldown or the approval context.
+            with model_work('background'):
+                async with asyncio.timeout(45):
+                    raw=await plugin._generate_json(WRITER+'\n'+state.get('persona_prompt',''),payload,row['origin'])
+            reply=json_object(raw).get('reply')
+            if not isinstance(reply,str) or not reply.strip():raise ValueError('预览没有有效正文')
+            outcome={'state':'ready','text':reply,'independently_reviewed':False}
+        except asyncio.CancelledError:outcome={'state':'cancelled'}
+        except BackgroundPaused:outcome={'state':'deferred','reason':'已为正常回复让路，可空闲时重新预览'}
+        except Exception as exc:outcome={'state':'failed','reason':type(exc).__name__}
+        latest=await self.detail(id_)
+        if latest and latest.get('preview',{}).get('request_id')==request_id and not self.closed:
+            if id_ not in self.store.rows:self.store.rows[id_]=latest
+            self.update(id_,preview={**latest['preview'],**outcome,'sent':False,'finished_at':time.time()})
+
     async def close(self):
+        for task in self.preview_tasks:task.cancel()
+        if self.preview_tasks:await asyncio.gather(*list(self.preview_tasks),return_exceptions=True)
         if self.retention_task:
             self.retention_task.cancel();await asyncio.gather(self.retention_task,return_exceptions=True)
         if self.recovery:
@@ -301,5 +372,14 @@ def register(plugin):
         try:row=await plugin._review_history.detail(id_)
         except Exception:return jsonify(status='error',message='审阅记录读取失败，稍后重试'),503
         return (jsonify(status='ok',data=row) if row else (jsonify(status='error',message='记录不存在或已超出保留范围；旧版未留存完整对照'),404))
+    async def action():
+        from .reply_jobs import QueueConflict
+        try:
+            if request.content_length and request.content_length>8192:raise ValueError('操作过长')
+            return jsonify(status='ok',data=await plugin._review_history.action(await request.get_json(silent=True),plugin))
+        except QueueConflict as exc:return jsonify(status='error',message=str(exc)),409
+        except ValueError as exc:return jsonify(status='error',message=str(exc)),400
+        except Exception:return jsonify(status='error',message='反馈未完成，请保留本次请求编号重试'),503
     plugin.context.register_web_api('/astrbot_plugin_proactive_agent/panel_review_history',listing,['GET'],'审阅历史摘要')
     plugin.context.register_web_api('/astrbot_plugin_proactive_agent/panel_review_detail',detail,['GET'],'审阅原稿与发送对照')
+    plugin.context.register_web_api('/astrbot_plugin_proactive_agent/panel_review_action',action,['POST'],'审阅反馈与只读重生成预览')

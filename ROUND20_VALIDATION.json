@@ -1,0 +1,175 @@
+{
+  "version": "1.25.0-rc1",
+  "date_hong_kong": "2026-11-10",
+  "status": "Implementation deployed; performance acceptance remains incomplete",
+  "tests": {
+    "full_local": {
+      "tests": 1388,
+      "seconds": 152.032,
+      "passed": true
+    },
+    "full_public": {
+      "tests": 1372,
+      "seconds": 150.934,
+      "passed": true
+    },
+    "final_review_local": {
+      "tests": 85,
+      "seconds": 5.202,
+      "passed": true
+    },
+    "final_review_public": {
+      "tests": 85,
+      "seconds": 5.818,
+      "passed": true
+    },
+    "reset": {
+      "tests": 3,
+      "seconds": 0.188,
+      "passed": true
+    }
+  },
+  "quality": {
+    "final_rule": "independent-20.3",
+    "focused_first_and_reviewed": {
+      "cases": 15,
+      "completed": 15,
+      "first_generations": 15,
+      "review_passed": 15,
+      "withheld": 0,
+      "stages": {
+        "historical": {
+          "samples": 15,
+          "blocking": 6,
+          "natural_mean": 2.933
+        },
+        "first": {
+          "samples": 15,
+          "blocking": 0,
+          "natural_mean": 4.733
+        },
+        "reviewed": {
+          "samples": 15,
+          "blocking": 0,
+          "natural_mean": 4.733
+        }
+      }
+    },
+    "known_original_replies": {
+      "cases": 15,
+      "completed": 15,
+      "review_passed": 15,
+      "withheld": 0,
+      "stages": {
+        "historical": {
+          "samples": 15,
+          "blocking": 5,
+          "natural_mean": 2.667
+        },
+        "first": {
+          "samples": 15,
+          "blocking": 5,
+          "natural_mean": 2.667
+        },
+        "reviewed": {
+          "samples": 15,
+          "blocking": 0,
+          "natural_mean": 4.933
+        }
+      }
+    },
+    "historical_audit": {
+      "historical_texts": 117,
+      "additional_cases": 15,
+      "total": 132,
+      "incomplete_original_inputs": 30,
+      "initial_replay_approved": 123,
+      "initial_reviewed_blocking": 16,
+      "note": "Exploratory earlier-protocol replay: tool execution unavailable in replay, missing images/trigger evidence, and identity follow-up context corrected in final focused suite. Not 117 fully validated live conversations."
+    }
+  },
+  "performance": {
+    "scope": "Same-model paired generation + local preparation; excludes QQ transport/receive queue, not a live end-to-end P95 claim",
+    "reasoning_unchanged": true,
+    "review_calls": 0,
+    "by_variant": {
+      "baseline": {
+        "samples": 59,
+        "p50_ms": 3914.465499983635,
+        "p95_ms": 9277.572199993301,
+        "mean_output_chars": 21.64406779661017
+      },
+      "candidate": {
+        "samples": 60,
+        "p50_ms": 3530.1036999881035,
+        "p95_ms": 10017.319799982943,
+        "mean_output_chars": 20.666666666666668
+      }
+    },
+    "p95_ratio": 1.0797350410261615,
+    "replay_passed": false,
+    "local": {
+      "samples": 500,
+      "memory_rows": 2000,
+      "life_events": 3000,
+      "reading_rows": 512,
+      "p50_ms": 11.584899999434128,
+      "p95_ms": 13.843799999449402,
+      "max_ms": 18.813999980920926,
+      "limit_ms": 50,
+      "passed": true
+    },
+    "matched_complete_pairs": {
+      "pairs": 59,
+      "baseline": {
+        "samples": 59,
+        "p50_ms": 3914.465499983635,
+        "p95_ms": 9277.572199993301
+      },
+      "candidate": {
+        "samples": 59,
+        "p50_ms": 3515.891599992756,
+        "p95_ms": 10017.319799982943
+      },
+      "excluded_incomplete_pairs": [
+        44
+      ],
+      "p95_ratio": 1.0797350410261615,
+      "passed": false
+    },
+    "failed_attempts": [
+      {
+        "case": 44,
+        "variant": "baseline",
+        "elapsed_ms": 37542.651099996874,
+        "error": "InternalServerError"
+      }
+    ],
+    "interpretation": "All 120 requests retained. Original success-conditional aggregate and matched successful pair comparison both reported; one baseline API500. Neither establishes live QQ end-to-end non-inferiority."
+  },
+  "ui": {
+    "desktop_checked": true,
+    "narrow_width_px": 390,
+    "narrow_sidebar_collapse_required": true,
+    "paging_checked": true,
+    "unsaved_draft_preserved": true,
+    "historical_review_not_independently_certified": true,
+    "feedback_saved": true,
+    "refresh_feedback_visible": true
+  },
+  "deployment": {
+    "health_checks": 21,
+    "existing_configuration_preserved": true,
+    "new_features_default_off": true,
+    "new_sharing_preview_only": true,
+    "context_reset_explicitly_requested_for_local_install_only": true,
+    "reset_verified_empty": true,
+    "source_rollback_does_not_restore_old_chats": true
+  },
+  "limits": [
+    "Live QQ receive-to-confirmation paired P95 has not been measured; model replay is not that measurement.",
+    "Success-conditional model replay P95 rose about 8%, exceeding the 5% target; one baseline API500 and slow requests were retained in reports. Local preparation passed 50ms.",
+    "Optional ffmpeg/ffprobe absent on the deployment machine: video-frame reading reports unavailable; image/GIF generation and sending are separate existing functions.",
+    "No historical chat samples, prompts, account IDs, credentials, configurations or databases are included in this report."
+  ]
+}

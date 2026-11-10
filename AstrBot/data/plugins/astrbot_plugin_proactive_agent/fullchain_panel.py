@@ -11,6 +11,8 @@ FEATURES={'reply_queue_enabled':False,'reply_queue_concurrency':4,
           'incoming_visual_enabled':True,'incoming_visual_burst_ms':650,
           'incoming_visual_context_seconds':45,'incoming_visual_detail_tiles':4}
 FEATURES.update(natural_exchange_enabled=True,persona_scene_projection_enabled=True)
+from .memory_life import DEFAULTS as MEMORY_FEATURES
+FEATURES.update(MEMORY_FEATURES)
 
 
 def feature_settings(plugin):
@@ -53,6 +55,7 @@ def register_fullchain_panel(plugin):
         if 'reply_queue_concurrency' in values and not 1<=values['reply_queue_concurrency']<=8:
             return jsonify(status='error',message='回复并发须为1至8'),400
         limits={'incoming_visual_burst_ms':(0,1500),'incoming_visual_context_seconds':(5,120),'incoming_visual_detail_tiles':(0,6)}
+        limits.update(long_memory_daily_limit=(1,500),reading_interval_minutes=(15,10080))
         if any(k in values and not low<=values[k]<=high for k,(low,high) in limits.items()):
             return jsonify(status='error',message='图文设置超出允许范围'),400
         async with lock:
@@ -70,6 +73,10 @@ def register_fullchain_panel(plugin):
                     else:plugin.config[k]=v
                 return jsonify(status='error',message='保存失败，内存设置已恢复'),500
             plugin._reply_queue.pump()
+            profiles=getattr(plugin,'_ai_profiles',None)
+            if profiles:profiles.config_changed()
+            extension=getattr(plugin,'_memory_life',None)
+            if extension:extension.config_changed()
             return jsonify(status='ok',data=feature_settings(plugin))
 
     async def profiles():

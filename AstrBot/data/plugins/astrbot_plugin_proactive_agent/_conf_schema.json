@@ -496,5 +496,77 @@
     "type": "int",
     "default": 600,
     "description": "图片等待期限（180至900秒，默认600）；共享于本次创作与最多一次质量纠正。普通文字不受影响，超时不盲目重画"
+  },
+  "long_memory_enabled": {
+    "description": "长期记忆",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "long_memory_daily_limit": {
+    "description": "每日自动新增记忆上限",
+    "type": "int",
+    "default": 80,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "life_growth_enabled": {
+    "description": "经历与观点成长",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "active_reading_enabled": {
+    "description": "空闲主动阅读",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "reading_web_enabled": {
+    "description": "允许域名网页阅读",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "reading_allowed_domains": {
+    "description": "网页允许域名（逗号分隔）",
+    "type": "string",
+    "default": "",
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "reading_visual_enabled": {
+    "description": "本地视频抽样阅读",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "experience_sharing_enabled": {
+    "description": "新经历分享候选",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "experience_share_auto": {
+    "description": "新分享自动发送（关闭时只预览）",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "experience_share_groups": {
+    "description": "新分享许可群号",
+    "type": "string",
+    "default": "",
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "experience_share_qzone": {
+    "description": "新分享许可动态",
+    "type": "bool",
+    "default": false,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "reading_interval_minutes": {
+    "description": "空闲阅读检查间隔（分钟）",
+    "type": "int",
+    "default": 360,
+    "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
   }
 }

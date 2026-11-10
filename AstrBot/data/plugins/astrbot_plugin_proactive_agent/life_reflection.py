@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import re
+import uuid
 from .conversation_review import json_object
 from .work_scheduler import model_work,BackgroundPaused
 
@@ -23,11 +24,13 @@ class LifeReflection:
         self.life=life;self.cache=[];self.next_check=0
 
     def refresh(self):
-        self.cache=sorted((r for r in self.life.store.rows.values() if r.get('record_type')=='reflection'),key=lambda r:r['at'],reverse=True)[:96]
+        self.cache=sorted((r for r in self.life.store.rows.values() if r.get('record_type')=='reflection' and r.get('status','active')=='active'),key=lambda r:r['at'],reverse=True)[:96]
 
     def visible(self,origin,query=None,limit=2):
         now=self.life.clock();query=str(query or '').casefold()
-        return [r for r in self.cache if r['visibility'] in {'public',origin} and r['expires_at']>now
+        extension=getattr(self.life.plugin,'_memory_life',None)
+        return [r for r in self.cache if (not r.get('extended_growth') or self.life.plugin._cfg('life_growth_enabled',False)) and r['visibility'] in {'public',origin} and r['expires_at']>now
+                and (not r.get('extended_material') or extension and extension.material_enabled(r))
                 and (not query or any(k.casefold() in query for k in [r['topic'],*r.get('keywords',[])] if len(k)>=2))][:limit]
 
     async def public_read(self):
@@ -59,16 +62,25 @@ class LifeReflection:
         meta=life.store.rows.get('reflection:state',{})
         if meta.get('next_at',0)>now:return
         try:
-            await self.public_read()
+            if not p._cfg('active_reading_enabled',False):await self.public_read()
+            extension=getattr(p,'_memory_life',None)
             rows=[r for r in life.store.rows.values() if r.get('record_type')=='event' and r.get('source') in {'tool','chat_confirmed'}
-                and r.get('completed') and r.get('expires_at',0)>now and not r.get('reflected_at')]
+                and (not r.get('extended_material') or extension and extension.material_enabled(r))
+                and r.get('completed') and r.get('status','active')=='active' and not r.get('archived_at') and r.get('expires_at',0)>now and not r.get('reflected_at')]
             if not rows:return
             event=max(rows,key=lambda r:r['at']);origin=event['visibility']
+            event_revision=event.get('revision');opinion_revisions={k:r.get('revision') for k,r in life.store.rows.items() if r.get('record_type')=='reflection'}
+            growth=bool(p._cfg('life_growth_enabled',False))
             from .life_state import role_context
             system=SYSTEM+'\n'+await role_context(p,'qzone' if origin=='public' else origin)
             with model_work('background'):
                 raw=await p._generate_json(system,{'event':event,'previous_opinions':self.visible(origin,limit=3)},'qzone' if origin=='public' else origin)
             if not life.enabled() or p._work.busy():raise BackgroundPaused('foreground arrived')
+            if growth!=bool(p._cfg('life_growth_enabled',False)):raise BackgroundPaused('growth setting changed')
+            if event.get('extended_material') and (not extension or not extension.material_enabled(event)):raise BackgroundPaused('source feature disabled')
+            current=life.store.rows.get('event:'+event['id'],{})
+            if current.get('revision')!=event_revision or current.get('archived_at') or current.get('status','active')!='active':raise BackgroundPaused('source changed')
+            if opinion_revisions!={k:r.get('revision') for k,r in life.store.rows.items() if r.get('record_type')=='reflection'}:raise BackgroundPaused('opinion changed')
             data=json_object(raw)
             if data.get('skip') is not True:
                 quote=data.get('quote');topic=data.get('topic');thought=data.get('thought');intent=data.get('next_interest','')
@@ -80,11 +92,21 @@ class LifeReflection:
                 # A topic replaces its previous stance, with a bounded slot
                 # ring as a backstop. Context reads at most two short thoughts.
                 old=next((r for r in self.cache if r['topic']==topic and r['visibility']==origin),None)
-                slot=old['slot'] if old else int(meta.get('sequence',0))%96
-                life.store.put('reflection:item:'+str(slot),{'record_type':'reflection','slot':slot,'at':now,'expires_at':now+30*86400,
-                    'visibility':origin,'event_id':event['id'],'basis':quote,'topic':topic,'thought':thought,
-                    'next_interest':intent,'keywords':keywords,'source':'opinion','previous_thought':old.get('thought') if old else None})
+                slot=old.get('slot',int(meta.get('sequence',0))%96) if old else int(meta.get('sequence',0))%96
+                key='reflection:history:'+uuid.uuid4().hex if growth else 'reflection:item:'+str(slot)
+                if growth and old:
+                    old_key=next((k for k,r in life.store.rows.items() if r is old or r.get('id') and r.get('id')==old.get('id')),None)
+                    if old_key:life.store.put(old_key,{**old,'status':'superseded','changed_at':now,'change_reason':'同主题有新的实际经历','successor':key})
+                life.store.put(key,{'record_type':'reflection','id':key,'status':'active','extended_growth':growth,'slot':slot,'at':now,'expires_at':now+30*86400,
+                    'visibility':origin,'event_id':event['id'],'basis':quote,'topic':topic,'thought':thought,'extended_material':event.get('extended_material'),
+                    'next_interest':intent,'keywords':keywords,'source':'opinion','previous_thought':old.get('thought') if old else None,
+                    'previous_id':old.get('id') if old else None,'history':[]})
                 self.refresh()
+                if growth:
+                    for retired in self.cache[12:]:
+                        retired_key=next((k for k,r in life.store.rows.items() if r is retired),None)
+                        if retired_key:life.store.put(retired_key,{**retired,'status':'archived','changed_at':now,'change_reason':'活跃观点保留上限12条，历史仍可查看'})
+                    self.refresh()
                 if origin=='public' and intent:
                     state=life.activity()
                     life.store.put('life',{**state,'chapter':topic,'chapter_intention':intent,'chapter_basis':event['id']})

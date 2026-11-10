@@ -20,7 +20,7 @@ def subject(text):
     return NOISE.sub(' ',text).strip()
 
 
-def search(path, origin, query, actor, current_id='', current_text='', recent=()):
+def search(path, origin, query, actor, current_id='', current_text='', recent=(), cutoff=0):
     """Only this route, retained originals, no writes and no model/network."""
     started=time.monotonic();effective_query=query;needles=terms(subject(query)[:800])
     if not needles:
@@ -35,6 +35,7 @@ def search(path, origin, query, actor, current_id='', current_text='', recent=()
     personal=bool(re.search(r'我|自己',effective_query)) and not re.search(r'谁|大家|别人|其他人',effective_query)
     ranked=[];seen=set();searched=0;partial=False
     def consider(ident,row):
+        if (row.get('time') or 0)<cutoff:return
         nonlocal searched
         if row.get('origin')!=origin:return
         if current_id and str(row.get('message_id',''))==current_id:return
@@ -100,7 +101,7 @@ async def enrich(plugin,event,req):
     started=time.monotonic()
     try:
         result=await asyncio.wait_for(asyncio.to_thread(search,journal.path,origin,query,actor,
-            str(getattr(event.message_obj,'message_id','')),query,recent),.8)
+            str(getattr(event.message_obj,'message_id','')),query,recent,getattr(plugin,'_context_reset_at',0)),.8)
     except (TimeoutError,sqlite3.Error,OSError,ValueError):result={'status':'unavailable','rows':[],'searched':0}
     event.set_extra('qqbot_history_recall',result)
     window=getattr(plugin,'_context_window',None)

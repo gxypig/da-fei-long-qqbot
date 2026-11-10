@@ -21,7 +21,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         while self.history.store.pending:await self.history.store.flush(next(iter(self.history.store.pending)))
     async def test_original_rounds_and_exact_split_delivery_are_distinct(self):
         scope=request_scope(self.origin);scope['review_draft']={'original':'原稿。\n保持换行','formatted':'原稿\n保持换行'}
-        r=self.reviewer([{'pass':False,'natural':False,'chat_fit':True,'reason':'多说','replacement':'好呀\n知道啦'},
+        r=self.reviewer([{'pass':False,'natural':False,'chat_fit':True,'reason':'多说','replacement':'好呀\n知道啦'}, {'reply':'好呀\n知道啦'},
                          {'pass':True,'natural':True,'chat_fit':True}])
         result=await r.review('原稿\n保持换行',origin=self.origin)
         id_=linked(self.origin);row=await self.history.detail(id_)
@@ -42,7 +42,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         tasks=[asyncio.create_task(r.review('原文',origin=self.origin)) for _ in range(2)]
         await asyncio.sleep(.02);gate.set();await asyncio.gather(*tasks)
         self.assertEqual(len([k for k in self.history.store.rows if not k.startswith('__')]),1)
-        r=self.reviewer([{'pass':False,'natural':False,'chat_fit':True,'reason':'不合适','replacement':'另一稿'}]*3)
+        r=self.reviewer([{'pass':False,'natural':False,'chat_fit':True,'reason':'不合适','replacement':'另一稿'}, {'reply':'另一稿'}, {'pass':False,'natural':False,'chat_fit':True,'reason':'不合适'}, {'reply':'第三稿'}, {'pass':False,'natural':False,'chat_fit':True,'reason':'不合适'}])
         with self.assertRaises(ReviewUnavailable):await r.review('坏例',origin=self.origin)
         row=await self.history.detail(linked(self.origin));self.assertEqual(row['result'],'failed');self.assertIsNone(row['approved']);self.assertEqual(len(row['rounds']),3)
     async def test_off_has_no_model_and_format_only_preserves_original(self):

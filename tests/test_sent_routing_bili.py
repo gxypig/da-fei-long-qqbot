@@ -148,12 +148,13 @@ class Bili(unittest.IsolatedAsyncioTestCase):
 
     async def test_review_rewrite_preserves_actual_video_link(self):
         url = 'https://www.bilibili.com/video/BV1xx411c7mD'
-        model = AsyncMock(side_effect=[json.dumps({'pass':False,'natural':False,'chat_fit':True,'replacement':'这标题把本龙看愣了'}),
+        model = AsyncMock(side_effect=[json.dumps({'pass':False,'natural':False,'chat_fit':True,'reason':'多余总结','replacement':'这标题把本龙看愣了'}),
+                                      json.dumps({'reply':'这标题把本龙看愣了\n'+url}),
                                       '{"pass":true,"natural":true,"chat_fit":true}'])
         reviewer = ReplyReviewer(model, lambda *a: None)
         answer = await reviewer.review('首先总结一下\n'+url, origin='aiocqhttp:FriendMessage:1')
         self.assertIn(url, answer)
-        self.assertEqual(model.await_count, 2)
+        self.assertEqual(model.await_count, 3)
 
     async def test_timers_each_target_failure_and_no_immediate_retry(self):
         p = object.__new__(Main);p.config={**FIELDS,'auto_enabled':True,'quiet_hours':'','group_ids':'10,11','private_ids':'20'}

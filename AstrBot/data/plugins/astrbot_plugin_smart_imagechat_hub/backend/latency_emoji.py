@@ -529,6 +529,9 @@ class LatencyEmojiMixin:
         turn.ready_at_decoration=True;turn.embedding_decided=True
         if self._proactive_emoji_embed(turn.cfg):
             turn.attachment=Image.fromFileSystem(str(turn.path));message.chain.append(turn.attachment);turn.embedded=True
+            from ...astrbot_plugin_proactive_agent.media_approval import component
+            from ...astrbot_plugin_proactive_agent.emoji_match import fingerprint
+            turn.event.set_extra('qqbot_approved_optional_media',{'body':fingerprint(text),'items':[component(turn.attachment)]})
 
     def _latency_final_body(self,turn,text):
         if turn.closed:return

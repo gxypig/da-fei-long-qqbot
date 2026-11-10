@@ -55,6 +55,7 @@ class ImageMemory:
         ledger=getattr(self.plugin,'_delivery',None)
         if not ledger or not self.enabled():return
         for row in ledger.store.iter_select(states={'confirmed'},predicate=lambda r:r.get('image'),reverse=True):
+            if row.get('at',0)<getattr(ledger,'context_cutoff',0):continue
             if len(self.pending)>=1000:break
             if row.get('state')=='confirmed':self.confirmed(row,recovery=True)
 
@@ -394,7 +395,7 @@ class ImageMemory:
             return
         if quoted:
             rows=self.plugin._delivery.store.select(origin=event.unified_msg_origin,states={'confirmed'},
-                  predicate=lambda r:r.get('cid')==cid and str(r.get('message_id')) in quoted)
+                  predicate=lambda r:r.get('cid')==cid and str(r.get('message_id')) in quoted and (r.get('at') or 0)>=getattr(self.plugin,'_context_reset_at',0))
         else:
             rows=self.plugin._delivery.recent(event.unified_msg_origin,cid,include_history=True)
             # A confirmed image in this group is visible to every group member.

@@ -71,7 +71,7 @@ class VoicePolicy(unittest.IsolatedAsyncioTestCase):
         draft='现在没法生成新的语音，只能先打字认错'
         self.assertTrue(fast_path_issues(draft,'用语音给我道歉',state=state))
         generate=AsyncMock(side_effect=[json.dumps({'pass':False,'natural':False,'chat_fit':False,'replacement':'对不起，本龙说重了'}),
-                                       json.dumps({'pass':True,'natural':True,'chat_fit':True})])
+                                       json.dumps({'reply':'对不起，本龙说重了'}),json.dumps({'pass':True,'natural':True,'chat_fit':True})])
         reviewer=ReplyReviewer(generate,lambda *_:None)
         actual=await reviewer.review(draft,origin='test:FriendMessage:1',recent=['用语音给我道歉'],character=state)
         self.assertEqual(actual,'对不起，本龙说重了')

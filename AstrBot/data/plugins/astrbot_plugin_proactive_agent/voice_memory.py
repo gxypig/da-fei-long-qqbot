@@ -162,6 +162,9 @@ def install_voice_memory(plugin):
     @wraps(old_convert)
     async def convert(segment):
         result=await old_convert(segment)
+        if lease.active:
+            from .media_approval import converted
+            converted(segment,result)
         scope=_voice.get()
         if (lease.active and scope and scope['lease'] is lease and scope['owner'] is asyncio.current_task()
                 and isinstance(segment,Record) and isinstance(result,dict) and result.get('type')=='record'):

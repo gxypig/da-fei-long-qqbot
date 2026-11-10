@@ -59,6 +59,7 @@ class MemeUsage:
         self.store.put(plan['id'],{**row,**changes})
 
     def delivery(self,record):
+        if record.get('at',0)<getattr(self.ledger,'context_cutoff',0):return
         if record.get('state')!='confirmed' or record.get('optional') or record.get('purpose')=='error_notification':return
         origin=record.get('origin');rid=record.get('id');reply=record.get('job_id') or rid
         if not origin or not rid:return

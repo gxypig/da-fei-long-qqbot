@@ -25,13 +25,17 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
   for state in ({'persona_prompt':''},{'persona_prompt':'你是技术助理'},{**STATE,'persona_status':'disabled'},{**STATE,'identity_scene':False}):
    self.assertEqual(guard('我是虚拟龙娘',state),'我是虚拟龙娘')
   self.assertEqual(guard('型号未知',STATE,'management'),'型号未知')
- async def test_review_cannot_add_technical_tail_or_repeat_call(self):
+ async def test_identity_repair_still_requires_independent_judge(self):
   calls=[]
   async def generated(system,data,origin):
    calls.append(data)
+   if len(calls)==2:return '{"reply":"具体底层型号，本龙这边没有确切信息"}'
+   if len(calls)==4:return '{"reply":"龙骨架，外面裹龙鳞"}'
+   if len(calls) in (3,5):return '{"pass":true,"natural":true,"chat_fit":true}'
    return '{"pass":false,"natural":true,"chat_fit":false,"reason":"没有接住底层型号追问","replacement":"具体底层型号，本龙这边没有确切信息"}'
   reviewer=ReplyReviewer(generated,lambda *a:None,enabled=lambda:True);state=copy.deepcopy(STATE)
   text=await reviewer._review('本龙是白毛龙娘',origin='test',character=state)
-  self.assertEqual(text,'本龙是大肥龙，白毛龙娘');self.assertEqual(len(calls),1);self.assertTrue(state['identity_guard_review_override'])
+  self.assertEqual(text,'龙骨架，外面裹龙鳞');self.assertEqual(len(calls),5);self.assertFalse(state.get('identity_guard_review_override',False))
+  self.assertEqual(calls[2]['待发文字'],'具体底层型号，本龙这边没有确切信息')
 
 if __name__=='__main__':unittest.main()

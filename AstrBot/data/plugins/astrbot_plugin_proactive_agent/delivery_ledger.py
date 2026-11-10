@@ -233,7 +233,7 @@ class DeliveryLedger:
         return '\n'.join(parts)
 
     def voice_context(self,origin,cid,sender=None):
-        rows=self.store.select(origin=origin,states={'confirmed'},predicate=lambda r:r.get('cid')==cid and r.get('voice')
+        rows=self.store.select(origin=origin,states={'confirmed'},predicate=lambda r:r.get('cid')==cid and r.get('voice') and (r.get('at') or 0)>=getattr(self,'context_cutoff',0)
               and (sender is None or ':GroupMessage:' not in origin or str(r.get('sender') or '') in {str(sender),''}),reverse=True,limit=2)[::-1]
         if not rows:return ''
         # Receipt-backed facts, not an assistant's self-authored label. Keep
@@ -250,7 +250,7 @@ class DeliveryLedger:
                 self.store.put(x,{**row,'history_saved':True})
 
     def recent(self,origin,cid,*,include_history=False):
-        return self.store.select(origin=origin,states={'confirmed'},predicate=lambda r:r.get('cid')==cid and (r.get('at') or 0)>time.time()-7*86400
+        return self.store.select(origin=origin,states={'confirmed'},predicate=lambda r:r.get('cid')==cid and (r.get('at') or 0)>max(time.time()-7*86400,getattr(self,'context_cutoff',0))
               and (include_history or not r.get('history_saved') or r.get('attachments')),reverse=True,limit=8)[::-1]
 
     def note(self,origin,cid):

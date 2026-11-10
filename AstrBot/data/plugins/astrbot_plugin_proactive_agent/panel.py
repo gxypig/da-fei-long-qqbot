@@ -373,6 +373,8 @@ class PanelMixin:
                         if k in missing:self.config.pop(k,None)
                         else:self.config[k]=v
                     return jsonify({"status": "error", "message": "保存失败，原设置已保留，请检查配置文件权限"}), 500
+            profiles=getattr(self,'_ai_profiles',None)
+            if profiles:profiles.config_changed()
             saved, revision = settings(self)
             return jsonify({"status": "ok", "data": {"values": saved, "revision": revision,'sections':section_settings(self)}})
         except ValueError as exc:

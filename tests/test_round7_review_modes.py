@@ -113,14 +113,14 @@ class Modes(unittest.IsolatedAsyncioTestCase):
         await p._close_reply_pipeline()
 
     async def test_two_rewrites_keep_original_without_stale_charges(self):
-        generate=AsyncMock(side_effect=[verdict(False,'第二稿'),verdict(False,'第三稿'),verdict(True)])
+        generate=AsyncMock(side_effect=[verdict(False,'第二稿'),json.dumps({'reply':'第二稿'}),verdict(False,'第三稿'),json.dumps({'reply':'第三稿'}),verdict(True)])
         audit=Mock();review=ReplyReviewer(generate,audit)
         self.assertEqual(await review.review('原稿',origin='a'), '第三稿')
-        self.assertEqual(generate.await_count,3)
-        self.assertEqual(generate.call_args.args[1]['原稿'],'原稿')
+        self.assertEqual(generate.await_count,5)
+        self.assertNotIn('原稿',generate.call_args.args[1])
         self.assertEqual(generate.call_args.args[1]['必须修正的问题'],[])
-        self.assertEqual([c.args[1]['待发文字'] for c in generate.await_args_list],['原稿','第二稿','第三稿'])
-        self.assertTrue(audit.call_args.args[1]['extended'])
+        self.assertEqual([c.args[1]['待发文字'] for c in generate.await_args_list[::2]],['原稿','第二稿','第三稿'])
+        self.assertFalse(audit.call_args.args[1]['extended'])
 
     async def test_same_task_draft_coalesces_but_context_changes_do_not(self):
         bind_request('a',['问题'],False,{},modes.configured({'reply_review_enabled':True}))

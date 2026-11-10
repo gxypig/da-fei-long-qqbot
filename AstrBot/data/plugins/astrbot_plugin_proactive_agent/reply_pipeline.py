@@ -81,6 +81,8 @@ def fast_path_issues(text, user_text, *, mode='chat', media=0, state=None, used_
     if prediction and prediction.get('risk') == 'high': reasons.append('predicted_risk')
     if 'persona_status' not in state:reasons.extend(output_issues(text, mode, [user_text]))
     reasons.extend(speech_issues(text, state, mode))
+    from .send_checks import issues as local_issues
+    reasons.extend(local_issues(text,state=state,mode=mode,media=media))
     if mode=='chat':
         from .voice_memory import voice_issues
         reasons.extend(voice_issues(text,state))
@@ -267,7 +269,7 @@ class ReplyPipelineMixin:
         from .send_checks import normalize,issues
         from .persona_authority import role_text,functional_style
         state=event.get_extra('qqbot_character') or {};mode=self.review_mode(event.unified_msg_origin)
-        if not event.get_extra('qqbot_local_repair_used'):
+        if self.review_settings(event)['enabled'] and not event.get_extra('qqbot_local_repair_used'):
             event.set_extra('qqbot_local_repair_used',True)
             req=event.get_extra('qqbot_generation_request')
             try:

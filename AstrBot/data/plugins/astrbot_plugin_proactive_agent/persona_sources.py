@@ -13,7 +13,6 @@ def active_sources(plugin):
     from .cheeky_tone import TONE
     from .chat_style_policy import CHAT_STYLE_POLICY
     from .conversation_style import STYLE
-    from .conversation_review import REVIEW_SYSTEM
     from .local_recall import BRIEF_RULE
     from .life_state import COMPOSE_SYSTEM
     from .persona_authority import EXPRESSION_GUIDANCE
@@ -23,14 +22,15 @@ def active_sources(plugin):
         if isinstance(text,str) and text.strip():rows.append({'id':id_,'label':label,'text':text,'path':path,'scene':scene,'priority':1})
     for id_,label,value,file in [('character','角色补充',CHARACTER_POLICY,'dragon_character.py'),('tone','口吻补充',TONE,'cheeky_tone.py'),
         ('chat','聊天约定',CHAT_STYLE_POLICY,'chat_style_policy.py'),('conversation','会话补充',STYLE,'conversation_style.py'),
-        ('review','审阅角色约定',REVIEW_SYSTEM,'conversation_review.py'),('brief','长短表达习惯',BRIEF_RULE,'local_recall.py'),
+        ('brief','长短表达习惯',BRIEF_RULE,'local_recall.py'),
         ('life','主动表达',COMPOSE_SYSTEM,'life_state.py')]:add(id_,label,value,file,id_)
     add('configured_proactive','已保存的主动人格',plugin._cfg('personality',''),'plugin-config:personality','proactive')
     add('first_generation','首次生成的表达习惯',EXPRESSION_GUIDANCE,'persona_authority.py:EXPRESSION_GUIDANCE','chat')
     add('punctuation','聊天标点约定',PUNCTUATION_RULE,'chat_punctuation.py:PUNCTUATION_RULE','chat')
-    from .persona_projection import NATURAL,IDENTITY_GUIDANCE
+    from .persona_projection import NATURAL,IDENTITY_GUIDANCE,NATURAL_EXAMPLES
     add('natural_exchange','自然接话与收束',NATURAL,'persona_projection.py:NATURAL','chat')
     add('identity_chat','角色身份的聊天口吻',IDENTITY_GUIDANCE,'persona_projection.py:IDENTITY_GUIDANCE','chat')
+    add('natural_response_examples','当前话题优先的成对示例',NATURAL_EXAMPLES,'persona_projection.py:NATURAL_EXAMPLES','chat')
     base=Path(__file__).parent
     import json
     imported=base/'persona_import_sources.json'
@@ -59,6 +59,7 @@ def active_sources(plugin):
     for row in rows:
         row['epoch']=2 if row['id'] in {'first_generation','punctuation','chat:generation_example','gallery:replies'} else 1
         if row['id'] in {'natural_exchange','identity_chat'}:row['epoch']=3
+        if row['id']=='natural_response_examples':row['epoch']=4
         scene=row.get('scene', 'chat')
         row['destination']=scene if scene in {'chat','proactive','schedule','qzone','bili','gallery','image','review'} else 'chat'
     # Frozen import snapshots may share an ID with a current source. Keep the

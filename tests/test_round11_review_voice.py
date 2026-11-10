@@ -12,15 +12,15 @@ PASS={'pass':True,'natural':True,'chat_fit':True}
 class ReviewTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):bind_request('test:FriendMessage:1',[],False,{}, {'enabled':True,'mode':'full_review'})
     def reviewer(self,rows):return ReplyReviewer(AsyncMock(side_effect=[json.dumps(r,ensure_ascii=False) for r in rows]),lambda *_:None)
-    async def test_certified_correction_finishes_in_same_call(self):
-        r=self.reviewer([{**PASS,'pass':False,'reason':'指代误解','replacement':'你说哪个？','replacement_check':{**PASS,'facts_preserved':True}}])
+    async def test_self_certificate_requires_writer_and_independent_judge(self):
+        r=self.reviewer([{**PASS,'pass':False,'reason':'指代误解','replacement':'你说哪个？','replacement_check':{**PASS,'facts_preserved':True}}, {'reply':'你说哪个？'}, PASS])
         self.assertEqual(await r.review('对，群里叫我测试角色',origin='test:FriendMessage:1'),'你说哪个？')
-        self.assertEqual(r.generate.await_count,1)
+        self.assertEqual(r.generate.await_count,3)
     async def test_uncertified_legacy_replacement_still_gets_reviewed(self):
         for cert in (None,{**PASS,'facts_preserved':False},{**PASS,'facts_preserved':'true'}):
-            r=self.reviewer([{**PASS,'pass':False,'reason':'强行比喻','replacement':'好困就歇会儿','replacement_check':cert},PASS])
+            r=self.reviewer([{**PASS,'pass':False,'reason':'强行比喻','replacement':'好困就歇会儿','replacement_check':cert},{'reply':'好困就歇会儿'},PASS])
             self.assertEqual(await r.review('奇怪比喻',origin='test:FriendMessage:1'),'好困就歇会儿')
-            self.assertEqual(r.generate.await_count,2)
+            self.assertEqual(r.generate.await_count,3)
             self.assertNotIn('强行比喻',r.generate.await_args.args[1]['必须修正的问题'])
     async def test_certificate_cannot_override_hard_checks(self):
         row={**PASS,'pass':False,'replacement':'[待生成]','replacement_check':{**PASS,'facts_preserved':True}}

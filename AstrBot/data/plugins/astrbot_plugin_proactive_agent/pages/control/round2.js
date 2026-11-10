@@ -42,6 +42,7 @@
   button(images,'image-refresh','刷新图片状态',()=>loadImages());button(images,'image-retry','重试失败的识图任务',async()=>{await api('panel_image_memory',{});await loadImages();});
   const imageList=el('div');imageList.id='image-list';images.append(imageList);$('learning').append(images);
   subviews($('learning'),'idle',[['idle','空闲学习',idle],['memes','梗仓库',memes],['images','图片记忆',images]]);
+  const memoryEntry=el('article');memoryEntry.className='card';memoryEntry.append(el('h2','长期记忆、经历与看法、阅读材料'),el('p','按来源和会话保存，可更正和遗忘；新分享默认预览'));const memoryButton=el('button','管理记忆与生活');memoryButton.type='button';memoryButton.dataset.subview='memory';memoryEntry.append(memoryButton);idle.prepend(memoryEntry);
   const learningSummary=$('learning-truth');learningSummary.className='callout';idle.prepend(learningSummary);
   const rawLearning=$('learning-details');if(rawLearning){const d=details(idle,'底层学习诊断');d.append(rawLearning);}
   for(const [id,label] of [['learning-review-report','普通回复复核报告'],['learning-release-report','策略发布验证报告']]){const d=details(idle,label),body=$(id)||el('div');body.id=id;d.append(body);}
@@ -74,6 +75,7 @@
   const switchCard=el('div');switchCard.className='life-toggle';field(switchCard,'proactive_life_enabled','按连续生活和联系动机判断主动消息','checkbox');channelCard.append(switchCard);
   field(switchCard,'life_reflection_enabled','空闲阅读公开梗百科并整理自己的感想','checkbox');
   field(switchCard,'life_public_auto','私聊共同经历自动脱敏作为动态素材（无需逐次确认）','checkbox');
+  const shareEntry=el('button','新经历分享：许可与预览');shareEntry.type='button';shareEntry.dataset.subview='memory';proactive.append(shareEntry);
   const actions=el('div');actions.className='toolbar';button(actions,'edit-free','编辑自由规则',()=>openEditor('free'));button(actions,'edit-fixed','编辑定时与动态规则',()=>openEditor('fixed'));
   button(actions,'refresh-proactive','刷新运行摘要',()=>loadProactive());button(actions,'preview-proactive','预览但不发送',()=>preview());
   proactive.append(actions);

@@ -15,6 +15,7 @@ _INTERNAL=re.compile(r'Traceback \(most recent call last\):|(?m:^\s*File "[^"\n]
                      r'(?i:sk-[a-zA-Z0-9]{20,}|Authorization:\s*Bearer\s+\S+)|'
                      r'(?m:^\s*(?:<tool_call>|<function_call>|\[QQBOT_[A-Z_]+\]))')
 _PLACEHOLDER=re.compile(r'^(?:None|null|undefined|\{(?:reply|response|content|text)\}|<empty>|\[待生成\])$',re.I)
+_PROVIDER_DUMP=re.compile(r'All chat models failed:|(?:BadRequestError|APIConnectionError|InternalServerError):|(?:Error code:|HTTP\s+)[45]\d\d\s*[-:]\s*\{',re.I)
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,default=str).encode()).hexdigest()
@@ -50,10 +51,14 @@ def issues(text,*,state=None,mode='chat',media=0):
     state=state or {};text=str(text or '');out=[]
     if not text.strip() and not media:out.append('empty_output')
     if _PLACEHOLDER.fullmatch(text.strip()):out.append('placeholder_output')
+    from .identity_expression import violation
+    if violation(text,state,mode):out.append('identity_break')
     # User explicitly quoting a traceback is different from exposing an internal exception.
     if _INTERNAL.search(text) and not state.get('verbatim_text') and not state.get('quoted_error_requested'):
         out.append('internal_error_or_control_payload')
     own=_QUOTES.sub('',text)
+    if mode!='management' and not state.get('verbatim_text') and not state.get('quoted_error_requested') and _PROVIDER_DUMP.search(own):
+        out.append('internal_error_or_control_payload')
     for word in state.get('self_banned_phrases',[]):
         if isinstance(word,str) and word and re.search(re.escape(word)+r'(?=$|[\s，,。！？!?～~])',own):out.append('self_banned_phrase:'+word)
     expected=state.get('verbatim_text')
@@ -77,7 +82,7 @@ def normalize(text,state=None,mode='chat'):
     pieces.append(casual_punctuation((text or '')[at:],mode,strip_edges=False))
     return ''.join(pieces).strip() or text
 
-def own_style(text,state=None,mode='chat'):
+def own_style(text,state=None,mode='chat',*,identity_fallback=True):
     """Formatting/count limits apply to authored speech, never quoted bytes."""
     state=state or {}
     if state.get('verbatim_text') is not None:return state['verbatim_text']
@@ -89,7 +94,7 @@ def own_style(text,state=None,mode='chat'):
     value=limit_father_address(limit_emoji(value,state,mode),state,mode)
     for i,quote in enumerate(quotes):value=value.replace('\ue000'+str(i)+'\ue001',quote)
     from .identity_expression import guard
-    return normalize(guard(value,state,mode),state,mode)
+    return normalize(guard(value,state,mode) if identity_fallback else value,state,mode)
 
 def record(origin,text,settings,*,state=None,recent=(),path=None,local=(),reviewed=False):
     from .reply_jobs import current_job

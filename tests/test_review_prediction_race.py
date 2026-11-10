@@ -64,11 +64,12 @@ class LatePrediction(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_reviewer_marks_first_verdict_before_rewrite(self):
         sequence=[]
-        answers=iter(['{"pass":false,"natural":false,"chat_fit":true,"replacement":"奶茶店先笑了"}',
+        answers=iter(['{"pass":false,"natural":false,"chat_fit":true,"reason":"没有接住吐槽","replacement":"奶茶店先笑了"}',
+                      '{"reply":"奶茶店先笑了"}',
                       '{"pass":true,"natural":true,"chat_fit":true}'])
         async def generate(*_):sequence.append('generate');return next(answers)
         reviewer=ReplyReviewer(generate,lambda *_:None)
         result=await reviewer.review('钱包又瘪了',origin='a',character={'persona_status':'selected'},
             on_verdict=lambda:sequence.append('verdict'))
         self.assertEqual(result,'奶茶店先笑了')
-        self.assertEqual(sequence,['generate','verdict','generate','verdict'])
+        self.assertEqual(sequence,['generate','verdict','generate','generate','verdict'])

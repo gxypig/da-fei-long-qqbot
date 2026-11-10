@@ -15,7 +15,7 @@
     <article class="card"><h3>手动认证账号</h3><label>平台<input id="profile-platform" value="aiocqhttp" maxlength="80"></label><label>真实账号<input id="profile-account" maxlength="100"></label><button type="button" id="profile-add">按默认时长认证</button></article>
     <p id="profiles-status" role="status"></p><p id="profiles-error" role="alert"></p><div id="profiles-list"></div><button type="button" id="profiles-prev">上一页</button><span id="profiles-page"></span><button type="button" id="profiles-next">下一页</button>`;
   const labels={received:'接收中',pending:'待回复',running:'执行中',confirmed:'平台已确认',partial:'部分成功',failed:'失败',unknown:'结果未知',cancelled:'已取消',merged:'已归并',ignored:'无需回复',conversion:'消息转换',preparing:'准备上下文',model:'模型生成',review:'审阅',tool:'工具处理',sending:'发送中',reply_queue:'回复排队',ended:'结束',observing:'观察中',suspected:'疑似',auto_confirmed:'自动确认',manual_confirmed:'手动确认',expired:'已到期',revoked:'已撤销'};
-  const fields={reply_queue_enabled:['启用统一回复队列','checkbox'],reply_queue_concurrency:['不同会话最多同时执行数（1至8）','number'],adaptive_context_enabled:['兼容旧上下文选项（保留当前配置预算）','checkbox'],image_memory_enabled:['复用已发表情包的首次识别资料','checkbox'],ai_profiles_enabled:['启用后台账号识别','checkbox'],ai_probe_enabled:['在已有回复机会内允许自然试探','checkbox'],hourly_data_backup_enabled:['每小时空闲时备份数据（保留24小时与7个每日点）','checkbox']};
+  const fields={reply_queue_enabled:['启用统一回复队列','checkbox'],reply_queue_concurrency:['不同会话最多同时执行数（1至8）','number'],adaptive_context_enabled:['兼容旧上下文选项（保留当前配置预算）','checkbox'],image_memory_enabled:['复用已发表情包的首次识别资料','checkbox'],hourly_data_backup_enabled:['每小时空闲时备份数据（保留24小时与7个每日点）','checkbox']};
   Object.assign(fields,{natural_exchange_enabled:['重复话题自然收束（新问题和明确任务仍回复）','checkbox'],persona_scene_projection_enabled:['人格按场景取用（保留完整总设定与来源映射）','checkbox'],incoming_visual_enabled:['相邻图文联合理解与原图局部增强','checkbox'],incoming_visual_burst_ms:['图文连发窗口（毫秒，普通文字不等待）','number'],incoming_visual_context_seconds:['相邻图文资料保留（秒）','number'],incoming_visual_detail_tiles:['每次最多补充清晰局部','number']});
   const limits={reply_queue_concurrency:[1,8],incoming_visual_burst_ms:[0,1500],incoming_visual_context_seconds:[5,120],incoming_visual_detail_tiles:[0,6]};
   for(const [id,[label,type]] of Object.entries(fields)){const l=node('label',label),i=node('input');i.id='feature-'+id;i.type=type;if(type==='number'){[i.min,i.max]=limits[id]||[1,8];}l.append(i);$('feature-fields').append(l);}
@@ -71,12 +71,12 @@
       const evidence=node('details');evidence.append(node('summary','证据与反证'));
       for(const e of row.evidence||[])line(evidence,'证据',e.summary);for(const e of row.counterevidence||[])line(evidence,'反证',e.summary);card.append(evidence);
       const expiry=node('input');expiry.type='datetime-local';expiry.value=expiryDrafts.get(row.key)||'';expiry.setAttribute('aria-label','新的到期时间');expiry.oninput=()=>expiryDrafts.set(row.key,expiry.value);card.append(expiry);
-      for(const [label,action] of [['手动确认','confirm'],['立即撤销','revoke'],['修改到期','expiry'],['重新分析','reanalyze']]){
-        const b=node('button',label);b.type='button';b.className='secondary';b.onclick=()=>{const extra={platform:row.platform,account:row.account,account_version:row.account_version};
+      for(const [label,action] of [['手动确认','confirm'],['立即撤销','revoke'],['修改到期','expiry'],['重新分析','reanalyze'],['删除记录','delete']]){
+        const b=node('button',label);b.type='button';b.className='secondary';b.disabled=action==='reanalyze'&&!data.enabled;b.onclick=()=>{const extra={platform:row.platform,account:row.account,account_version:row.account_version};
           if(action==='expiry'){if(!expiry.value){$('profiles-status').textContent='请先填写到期时间';return;}extra.expires_at=new Date(expiry.value).getTime()/1000;}actProfile(action,extra);};card.append(b);}
       $('profiles-list').append(card);
     }
-    $('profiles-status').textContent=`共 ${profiles.total} 个账号 · ${profiles.day}（香港自然日） · 后台待分析 ${profiles.pending} 个 · 阶段 ${Object.entries(profiles.stages||{}).map(([k,v])=>(labels[k]||({analyzing:'分析中',awaiting_answer:'待答复',candidate:'候选',analysis:'后台分析'}[k])||k)+' '+v).join('、')}`;
+    $('profiles-status').textContent=`${profiles.enabled?'识别运行中':'识别已关闭'} · ${profiles.pause_reason||''} · 最近分析 ${profiles.last_analysis?new Date(profiles.last_analysis*1000).toLocaleString():'暂无'} · 共 ${profiles.total} 个账号 · ${profiles.day}（香港自然日） · 后台待分析 ${profiles.pending} 个 · 阶段 ${Object.entries(profiles.stages||{}).map(([k,v])=>(labels[k]||({analyzing:'分析中',awaiting_answer:'待答复',candidate:'候选',analysis:'后台分析'}[k])||k)+' '+v).join('、')}`;
     $('profiles-page').textContent=` ${(profiles.total?profileOffset+1:0)}—${Math.min(profileOffset+50,profiles.total)} / ${profiles.total} `;
     $('profiles-prev').disabled=!profileOffset;$('profiles-next').disabled=profileOffset+50>=profiles.total;
   }catch(e){if(serial===profileRequest)$('profiles-status').textContent='读取失败：'+e.message;}finally{if(serial===profileRequest)profileBusy=false;}}

@@ -106,14 +106,14 @@ class CurrentTurn(unittest.IsolatedAsyncioTestCase):
         p=self.plugin();e=self.event('今晚好冷',images=False);await p.track_session(e)
         g=AsyncMock(return_value=json.dumps(PASS));await ReplyReviewer(g,lambda *a:None).review('穿件外套',origin=e.unified_msg_origin)
         self.assertEqual(g.await_args.kwargs,{})
-    async def test_certified_multiline_quote_rewrite_returns_in_one_call(self):
+    async def test_multiline_quote_rewrite_is_independently_reviewed(self):
         bind_request('incident',[],False)
         fixed='标题是一串符号\n“白屏”是评论里的说法'
         verdict={**PASS,'pass':False,'natural':False,'reason':'缺少断句','replacement':fixed,
                  'replacement_check':{**PASS,'facts_preserved':True}}
-        g=AsyncMock(return_value=json.dumps(verdict,ensure_ascii=False))
+        g=AsyncMock(side_effect=[json.dumps(x,ensure_ascii=False) for x in [verdict,{'reply':fixed},PASS]])
         self.assertEqual(await ReplyReviewer(g,lambda *a:None).review('标题是一串符号“白屏”是评论里的说法',origin='incident'),fixed)
-        g.assert_awaited_once()
+        self.assertEqual(g.await_count,3)
 
 class VisualReview(unittest.IsolatedAsyncioTestCase):
     asyncSetUp=visual_tests.Visual.asyncSetUp

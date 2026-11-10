@@ -55,7 +55,7 @@ class SentMemory:
             ).fetchone() is not None:
                 db.execute('UPDATE sent SET cid=? WHERE origin=? AND cid IS NULL', (cid, origin))
             rows = db.execute('SELECT at,text,kind FROM sent WHERE origin=? AND cid IS ? AND at>=? ORDER BY id DESC LIMIT 8',
-                              (origin, cid, self.clock() - 7 * 86400)).fetchall()
+                              (origin, cid, max(self.clock() - 7 * 86400,getattr(self,'context_cutoff',0)))).fetchall()
             if legacy_only and self.legacy_before is not None:rows=[r for r in rows if r[0]<self.legacy_before]
         return [{'time': datetime.fromtimestamp(at).isoformat(timespec='seconds'), 'role': 'assistant',
                  'text': text, 'kind': kind} for at, text, kind in reversed(rows)]
@@ -77,7 +77,7 @@ class SentMemory:
     def proactive_recent(self, origin):
         with self.connect() as db:
             rows = db.execute("SELECT text FROM sent WHERE origin=? AND kind IN ('fixed','discretionary') AND at>=? ORDER BY id DESC LIMIT 24",
-                              (origin, self.clock() - 7 * 86400)).fetchall()
+                              (origin, max(self.clock() - 7 * 86400,getattr(self,'context_cutoff',0)))).fetchall()
         return [r[0] for r in reversed(rows)]
 
 

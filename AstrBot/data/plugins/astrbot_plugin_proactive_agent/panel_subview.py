@@ -4,7 +4,8 @@ from pathlib import Path
 from quart import request, jsonify
 
 VIEWS = {'persona': ('persona_state', 'persona_action'), 'sessions': ('mute_state', 'mute_action'),
-         'reviews': ('panel_review_history','panel_review_detail')}
+         'reviews': ('panel_review_history','panel_review_detail','panel_review_action'),
+         'memory': ('panel_memory','panel_memory_detail','panel_memory_action','panel_fullchain_settings')}
 
 def bundled_view(name):
     if name not in VIEWS:
@@ -17,7 +18,11 @@ def bundled_view(name):
     style_href = '../persona/style.css' if name == 'sessions' else './style.css'
     html=re.sub(r'<link rel="stylesheet" href="'+re.escape(style_href)+r'(?:\?[^"<>]*)?">',lambda _: '<style>'+css+'</style>',html)
     html=html.replace('<script src="/api/plugin/page/bridge-sdk.js"></script>', '')
-    return re.sub(r'<script src="\./app\.js(?:\?[^"<>]*)?"></script>',lambda _: '<script>'+js+'</script>',html)
+    html=re.sub(r'<script src="\./app\.js(?:\?[^"<>]*)?"></script>',lambda _: '<script>'+js+'</script>',html)
+    if name=='reviews':
+        feedback=(root/'feedback.js').read_text('utf-8').replace('</script','<\\/script')
+        html=re.sub(r'<script src="\./feedback\.js(?:\?[^"<>]*)?"></script>',lambda _: '<script>'+feedback+'</script>',html)
+    return html
 
 def register_subview_panel(plugin):
     async def view():

@@ -25,11 +25,11 @@ def encoded(verdict, replacement=""):
 
 class Reviews(unittest.IsolatedAsyncioTestCase):
     async def test_rewrite_is_independently_rechecked(self):
-        generate = AsyncMock(side_effect=[encoded(False, "别急，先看第一步。"), encoded(True)])
+        generate = AsyncMock(side_effect=[encoded(False,"别急，先看第一步。"),json.dumps({"reply":"别急，先看第一步。"}),encoded(True)])
         reviewer = ReplyReviewer(generate, lambda *a: None)
         result = await reviewer.review("首先其次总结公式", origin="chat", recent=["怎么算"])
         self.assertEqual(result, "别急，先看第一步")
-        self.assertEqual(generate.await_count, 2)
+        self.assertEqual(generate.await_count, 3)
         self.assertEqual(generate.call_args.args[1]["待发文字"], result)
 
     async def test_rejected_rewrites_and_invalid_output_fail_closed(self):
@@ -86,7 +86,7 @@ class Sending(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent_text("qzone", "公开动态"), "公开动态")
 
     async def test_image_route_mention_and_caller_payload_preserved(self):
-        self.generate.side_effect = [encoded(False, "给你画好啦。"), encoded(True)]
+        self.generate.side_effect = [encoded(False,"给你画好啦。"),json.dumps({"reply":"给你画好啦。"}),encoded(True)]
         chain = [{"type": "at", "data": {"qq": "3"}}, {"type": "text", "data": {"text": "冗长说明"}},
                  {"type": "image", "data": {"file": "base64://aW1hZ2U="}}, {"type": "reply", "data": {"id": "4"}}]
         await self.bot.send_private_msg(user_id=1, message=chain)
@@ -99,7 +99,7 @@ class Sending(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent_text("aiocqhttp:FriendMessage:1", "冗长说明"), "给你画好啦")
 
     async def test_forward_nodes_reviewed_and_failed_review_never_sends(self):
-        self.generate.side_effect = [encoded(False, "短句"), encoded(True)]
+        self.generate.side_effect = [encoded(False,"短句"),json.dumps({"reply":"短句"}),encoded(True)]
         await self.bot.send_group_forward_msg(group_id=2, messages=[{"type": "node", "data": {
             "name": "大肥龙", "uin": "3", "content": [{"type": "text", "data": {"text": "代码长文"}}]}}])
         self.assertEqual(self.transport.call_args.kwargs["messages"][0]["data"]["content"][0]["data"]["text"], "短句")
@@ -150,7 +150,7 @@ class ConversationHistory(unittest.IsolatedAsyncioTestCase):
         plugin = object.__new__(Main)
         plugin.config={"reply_review_enabled":True,"review_policy":"all"}
         plugin._audit=lambda *a:None
-        plugin._reviewer = ReplyReviewer(AsyncMock(side_effect=[encoded(False, "短句"), encoded(True)]), lambda *a: None)
+        plugin._reviewer = ReplyReviewer(AsyncMock(side_effect=[encoded(False,"短句"),json.dumps({"reply":"短句"}),encoded(True)]), lambda *a: None)
         plugin.review_context = lambda origin: ["你好"]
         plugin.review_mode = lambda origin: "chat"
         event = SimpleNamespace(unified_msg_origin="aiocqhttp:FriendMessage:1", get_group_id=lambda: "",

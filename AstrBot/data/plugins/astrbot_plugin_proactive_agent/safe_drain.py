@@ -7,6 +7,12 @@ async def drain_project(plugin,timeout=8):
     meta=getter('astrbot_plugin_bili_scroll') if getter else None
     if meta and meta.activated:companions.append(meta.star_cls)
     tasks=set();stores=[];snapshots=[];queues=[];errors=[]
+    extension=getattr(plugin,'_memory_life',None)
+    if extension:
+        try:
+            async with asyncio.timeout(timeout):await extension.close()
+            if extension.store.pending:errors.append('长期记忆待办仍在恢复队列，尚未完成落盘')
+        except Exception as exc:errors.append('长期记忆和阅读尚未安全停止：'+type(exc).__name__)
     wiki=getattr(plugin,'_wiki_updates',None)
     if wiki:
         try:

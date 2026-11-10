@@ -144,7 +144,7 @@ class ImageRoute(unittest.IsolatedAsyncioTestCase):
             try:
                 provider=SimpleNamespace(client=client,text_chat=AsyncMock(return_value=SimpleNamespace(completion_text=json.dumps({'intent':'animation','scene':'眨眼','requirements':[]}))))
                 a=await ProviderOpenAIOfficial._query(provider);b=await ProviderOpenAIOfficial._query(provider)
-                self.assertIn('还没开放动图',a.completion_text);self.assertIs(a,b);self.assertEqual(create.await_count,1)
+                self.assertIn('没做成会动的',a.completion_text);self.assertNotIn('Traceback',a.completion_text);self.assertIs(a,b);self.assertEqual(create.await_count,1)
                 self.assertEqual(job.reply_purpose,'error_notification');ordinary.assert_not_awaited()
                 event.text='吃了没';self.assertEqual(await ProviderOpenAIOfficial._query(provider),'ordinary')
             finally:current_job.reset(token);restore()

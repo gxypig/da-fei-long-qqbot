@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>记忆与生活</title><link rel="stylesheet" href="./style.css"></head><body><main>
+<h1>记忆、经历与阅读</h1><p>保留来由和说话人，记忆仅用于对应会话；新自动分享默认只预览</p>
+<nav><button data-kind="memory">长期记忆</button><button data-kind="experience">经历与看法</button><button data-kind="reading">阅读材料</button><button data-kind="work">后台待办</button></nav>
+<p id="notice" role="status" aria-live="polite"></p><p id="summary"></p>
+<section><h2>功能开关</h2><div id="switches"></div><details><summary>预算、阅读范围与分享许可</summary><div id="advanced"></div><p>网页域名须明确填写，单次10秒／2MB、每天最多50次；视频仅抽样本机已取得的文件，最多9帧，不表示完整观看</p></details><button id="save">保存本区设置</button><span id="save-state"></span></section>
+<section><div class="toolbar"><input id="query" type="search" placeholder="搜索内容或主体"><input id="scope" placeholder="会话范围，可空"><select id="status"><option value="active">有效记忆</option><option value="">含变更历史</option></select><button id="search">搜索／刷新</button></div>
+<div class="toolbar"><button id="prev">上一页</button><span id="page"></span><button id="next">下一页</button></div><div id="rows"></div></section>
+<section id="read-controls" hidden><h2>加入阅读待办</h2><select id="reader"><option value="wiki">本地梗百科</option><option value="bili">B站标题、简介与评论</option><option value="web">允许域名网页</option><option value="visual">本地视频抽样</option></select><input id="read-value" placeholder="词条、B站关键词、网址或本地视频路径"><input id="read-scope" value="public" placeholder="public 或明确会话范围"><button id="read">加入空闲阅读</button><p>这项操作不会分享、评论、点赞或关注</p></section>
+<section><h2>新分享预览</h2><select id="targets"></select><button id="preview">预览但不发送</button><pre id="preview-result"></pre><p>首次仅列管理设置中的主人；群与动态需要另行许可，并继续遵守原有主动消息规则、冷却和免打扰</p></section>
+<dialog id="detail"><button id="close">关闭详情</button><h2 id="detail-title"></h2><pre id="evidence"></pre><label>更正内容<textarea id="content" rows="5"></textarea></label><label>变更原因<input id="reason"></label><div id="actions" class="toolbar"></div><p id="detail-state" role="status"></p></dialog>
+</main><script src="/api/plugin/page/bridge-sdk.js"></script><script src="./app.js"></script></body></html>

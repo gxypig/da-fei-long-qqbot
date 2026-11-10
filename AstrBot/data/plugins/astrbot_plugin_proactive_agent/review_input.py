@@ -10,9 +10,11 @@ RULE = '''\n审阅中的“当前收到的消息”是本轮唯一触发，历�
 def current_message(event):
     parts=list(getattr(getattr(event,'message_obj',None),'message',None) or [])
     attachments=[type(part).__name__ for part in parts if type(part).__name__ not in {'Plain','At','Reply'}]
+    quote=next((p for p in parts if type(p).__name__=='Reply'),None)
     return {'message_id':str(getattr(getattr(event,'message_obj',None),'message_id','')),
             'sender':str(event.get_sender_id()),'text':str(event.get_message_str() or '')[:4000],
-            'attachments':attachments,'quoted':any(type(part).__name__=='Reply' for part in parts)}
+            'attachments':attachments,'quoted':quote is not None,
+            'quote':{'message_id':str(getattr(quote,'id',''))} if quote else None}
 
 
 def bind_current(event):

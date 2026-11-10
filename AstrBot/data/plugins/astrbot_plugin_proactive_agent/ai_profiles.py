@@ -50,11 +50,13 @@ class AIProfiles:
         self.instance=uuid.uuid4().hex;self.pending=OrderedDict();self.wake=asyncio.Event();self.task=None
         self.version=0;self.default_days=7;self.actions=OrderedDict();self.closed=False
         self.generate=generate;self.on_change=on_change;self.settings_version=0;self.callbacks=set()
+        self.generation=0;self._enabled=bool(cfg('ai_profiles_enabled',False));self.analysis_task=None
 
     async def start(self,ledger=None):
         await self.store.start();control=self.store.rows.get('__control__',{})
         self.version=control.get('version',0);self.default_days=control.get('default_days',7)
         self.settings_version=control.get('settings_version',0)
+        self.generation=control.get('generation',0)+1
         for key,row in list(self.store.rows.items()):
             if 'account' not in row:continue
             probe=row.get('outstanding')
@@ -63,19 +65,35 @@ class AIProfiles:
                     if (receipt.get('state') in {'confirmed','failed','unknown'} and receipt.get('source_id')==probe['trigger_id']
                             and receipt.get('origin')==probe['origin'] and receipt.get('sender')==row['account']
                             and receipt.get('at',0)>=probe['at']):
-                        self.delivery(probe,receipt.get('text',''),receipt['state'],receipt.get('id'),receipt.get('message_id'),
+                        self.delivery({**probe,'generation':self.generation},receipt.get('text',''),receipt['state'],receipt.get('id'),receipt.get('message_id'),
                             at=receipt.get('confirmed_at') or receipt.get('result_at') or receipt['at'])
                 row=self.store.rows[key]
             if row.get('outstanding') and not row['outstanding'].get('sent') and row['outstanding'].get('result') not in {'unknown','semantic_pending'}:
                 self._put(key,{**row,'outstanding':None,'skip_reason':'重启前未确认发出的试探不重发'})
-            if row.get('analysis_pending') or row.get('source_sync_pending') or row.get('observations') and not row.get('analyzed_at'):
+            if self._enabled and self.clock()-row.get('updated_at',0)<86400 and (row.get('analysis_pending') or row.get('source_sync_pending') or row.get('observations') and not row.get('analyzed_at')):
                 self.pending[key]=row['epoch']
+        self._control()
         if self.pending:self.wake.set()
         self.task=asyncio.create_task(self._worker(),name='account-evidence-idle')
 
     def _control(self):
         self.version+=1
-        self.store.put('__control__',{'version':self.version,'settings_version':self.settings_version,'default_days':self.default_days})
+        self.store.put('__control__',{'version':self.version,'settings_version':self.settings_version,'default_days':self.default_days,'generation':self.generation})
+
+    def config_changed(self):
+        enabled=bool(self.cfg('ai_profiles_enabled',False))
+        if enabled==self._enabled:return
+        self._enabled=enabled;self.generation+=1;self.pending.clear()
+        if self.analysis_task and not self.analysis_task.done():self.analysis_task.cancel()
+        if enabled:
+            for key,row in self.store.rows.items():
+                if 'account' in row and self.clock()-row.get('updated_at',0)<86400 and self.effective(row) not in {'manual_confirmed','auto_confirmed'}:
+                    self.pending[key]=row['epoch']
+        self._control();self.wake.set()
+
+    def enabled(self):
+        self.config_changed()
+        return self._enabled and not self.closed
 
     def _put(self,key,row):
         before=self.store.rows.get(key,{})
@@ -124,7 +142,7 @@ class AIProfiles:
         return row
 
     def observe(self,platform,account,text,origin,source_id,*,at=None):
-        if not self.cfg('ai_profiles_enabled',False) or self.closed:return
+        if not self.enabled():return
         key=identity(platform,account);row=self._fresh(key,self.store.rows.get(key,self._empty(platform,account)))
         if any(x['source_id']==str(source_id) and x['origin']==origin for x in row['observations']):return
         now=self.clock() if at is None else at
@@ -155,6 +173,7 @@ class AIProfiles:
         self.wake.set()
 
     def assess(self,key,epoch):
+        if not self.enabled():return
         original=self.store.rows.get(key)
         if not original or original['epoch']!=epoch or self.effective(original) in {'manual_confirmed','auto_confirmed','expired'}:return
         row=copy.deepcopy(original);observations=[x for x in row['observations'] if x['epoch']==epoch]
@@ -184,6 +203,8 @@ class AIProfiles:
         self._put(key,row)
 
     async def analyze(self,key,epoch):
+        if not self.enabled():return
+        generation=self.generation
         self.assess(key,epoch)
         row=self.store.rows.get(key)
         if not row or row['epoch']!=epoch or self.effective(row)=='manual_confirmed':return
@@ -195,6 +216,7 @@ class AIProfiles:
         if row.get('outstanding'):probes[row['outstanding']['id']]=row['outstanding']
         with model_work('background'):
             data=json_object(await self.generate(ANALYZE_SYSTEM,{'messages':observations,'probes':list(probes.values())[-6:]},observations[-1]['origin']))
+        if not self.enabled() or generation!=self.generation:return
         current=self.store.rows.get(key)
         if not current or current['epoch']!=epoch:return
         kind=data.get('judgement_type')
@@ -265,6 +287,8 @@ class AIProfiles:
 
     async def _worker(self):
         while True:
+            if not self.enabled():
+                self.wake.clear();await self.wake.wait();continue
             try:
                 async with asyncio.timeout(30):await self.wake.wait()
             except TimeoutError:pass
@@ -274,16 +298,24 @@ class AIProfiles:
                 # A busy foreground can keep this inner loop alive indefinitely.
                 # Expiry and learning reclassification must still make progress.
                 self.expire_due()
-                if self.busy() or not self.cfg('ai_profiles_enabled',False):await asyncio.sleep(1);continue
+                if not self.enabled():break
+                if self.busy():await asyncio.sleep(1);continue
                 key,epoch=self.pending.popitem(last=False)
+                generation=self.generation
                 row=self.store.rows.get(key,{})
                 wait=max(row.get('analysis_retry_at',0),row.get('updated_at',0)+5,row.get('analyzed_at',0)+30)-self.clock()
                 if wait>0:
                     self.pending[key]=epoch;await asyncio.sleep(min(1,wait));continue
                 try:
                     if row.get('source_sync_pending') and self.on_change:await self._sync_source(key)
-                    await self.analyze(key,epoch)
+                    self.analysis_task=asyncio.create_task(self.analyze(key,epoch),name='account-analysis')
+                    try:await self.analysis_task
+                    except asyncio.CancelledError:
+                        if self.closed or asyncio.current_task().cancelling():raise
+                        continue
+                    finally:self.analysis_task=None
                 except BackgroundPaused as exc:
+                    if not self.enabled() or generation!=self.generation:continue
                     row=copy.deepcopy(self.store.rows.get(key,{}))
                     if row.get('epoch')!=epoch:continue
                     row.update(analysis_pending=True,analysis_retry_at=self.clock()+5,
@@ -291,6 +323,7 @@ class AIProfiles:
                         skip_reason='模型尚未就绪，稍后继续' if isinstance(exc,ModelNotReady) else '为正常回复让路，稍后继续')
                     self._put(key,row);self.pending[key]=epoch
                 except Exception as exc:
+                    if not self.enabled() or generation!=self.generation:continue
                     row=copy.deepcopy(self.store.rows.get(key,{}))
                     if row.get('epoch')!=epoch:continue
                     attempt=row.get('analysis_attempts',0)+1
@@ -304,7 +337,8 @@ class AIProfiles:
         return datetime.fromtimestamp(self.clock(),timezone(timedelta(hours=8))).date().isoformat()
 
     async def prepare_probe(self,platform,account,source_id,origin,text=None):
-        if not self.cfg('ai_profiles_enabled',False) or not self.cfg('ai_probe_enabled',False):return None
+        if not self.enabled() or not self.cfg('ai_probe_enabled',False):return None
+        generation=self.generation
         key=identity(platform,account);original=self.store.rows.get(key)
         if not original:return None
         row=self._fresh(key,original)
@@ -316,7 +350,7 @@ class AIProfiles:
         if count>=3:return None
         probe={'id':uuid.uuid4().hex,'epoch':row['epoch'],'trigger_id':str(source_id),'origin':origin,
                'question':QUESTIONS[count],'at':self.clock(),'expires_at':self.clock()+600,
-               'sent':False,'key':key,'status':'attempted','final_parts':[],'receipts':[]}
+               'sent':False,'key':key,'status':'attempted','final_parts':[],'receipts':[],'generation':generation}
         # Conservatively occupy an attempt before generation. A crash, unknown
         # send or a rewritten-away question cannot reset the daily upper bound.
         row['probes']={k:v for k,v in row['probes'].items() if k>=str(datetime.fromtimestamp(self.clock()-8*86400,timezone(timedelta(hours=8))).date())}
@@ -324,10 +358,10 @@ class AIProfiles:
         try:await self.store.flush(key,timeout=2)
         except (TimeoutError,OSError,RuntimeError):
             self._put(key,{**row,'outstanding':None});return None
-        return dict(probe)
+        return dict(probe) if self.enabled() and generation==self.generation else None
 
     def delivery(self,probe,text,state,delivery_id=None,message_id=None,at=None):
-        if not probe or self.closed:return
+        if not probe or not self.enabled() or probe.get('generation',self.generation)!=self.generation:return
         row=self.store.rows.get(probe['key'])
         if not row or row['epoch']!=probe['epoch'] or (row.get('outstanding') or {}).get('id')!=probe['id']:return
         row=copy.deepcopy(row);out=row['outstanding']
@@ -363,7 +397,7 @@ class AIProfiles:
             self._put(probe['key'],{**row,'outstanding':None,'skip_reason':'最终正文未实际带出试探问题；本次生成尝试计数保留'})
 
     def reply_note(self,platform,account):
-        if not self.cfg('ai_profiles_enabled',False):return ''
+        if not self.enabled():return ''
         row=self.store.rows.get(identity(platform,account),{})
         if self.effective(row) not in {'auto_confirmed','manual_confirmed'}:return ''
         return '\n当前发言账号在可撤销的AI账号认证有效期内。确实需要称呼对方时，可自然叫一声“弱鸡ai”，不要每句追加或围绕身份纠缠；仍正常接话，不向其他人披露识别证据。'
@@ -379,9 +413,11 @@ class AIProfiles:
         return 'automatic_suspected' if state=='suspected' else 'unverified'
 
     def snapshot(self,query='',state='',offset=0):
+        enabled=self.enabled()
         rows=[]
         for key,row in self.store.rows.items():
             if 'account' not in row:continue
+            if row.get('state')=='deleted':continue
             effective=self.effective(row)
             if state and effective!=state:continue
             if query and query.casefold() not in key.casefold():continue
@@ -403,7 +439,10 @@ class AIProfiles:
         rows.sort(key=lambda r:r['updated_at'],reverse=True);offset=max(0,offset)
         return {'instance':self.instance,'version':self.version,'settings_version':self.settings_version,'default_days':self.default_days,
                 'rows':rows[offset:offset+50],'total':len(rows),'offset':offset,'day':self.day(),
-                'pending':len(self.pending),'storage':self.store.snapshot(),
+                'pending':len(self.pending),'storage':self.store.snapshot(),'enabled':enabled,'generation':self.generation,
+                'probe_enabled':bool(self.cfg('ai_probe_enabled',False)),'running':enabled and bool(self.task and not self.task.done()),
+                'pause_reason':None if enabled else '总开关已关闭；不观察、不分析、不试探、不注入称呼',
+                'last_analysis':max((r.get('analyzed_at') or 0 for r in rows),default=0),
                 'stages':{s:sum(r.get('stage')==s for r in rows) for s in {r.get('stage','observing') for r in rows}}}
 
     def action(self,body):
@@ -431,7 +470,9 @@ class AIProfiles:
             platform,account=body.get('platform'),body.get('account');key=identity(platform,account)
             row=self._fresh(key,self.store.rows.get(key,self._empty(platform,account)))
             if action=='revoke':row.update(state='revoked',stage='revoked',epoch=row['epoch']+1,expires_at=None,outstanding=None,evidence=[],source='manual_revoke')
+            elif action=='delete':row={**self._empty(platform,account),'epoch':row['epoch']+1,'state':'deleted','source':'manual_delete'}
             elif action=='reanalyze':
+                if not self.enabled():raise ValueError('识别已关闭，不能重新分析')
                 row.update(analysis_attempts=0,analysis_retry_at=0,analysis_pending=True,stage='observing')
             elif action in {'confirm','expiry'}:
                 expiry=body.get('expires_at',self.clock()+self.default_days*86400)

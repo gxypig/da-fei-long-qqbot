@@ -58,7 +58,7 @@ class ImageWait(unittest.IsolatedAsyncioTestCase):
             try:
                 a,b=await asyncio.gather(Provider._query(self.provider),Provider._query(self.provider))
                 self.assertIs(a,b);self.assertEqual(self.create.await_count,1);ordinary.assert_not_awaited()
-                self.assertIn('无法确认',a.qqbot_status_receipt);self.assertEqual(event.get_extra('qqbot_image_progress')['outcome'],'unknown')
+                self.assertIn('不确定',a.qqbot_status_receipt);self.assertEqual(event.get_extra('qqbot_image_progress')['outcome'],'unknown')
                 self.assertNotIn('没生成成功',a.completion_text)
             finally:current_job.reset(token);restore()
 

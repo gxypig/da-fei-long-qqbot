@@ -1,5 +1,5 @@
 (()=>{'use strict';
- const bridge=window.AstrBotPluginView||window.AstrBotPluginPage,allow={persona:['persona_state','persona_action'],sessions:['mute_state','mute_action'],reviews:['panel_review_history','panel_review_detail']};
+ const bridge=window.AstrBotPluginView||window.AstrBotPluginPage,allow={persona:['persona_state','persona_action'],sessions:['mute_state','mute_action'],reviews:['panel_review_history','panel_review_detail','panel_review_action'],memory:['panel_memory','panel_memory_detail','panel_memory_action','panel_fullchain_settings']};
  let active=null,bodyOverflow='';
  const dialog=document.createElement('dialog');dialog.style.cssText='width:calc(100% - 16px);max-width:1600px;height:calc(100% - 16px);max-height:none;padding:0;border:0;border-radius:12px;overflow:hidden';
  const bar=document.createElement('div');bar.style.cssText='display:flex;align-items:center;gap:16px;padding:8px 16px;background:#eef2fa';
@@ -9,12 +9,12 @@
  back.onclick=close;dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
  window.addEventListener('message',async e=>{const m=e.data;if(e.source!==frame.contentWindow||!active||m?.channel!==active.channel)return;
    if(m.kind==='dirty'){active.dirty=!!m.value;back.dataset.discard='';back.textContent='返回控制面板';return;}
-   if(m.kind!=='request'||!allow[active.view].includes(m.endpoint)||!['get','post'].includes(m.method)||active.view==='reviews'&&m.method!=='get')return;
+   if(m.kind!=='request'||!allow[active.view].includes(m.endpoint)||!['get','post'].includes(m.method)||active.view==='reviews'&&m.method==='post'&&m.endpoint!=='panel_review_action')return;
    const target=e.source,channel=active.channel;try{const data=await(m.method==='get'?bridge.apiGet(m.endpoint,m.payload):bridge.apiPost(m.endpoint,m.payload));target.postMessage({channel,id:m.id,data},'*');}
    catch(err){target.postMessage({channel,id:m.id,error:err.message},'*');}
  });
  async function open(view){if(!allow[view]||active)return;const result=await bridge.apiGet('panel_subview',{view});if(result.status==='error')throw new Error(result.message);const data=result.data??result,channel=crypto.randomUUID();
-   active={view,channel,dirty:false};bodyOverflow=document.body.style.overflow;document.body.style.overflow='hidden';window.QQBotSubviewActive=true;title.textContent=({persona:'人格总设定',sessions:'会话管理',reviews:'审阅记录'})[view];
+   active={view,channel,dirty:false};bodyOverflow=document.body.style.overflow;document.body.style.overflow='hidden';window.QQBotSubviewActive=true;title.textContent=({persona:'人格总设定',sessions:'会话管理',reviews:'审阅记录',memory:'记忆、经历与阅读'})[view];
    const bootstrap=`<script>(()=>{const channel=${JSON.stringify(channel)},pending=new Map();let id=0;function req(method,endpoint,payload){return new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});parent.postMessage({channel,kind:'request',id:n,method,endpoint,payload},'*');});}window.addEventListener('message',e=>{if(e.source!==parent||e.data?.channel!==channel)return;const p=pending.get(e.data.id);if(!p)return;pending.delete(e.data.id);e.data.error?p.reject(new Error(e.data.error)):p.resolve(e.data.data);});window.AstrBotPluginView=window.AstrBotPluginPage={ready:async()=>({}),apiGet:(name,params)=>req('get',name,params),apiPost:(name,body)=>req('post',name,body)};window.addEventListener('qqbot-draft-dirty',e=>parent.postMessage({channel,kind:'dirty',value:e.detail},'*'));})();<\/script>`;
    frame.srcdoc=data.html.replace('<head>','<head>'+bootstrap);dialog.showModal();
  }

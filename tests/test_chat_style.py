@@ -19,15 +19,15 @@ class ReviewContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_persona_review_can_correct_technical_reply_without_keyword_ban(self):
         draft='这个脚本可以改文件名'
-        generate=AsyncMock(side_effect=[encoded(False,'这个忙得先看你的文件规则'),encoded(True)])
+        generate=AsyncMock(side_effect=[encoded(False,'这个忙得先看你的文件规则'),json.dumps({"reply":'这个忙得先看你的文件规则'}),encoded(True)])
         result=await ReplyReviewer(generate,lambda *a:None).review(draft,origin='p',character={'persona_status':'selected'})
-        self.assertEqual(result,'这个忙得先看你的文件规则');self.assertEqual(generate.await_count,2)
+        self.assertEqual(result,'这个忙得先看你的文件规则');self.assertEqual(generate.await_count,3)
 
     async def test_repeated_rejection_fails_closed(self):
-        generate=AsyncMock(return_value=encoded(False,'仍然不合适'))
+        generate=AsyncMock(side_effect=[encoded(False,'仍然不合适'),json.dumps({'reply':'另一稿'}),encoded(False,'仍然不合适'),json.dumps({'reply':'仍然不合适'}),encoded(False,'仍然不合适')])
         reviewer=ReplyReviewer(generate,lambda *a:None)
         with self.assertRaises(ReviewUnavailable):await reviewer.review('原稿',origin='p')
-        self.assertEqual(generate.await_count,3)
+        self.assertEqual(generate.await_count,5)
 
     async def test_approved_necessary_help_is_not_overridden_by_legacy_regex(self):
         for draft in ['答案是1/2，24种排列里有12种符合','把文件路径发来才能检查','```python\nprint(1)\n```']:
@@ -41,10 +41,10 @@ class ReviewContract(unittest.IsolatedAsyncioTestCase):
                 await reviewer.review("普通句子", origin="p")
         verdict = {"pass": True, "natural": True, "chat_fit": False,
                    "reason": "仍然答题", "replacement": "好家伙，聊天还能突然开考啊。"}
-        generate = AsyncMock(side_effect=[json.dumps(verdict), encoded(True)])
+        generate = AsyncMock(side_effect=[json.dumps(verdict), json.dumps({"reply":verdict["replacement"]}), encoded(True)])
         result = await ReplyReviewer(generate, lambda *a: None).review("正确而很短的技术答案", origin="p")
         self.assertEqual(result, "好家伙，聊天还能突然开考啊")
-        self.assertEqual(generate.await_count, 2)
+        self.assertEqual(generate.await_count, 3)
 
     async def test_management_is_preserved_and_still_model_reviewed(self):
         draft = "## 状态\n管理员：123456789\n`/主动间隔 30`\n唤醒：30分钟"

@@ -255,7 +255,11 @@ def install(plugin):
         if event.get_extra('qqbot_visual_route')=='none':return None
         previous=event.get_extra('qqbot_image_api_result')
         if previous is not None:return previous
-        try:response=await generate(plugin,provider,event)
+        from .tool_receipts import record as tool_record,image_text,failure_details
+        tool_record(event,'image_generation','processing')
+        try:
+            response=await generate(plugin,provider,event)
+            tool_record(event,'image_generation','success',operation='generation',delivery='not_confirmed')
         except asyncio.CancelledError:
             progress=event.get_extra('qqbot_image_progress') or {}
             event.set_extra('qqbot_image_progress',{**progress,'stage':'cancelled'})
@@ -274,17 +278,14 @@ def install(plugin):
             outcome=detail[1] if detail else 'failed'
             plugin._audit('image_generation',{'status':'failed','outcome':outcome,'stage':progress.get('stage'),
                 'animated':animated,'error':type(exc).__name__,'http_status':code,
-                'reason':detail[0] if detail else 'gif_not_enabled' if unsupported else reason if known else 'generation_failed',**rejection_details(exc)})
+                'reason':detail[0] if detail else 'gif_not_enabled' if unsupported else reason if known else 'generation_failed',**rejection_details(exc),**failure_details(exc)})
             event.set_extra('qqbot_image_progress',{**progress,'stage':'finished','outcome':outcome})
             job=current_job.get()
             if job:job.reply_purpose='error_notification'
-            message=('这次画出来的内容没通过检查，先不给你发错图' if reason=='image_quality_rejected'
-                else '这段画面要求太长了，拆成两次画吧' if reason in {'image_request_too_long','image_prompt_too_long'}
-                else '角色参考图暂时读不到，这次没生成' if reason.startswith('identity_reference')
-                else '这张动作参考图现在读不到了，再发一下原图，本龙照着拍' if reason in {'image_reference_missing','image_reference_expired'}
-                else '这条接口还没开放动图，暂时画不了会动的；静态图可以正常画' if unsupported
-                else '动图接口这次没接通，没生成成功' if animated else '图片这次没生成成功，稍后再试一下')
-            if detail:message=detail[2]
+            category=detail[0] if detail else 'gif_not_enabled' if unsupported else reason
+            tool_record(event,'image_generation','unknown' if outcome=='unknown' else 'failed',category,
+                        operation='generation',delivery='not_confirmed')
+            message=image_text(category,outcome,animated)
             response=LLMResponse(role='assistant',completion_text=message)
             response.qqbot_status_receipt=message
         event.set_extra('qqbot_image_api_result',response);return response

@@ -31,6 +31,7 @@ class PublicExperiences:
         rows=[r for r in life.store.rows.values() if r.get('record_type')=='event'
               and ':FriendMessage:' in r.get('visibility','') and r.get('completed')
               and r.get('source') in {'tool','chat_confirmed'} and r.get('at',0)>now-3*86400
+              and not r.get('extended_material')
               and not r.get('public_processed_at') and r.get('public_retry_at',0)<=now]
         if not rows:return
         event=max(rows,key=lambda r:r['at']);eid=event['id']
