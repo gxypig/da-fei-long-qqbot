@@ -66,5 +66,11 @@ async def read_web(url,allowed,reserve,*,session_factory=aiohttp.ClientSession):
                     parser=TextReader();parser.feed(text)
                     content=('\n'.join(parser.parts) if ctype!='text/plain' else text)[:16000]
                     if not content.strip():raise ValueError('网页没有可读正文')
-                    return {'url':url,'title':' '.join(parser.title)[:180],'content':content,'scope':'web_body','bytes':len(data),'truncated':parser.size>16000}
+                    title=' '.join(parser.title)[:180]
+                    # A successful HTTP response may still be an anti-bot/login shell.
+                    gate=('安全验证','访问验证','人机验证','请完成验证','访问异常','验证码','登录后查看','登录后继续','Just a moment','Access Denied','Sign in to continue')
+                    if any(v.casefold() in title.casefold() for v in gate) or (len(content)<800 and any(v.casefold() in content.casefold() for v in gate)):
+                        raise ValueError('网站要求登录或验证，尚未读到正文')
+                    if len(content.strip())<60:raise ValueError('网页只有空壳或内容不足，未标记已读')
+                    return {'url':url,'title':title,'content':content,'scope':'网页正文（截取）' if parser.size>16000 else '网页正文','bytes':len(data),'truncated':parser.size>16000}
     raise ValueError('网页读取未完成')

@@ -568,5 +568,35 @@
     "type": "int",
     "default": 360,
     "hint": "管理入口：大肥龙面板→学习与记忆→管理记忆与生活。现有设置不因升级改变"
+  },
+  "reading_discovery_enabled": {
+    "description": "自主发现阅读内容",
+    "type": "bool",
+    "default": false,
+    "hint": "学习与记忆→管理记忆与生活；仅空闲执行，读后有看法才进入分享候选"
+  },
+  "reading_bili_enabled": {
+    "description": "自主寻找B站视频资料",
+    "type": "bool",
+    "default": true,
+    "hint": "学习与记忆→管理记忆与生活；仅空闲执行，读后有看法才进入分享候选"
+  },
+  "reading_discovery_daily_limit": {
+    "description": "每日自主探索次数上限",
+    "type": "int",
+    "default": 8,
+    "hint": "学习与记忆→管理记忆与生活；仅空闲执行，读后有看法才进入分享候选"
+  },
+  "reading_interest_topics": {
+    "description": "额外兴趣（可空，自动从生活与聊天提取）",
+    "type": "string",
+    "default": "",
+    "hint": "学习与记忆→管理记忆与生活；仅空闲执行，读后有看法才进入分享候选"
+  },
+  "reading_excluded_topics": {
+    "description": "不想探索的话题（逗号分隔）",
+    "type": "string",
+    "default": "",
+    "hint": "学习与记忆→管理记忆与生活；仅空闲执行，读后有看法才进入分享候选"
   }
 }

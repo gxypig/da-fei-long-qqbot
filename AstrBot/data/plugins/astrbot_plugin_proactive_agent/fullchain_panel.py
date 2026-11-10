@@ -55,9 +55,11 @@ def register_fullchain_panel(plugin):
         if 'reply_queue_concurrency' in values and not 1<=values['reply_queue_concurrency']<=8:
             return jsonify(status='error',message='回复并发须为1至8'),400
         limits={'incoming_visual_burst_ms':(0,1500),'incoming_visual_context_seconds':(5,120),'incoming_visual_detail_tiles':(0,6)}
-        limits.update(long_memory_daily_limit=(1,500),reading_interval_minutes=(15,10080))
+        limits.update(long_memory_daily_limit=(1,500),reading_interval_minutes=(15,10080),reading_discovery_daily_limit=(1,48))
         if any(k in values and not low<=values[k]<=high for k,(low,high) in limits.items()):
-            return jsonify(status='error',message='图文设置超出允许范围'),400
+            return jsonify(status='error',message='设置数值超出允许范围'),400
+        if any(isinstance(v,str) and len(v)>2000 for v in values.values()):
+            return jsonify(status='error',message='设置内容过长'),400
         async with lock:
             current=feature_settings(plugin);revisions=body.get('field_revisions')
             valid=(isinstance(revisions,dict) and all(revisions.get(k)==current['field_revisions'][k] for k in values)) if set(values)!=set(FEATURES) and revisions is not None else body.get('revision')==current['revision']

@@ -69,7 +69,11 @@ def register_memory_panel(plugin):
                     if saved:
                         if saved['fingerprint']!=fingerprint:raise RuntimeError('version_conflict')
                         return jsonify(status='ok',data=saved['result'])
-                    if op=='read':data=await service.queue_read(body.get('reader'),str(body.get('value','')),str(body.get('visibility','public')),rid)
+                    if op=='discover':
+                        if not service.enabled('active_reading_enabled') or not service.cfg('reading_discovery_enabled'):raise ValueError('请先启用主动阅读和自主发现')
+                        service.discovery.report(next_at=service.clock(),state='waiting',reason='已预约一次空闲探索，仍受每日预算限制')
+                        await service.store.flush('__discovery__');data=service.discovery.snapshot()
+                    elif op=='read':data=await service.queue_read(body.get('reader'),str(body.get('value','')),str(body.get('visibility','public')),rid)
                     elif kind=='experience':
                         key=str(body.get('id'));row=plugin._life.store.rows.get(key)
                         if not row or row.get('record_type') not in {'reflection','event'}:raise ValueError('经历或看法不存在')
