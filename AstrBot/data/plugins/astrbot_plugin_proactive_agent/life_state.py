@@ -66,6 +66,8 @@ class ProactiveLife:
         self.task=asyncio.create_task(self._worker(),name='continuous-life-idle')
 
     async def free_opportunity(self,dry_run=False):
+        from .reading_agency import enabled
+        if enabled(self.plugin):return {'decision':'delegated','reason':'已交给空闲自主决策，固定检查间隔不参与选题或分享','preview':dry_run}
         from .proactive_policy import eligible_targets,select_lane
         p=self.plugin;now=self.clock();state=await p.get_kv_data('proactive_state',{})
         if not isinstance(state,dict):state={}
@@ -255,7 +257,7 @@ class ProactiveLife:
                 self.store.put('inbox:'+due,{**row,'attempts':attempt,'last_error':type(exc).__name__})
                 self.pending[due]=self.clock()+min(1800,30*2**min(attempt,6))
 
-    def candidate(self,origin,mode='free',required=False,*,preview=False,extended_only=False):
+    def candidate(self,origin,mode='free',required=False,*,preview=False,extended_only=False,event_id=None):
         now=self.clock();contact=self.store.rows.get('contact:'+origin,{})
         used=set(contact.get('consumed_events',[]));events=[r for r in self.events(origin) if r['id'] not in used and not r.get('resolved_at') and not r.get('archived_at') and (origin!='qzone' or not r.get('published_at'))]
         # Private follow-up beats public fictional activity. A future promise is not yet due.
@@ -268,6 +270,7 @@ class ProactiveLife:
             previous=self.store.rows.get('candidate:'+id_,{})
             return previous.get('status') not in {'confirmed','unknown','drop','submitting'} and (previous.get('retry_at') or 0)<=now
         events=[r for r in events if available(r)]
+        if event_id is not None:events=[r for r in events if r['id']==event_id]
         events.sort(key=lambda r:(r['visibility']==origin,r['source']=='plan',r.get('completed',False),r.get('operation')=='anonymized_shared_experience',r['at']),reverse=True)
         event=events[0] if events else None
         if event is None and not required:return None
@@ -281,8 +284,16 @@ class ProactiveLife:
         p=self.plugin;now=self.clock()
         if not candidate:return {'decision':'drop','reason':'没有新的事件依据或到期事项'}
         origin=candidate['origin'];required=candidate['required'];contact=self.store.rows.get('contact:'+origin,{})
+        from .reading_agency import enabled,allowed_target
+        autonomous=candidate.get('mode')=='autonomous' and enabled(p)
+        if candidate.get('mode')=='autonomous' and not autonomous:return {'decision':'drop','reason':'自主决策已关闭'}
+        if enabled(p) and not autonomous and not required:return {'decision':'defer','reason':'普通主动已交给自主决策，取消旧定时草稿'}
         if candidate.get('basis',{}).get('extended_material'):
             extension=getattr(p,'_memory_life',None)
+            if origin=='qzone':
+                from .reading_share import material_for,evidence_error
+                problem=evidence_error(material_for(p,candidate))
+                if problem:return {'decision':'drop','reason':problem}
             if not extension or not extension.share_allowed(candidate['basis'],origin,preview=candidate.get('preview',False)):
                 return {'decision':'drop','reason':'新分享未启用、仅预览或对象没有获得许可'}
         if not self.enabled() or not p._cfg('enable',True):return {'decision':'drop','reason':'主动消息已关闭'}
@@ -293,19 +304,21 @@ class ProactiveLife:
         if lane!='qzone':
             fixed=candidate['mode']=='fixed';field=('fixed_' if fixed else '')+('group_ids' if lane=='group' else 'private_ids')
             allowed=p._id_set(p._cfg(field,''));uid=origin.rsplit(':',1)[-1]
-            if (fixed or allowed) and uid not in allowed:return {'decision':'drop','reason':'对象不在当前许可范围'}
+            if autonomous:
+                if not allowed_target(p,origin):return {'decision':'drop','reason':'自主选择的对象当前不可联系'}
+            elif (fixed or allowed) and uid not in allowed:return {'decision':'drop','reason':'对象不在当前许可范围'}
             targets=getattr(p,'_targets',None)
             if targets:
                 status=targets.status(origin)
                 if not status['available']:return {'decision':'defer','reason':status['reason'],'retry_at':status.get('resume_at') or now+300}
         if not required:
-            if contact.get('next_candidate_after',0)>now:return {'decision':'defer','reason':'上次候选已结束，等待下次检查机会','retry_at':contact['next_candidate_after']}
+            if not autonomous and contact.get('next_candidate_after',0)>now:return {'decision':'defer','reason':'上次候选已结束，等待下次检查机会','retry_at':contact['next_candidate_after']}
             if p._work.busy():return {'decision':'defer','reason':'先处理正常回复','retry_at':now+30}
-            if lane!='qzone' and contact.get('unanswered',0)>=max(1,int(p._cfg('proactive_unanswered_limit',2))):
+            if not enabled(p) and lane!='qzone' and contact.get('unanswered',0)>=max(1,int(p._cfg('proactive_unanswered_limit',2))):
                 return {'decision':'defer','reason':'连续主动消息尚未得到回应','retry_at':now+1800}
             gap=max(1,int(p._cfg('proactive_min_gap_minutes',5)))*60
-            if contact.get('last_confirmed_at',0)+gap>now:return {'decision':'defer','reason':'联系冷却中','retry_at':contact['last_confirmed_at']+gap}
-            if contact.get('last_inbound',0)+60>now:return {'decision':'defer','reason':'当前正在聊天，不插入无关主动话题','retry_at':contact['last_inbound']+60}
+            if not autonomous and contact.get('last_confirmed_at',0)+gap>now:return {'decision':'defer','reason':'联系冷却中','retry_at':contact['last_confirmed_at']+gap}
+            if not autonomous and contact.get('last_inbound',0)+60>now:return {'decision':'defer','reason':'当前正在聊天，不插入无关主动话题','retry_at':contact['last_inbound']+60}
         old=self.store.rows.get('candidate:'+candidate['id'],{})
         if old.get('status') in {'confirmed','unknown','drop'} or old.get('status')=='submitting' and not committing:return {'decision':'drop','reason':'该事项已发送、已放弃或投递结果未知，不重复投递'}
         return {'decision':'send','reason':candidate['motive']}
@@ -331,15 +344,15 @@ class ProactiveLife:
         except RuntimeError:pass
 
     @recipient_task(lambda self,origin,*a,**kw:origin)
-    async def opportunity(self,origin,mode='free',required=False,dry_run=False,check=None):
+    async def opportunity(self,origin,mode='free',required=False,dry_run=False,check=None,event_id=None):
         if dry_run:
-            candidate=self.candidate(origin,mode,required,preview=True)
+            candidate=self.candidate(origin,mode,required,preview=True,event_id=event_id)
             if candidate:candidate={**candidate,'preview':True}
             return {'candidate':candidate,**self.decide(candidate),'preview':True,'sent':False}
         async with self.locks.setdefault(origin,asyncio.Lock()):
             self.advance()
             if origin!='qzone':await self.plugin._targets.check(origin)
-            candidate=self.candidate(origin,mode,required);decision=self.decide(candidate)
+            candidate=self.candidate(origin,mode,required,event_id=event_id);decision=self.decide(candidate)
             if decision['decision']!='send':self.record_decision(candidate,decision);return decision
             p=self.plugin;cid=None if origin=='qzone' else await conversation_id(p,origin)
             manager=getattr(p.context,'conversation_manager',None);fence=get_fence(manager)
@@ -347,6 +360,9 @@ class ProactiveLife:
             recent=[] if origin=='qzone' else list(p._recent_messages.get(origin,[]))[-8:]
             payload={'candidate':candidate,'recent_messages':recent,'already_confirmed':variety(p).history(origin)}
             system=COMPOSE_SYSTEM.replace('为大肥龙的一次主动联系','为当前角色的一次主动联系').replace('虚拟龙娘日常','角色的虚拟日常').replace('保持嘴欠、傲娇、亲近而自然的龙娘风格','按当前人格的用途版本表达')+'\n'+await role_context(p,origin,[r['text'] for r in recent],cid,'schedule' if mode=='fixed' else 'proactive')
+            from .reading_share import material_for,text_error,ensure_text
+            reading_material=material_for(p,candidate) if origin=='qzone' else None
+            if reading_material:payload['reading_evidence']={k:reading_material.get(k) for k in ('title','url','basis','thought','scope')}
             attempt={'state':'preparing'};token=delivery_scope.set(attempt)
             async def permitted():
                 if check:await check()
@@ -355,6 +371,7 @@ class ProactiveLife:
                 if origin=='qzone' and mode=='free' and not await p._qzone_allowed():raise BackgroundPaused('动态冷却中')
             async def send(content):
                 await permitted()
+                ensure_text(reading_material,content)
                 if origin=='qzone' and candidate['basis'].get('operation')=='anonymized_shared_experience':
                     # Check the FINAL text after dedup rewrites, before any external write.
                     await self.public.verify_composed(candidate['basis'],content)
@@ -366,14 +383,31 @@ class ProactiveLife:
                     if check:await check()
                     latest=self.decide(candidate,committing=True)
                     if latest['decision']!='send':raise BackgroundPaused(latest['reason'])
-                with explicit_route(origin),delivery_policy(boundary_check),for_session(origin,cid,epoch):
+                from .conversation_review import attachment_policy
+                def final_content_check(action,params):
+                    if action.removesuffix('_async')=='send_qzone_msg':ensure_text(reading_material,params.get('content',''))
+                with explicit_route(origin),delivery_policy(boundary_check),attachment_policy(final_content_check),for_session(origin,cid,epoch):
                     if origin=='qzone':
                         attempt['state']='submitted';await p._post_qzone(content,[]);attempt['state']='confirmed'
                     elif await p.context.send_message(origin,p._build_chain(content,[])) is False:
                         raise DeliveryUnconfirmed('平台未接受消息')
             try:
                 with model_work('scheduled' if required else 'background'):
-                    data=json_object(await p._generate_json(system,payload,origin))
+                    for generation_try in range(3):
+                        await permitted()
+                        data=json_object(await p._generate_json(system,payload,origin))
+                        generated=p._clean(str(data.get('content','')))
+                        issue=text_error(reading_material,generated) if data.get('decision')=='send' else ''
+                        previous=self.store.rows.get('candidate:'+candidate['id'],{})
+                        drafts=[*previous.get('drafts',[]),{'at':self.clock(),'content':generated,'issue':issue,'attempt':generation_try+1}][-3:]
+                        self.store.put('candidate:'+candidate['id'],{**previous,**candidate,'status':'draft','draft':generated,'drafts':drafts})
+                        await self.store.flush('candidate:'+candidate['id'])
+                        if not issue:break
+                        if generation_try==2:
+                            decision={'decision':'drop','reason':'阅读动态检查未通过，已保留草稿：'+issue}
+                            self.record_decision(candidate,decision);return decision
+                        payload['revision_request']=issue+'；保留正文细节和已有具体看法，不添加新事实'
+
                     if data.get('decision') not in {'send','defer','drop'}:raise ValueError('invalid proactive decision')
                     if data['decision']!='send' and not required:
                         decision={'decision':data['decision'],'reason':str(data.get('reason','没有充分联系理由'))[:300]}
@@ -384,13 +418,13 @@ class ProactiveLife:
                     if origin=='qzone' and candidate['basis'].get('operation')=='anonymized_shared_experience':
                         from .life_public import safe_public
                         if not safe_public(content):raise ValueError('public_content_has_private_markers')
-                    self.store.put('candidate:'+candidate['id'],{**candidate,'status':'draft','draft':content})
+                    self.store.put('candidate:'+candidate['id'],{**self.store.rows.get('candidate:'+candidate['id'],{}),**candidate,'status':'draft','draft':content})
                     await permitted()
                     # Variety's attempt context must be shared with our receipt decision.
                     content=await variety(p).deliver(origin,content,send,attempt=attempt)
                 if attempt['state']!='confirmed':raise DeliveryUnconfirmed('缺少确认回执','unknown')
                 content=sent_text(origin,content)
-                self.store.put('candidate:'+candidate['id'],{**candidate,'status':'confirmed','at':self.clock(),'delivery_id':attempt.get('id')})
+                self.store.put('candidate:'+candidate['id'],{**self.store.rows.get('candidate:'+candidate['id'],{}),**candidate,'status':'confirmed','at':self.clock(),'delivery_id':attempt.get('id')})
                 contact=self.store.rows.get('contact:'+origin,{})
                 self.store.put('contact:'+origin,{**contact,'origin':origin,'last_confirmed_at':self.clock(),
                     'unanswered':0 if origin=='qzone' else contact.get('unanswered',0)+1,'last_content':content,

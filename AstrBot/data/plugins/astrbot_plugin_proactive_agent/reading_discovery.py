@@ -68,6 +68,10 @@ class ReadingDiscovery:
         s=self.s;old=s.store.rows.get('__discovery__',{})
         s.store.put('__discovery__',{**old,**fields,'at':s.clock()})
     def domains(self):return [v for v in re.split(r'[,，\s]+',self.s.cfg('reading_allowed_domains')) if v]
+    def host_blocked(self,host):
+        from .browser_reader import authorization_newer
+        row=self.s.store.rows.get('reading-host:'+host,{})
+        return row.get('until',0)>self.s.clock() and not authorization_newer(self.s.db.path.parent/'web-reader','https://'+host+'/',row.get('at',0))
     async def plan(self):
         s=self.s;now=s.clock();generation=s.generation
         if not s.cfg('reading_discovery_enabled'):return False
@@ -115,8 +119,8 @@ class ReadingDiscovery:
                 domains=allowed
                 host=domains[(cycle//2-1)%len(domains)]
                 block=s.store.rows.get('reading-host:'+host,{})
-                if block.get('until',0)>now:
-                    domains=[d for d in allowed if s.store.rows.get('reading-host:'+d,{}).get('until',0)<=now]
+                if self.host_blocked(host):
+                    domains=[d for d in allowed if not self.host_blocked(d)]
                     if not domains:raise ValueError('允许的网站暂不可读，等待站点冷却后再查')
                     host=domains[0]
                 raw=await s.idle_io(s.plugin._search_meme(query+' site:'+host,src['scope'] if src['scope']!='public' else 'qzone'),generation)
@@ -141,6 +145,6 @@ class ReadingDiscovery:
         if job['kind']!='web':return
         host=urlsplit(job['value']).hostname
         if host:
-            self.s.store.put('reading-host:'+host,{'until':self.s.clock()+3600,'reason':str(exc)[:150]})
+            self.s.store.put('reading-host:'+host,{'at':self.s.clock(),'until':self.s.clock()+3600,'reason':str(exc)[:250]})
     def snapshot(self):
         return {**self.s.store.rows.get('__discovery__',{}),'today_used':self.s.store.rows.get('discovery-quota:'+day(self.s.clock()),{}).get('count',0)}

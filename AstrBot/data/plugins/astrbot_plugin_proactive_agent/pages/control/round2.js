@@ -80,7 +80,7 @@
   button(actions,'refresh-proactive','刷新运行摘要',()=>loadProactive());button(actions,'preview-proactive','预览但不发送',()=>preview());
   proactive.append(actions);
   for(const [id,label] of [['rules-enabled','仅看已启用'],['rules-exceptions','仅看异常']]){const l=el('label',label),c=el('input');c.id=id;c.type='checkbox';c.onchange=renderRules;l.prepend(c);actions.append(l);}
-  const summary=el('div');summary.id='proactive-summary';summary.className='callout';proactive.append(summary);
+  const autonomySummary=el('div');autonomySummary.className='callout';proactive.append(autonomySummary);const summary=el('div');summary.id='proactive-summary';summary.className='callout';proactive.append(summary);
   const rules=el('div');rules.id='proactive-rules';proactive.append(rules);
   const previewResult=el('pre');previewResult.id='proactive-preview-result';previewResult.setAttribute('role','status');proactive.append(previewResult);
   const decisions=details(proactive,'查看最近决策：为什么发，为什么跳过');decisions.id='proactive-decisions';
@@ -115,7 +115,7 @@
     if(d.reply_backlog!==undefined)line(healthDelivery,'待回复 / 最老等待',`${d.reply_backlog} 条 / ${Math.round(d.oldest_reply_wait_seconds||0)} 秒`);
     if(d.review_history){const h=d.review_history;line(healthDelivery,'审阅记录保存',`${h.current_fault?'当前异常':'运行正常'} · 待写 ${h.pending||0} · 本次加载累计缺失 ${h.missing_records||0}${h.last_error?' · '+h.last_error:''}`);if(h.recovered_at)line(healthDelivery,'审阅记录最近恢复',new Date(h.recovered_at*1000).toLocaleString());}
     line(healthDelivery,'等待落盘',d.persistence?.pending??0);line(healthDelivery,'最近持久化恢复',d.persistence?.recovered_at?new Date(d.persistence.recovered_at*1000).toLocaleString():'没有历史恢复记录');}
-  async function loadProactive(){if(!ready)return;const request=++serial;try{const d=await api('panel_proactive');if(request!==serial)return;state=d;
+  async function loadProactive(){if(!ready)return;const request=++serial;try{const d=await api('panel_proactive');if(request!==serial)return;state=d;autonomySummary.hidden=!d.agency?.enabled;autonomySummary.textContent=d.agency?.enabled?`当前由大肥龙自主决定：${d.agency.reason||'等待空闲判断'}。网站、数量、时机与对象由模型选择；下次判断 ${d.agency.next_at?new Date(d.agency.next_at*1000).toLocaleString():'下次空闲时'}。下面的普通间隔参数暂不参与调度，明确必发任务继续执行。可在「管理记忆与生活」切换模式`:'';
     summary.textContent=`主动消息${d.enabled?'已开启':'已关闭'} · ${d.quiet_now?'免打扰中':'可检查机会'} · 待回复 ${d.pending_replies} 条；自由群聊：${d.scope.group.label}，自由私聊：${d.scope.private.label}`;
     renderRules();health(d.delivery);for(const child of [...decisions.children].slice(1))child.remove();
     for(const r of d.decisions){const row=el('article');row.className='compact-row';line(row,new Date(r.at*1000).toLocaleString(),`${r.origin||'无对象'} · ${r.decision.decision} · ${r.decision.reason}`);decisions.append(row);}
@@ -133,10 +133,10 @@
       }lifeDetails.append(item);}
     for(const [field,label] of [['open_items','未完成事项'],['promises','跟进承诺']])for(const item of d.life[field]||[])line(lifeDetails,label,`${item.summary} · ${item.resolved_at?'已由聊天确认结束':'待跟进'} · 仅在 ${item.visibility} 可见`);
   }catch(e){summary.textContent='读取失败：'+e.message;}}
-  function renderRules(){if(!state)return;rules.replaceChildren();const statuses={ready:'可检查',waiting:'等待机会',confirmed:'已确认发送',drop:'已跳过',defer:'已延期',unknown:'投递未知，不重发',failed:'明确失败',unavailable:'对象暂不可用',quiet:'免打扰'};
+  function renderRules(){if(!state)return;rules.replaceChildren();const statuses={autonomous:'交由自主决策',ready:'可检查',waiting:'等待机会',confirmed:'已确认发送',drop:'已跳过',defer:'已延期',unknown:'投递未知，不重发',failed:'明确失败',unavailable:'对象暂不可用',quiet:'免打扰'};
     for(const r of state.rules){if($('rules-enabled').checked&&!r.enabled)continue;if($('rules-exceptions').checked&&!['failed','unknown','unavailable'].includes(r.status))continue;
       const card=el('article');card.className='rule-row';line(card,({free:'自由模式',opportunity:'定时检查',required:'明确必发'}[r.type]||r.type),`${({group:'群聊',private:'私聊',qzone:'动态'}[r.lane]||r.lane)} · ${r.targets.label} · ${r.enabled?'已启用':'未启用'}`);
-      line(card,'间隔',Array.isArray(r.interval)?`${r.interval[0]/60}—${r.interval[1]/60}分钟随机`:`${r.interval/60}分钟`);
+      line(card,r.status==='autonomous'?'传统间隔（当前不生效）':'间隔',Array.isArray(r.interval)?`${r.interval[0]/60}—${r.interval[1]/60}分钟随机`:`${r.interval/60}分钟`);
       line(card,r.time_label,r.next_at?new Date(r.next_at*1000).toLocaleString():'等待调度初始化');line(card,'状态',statuses[r.status]||r.status);if(r.reason)line(card,'原因',r.reason);
       const d=details(card,'对象范围与详情');if(r.targets.excludes_fixed)line(d,'实际自由范围','排除已由定时规则负责的对象');if(r.targets.actual)for(const t of r.targets.actual)line(d,t.name+' '+t.id,t.availability.available?'可达':t.availability.reason);
       button(card,'edit-'+r.id,'编辑',()=>openEditor(r.type==='free'?'free':'fixed'));button(card,'preview-'+r.id,'预览',()=>preview(r));rules.append(card);

@@ -68,7 +68,7 @@ class Management(Runtime):
   self.assertEqual(sum(r['status']=='archived' for r in rows),2)
  async def test_daily_web_quota_and_cache_do_not_duplicate_requests(self):
   self.enable(active_reading_enabled=True,reading_web_enabled=True,reading_allowed_domains='example.org')
-  async def fetch(url,allowed,reserve):await reserve();return {'title':'例子','content':'阅读内容','scope':'web_body','url':url}
+  async def fetch(url,allowed,reserve,**kw):await reserve();return {'title':'例子','content':'阅读内容','scope':'web_body','url':url}
   job={'reader':'web','value':'https://example.org/a','visibility':'public'}
   # _read consumes the reader field named kind in persisted jobs.
   job={'kind':'web',**job}
@@ -80,7 +80,7 @@ class Management(Runtime):
  async def test_parent_worker_cancellation_is_not_swallowed(self):
   self.enable(long_memory_enabled=True);self.observe();self.now+=301;gate=asyncio.Event()
   async def slow(*_):await gate.wait();return self.answer()
-  self.p._generate_json=slow;task=asyncio.create_task(self.s.step());await asyncio.sleep(.02);task.cancel()
+  self.p._generate_json=slow;self.s.read_runtime.idle_since=self.now-11;task=asyncio.create_task(self.s.step());await asyncio.sleep(.02);task.cancel()
   with self.assertRaises(asyncio.CancelledError):await asyncio.wait_for(task,1)
   self.assertIsNone(self.s.task)
  async def test_authenticated_routes_pagination_versions_and_draft_payload(self):

@@ -36,7 +36,8 @@ def forbidden_voice_request(text):
 
 async def prepare_voice_state(plugin,event,state):
     """Only voice-related turns need local configuration/provider resolution."""
-    if not re.search(r'语音|音频|声音',event.get_message_str() or ''):return
+    texts=current_voice_texts(event)
+    if not any(re.search(r'语音|音频|声音',text) for text in texts):return
     if 'voice_capability' in state:return
     getter=getattr(getattr(plugin,'context',None),'get_config',None)
     if not callable(getter):return
@@ -51,10 +52,29 @@ async def prepare_voice_state(plugin,event,state):
                 provider=await plugin.context.get_using_tts_provider_async(umo=event.unified_msg_origin)
                 available=provider is not None
         state['voice_capability']={'configured':enabled,'available':available,
-                                   'explicit':explicit_voice_request(event.get_message_str())}
+                                   'explicit':current_voice_intent(event)[0]}
     except Exception as exc:
         # Unknown local state is not evidence that the bot cannot speak.
         plugin._audit('voice_request',{'status':'capability_unknown','error':type(exc).__name__})
+
+
+def current_voice_texts(event):
+    """Only this sender's admitted turn; never background/history messages."""
+    getter=getattr(event,'get_extra',lambda *_:None)
+    job=getter('qqbot_reply_job')
+    if job and getattr(job,'sources',None):
+        return [str(s.get('text','')) for s in job.sources if str(s.get('sender',''))==str(job.sender)]
+    batch=getter('qqbot_chat_batch')
+    if isinstance(batch,list) and batch:return [s for s in batch if isinstance(s,str)]
+    return [event.get_message_str() or '']
+
+
+def current_voice_intent(event):
+    # A later explicit change of output format wins over an earlier request.
+    for text in reversed(current_voice_texts(event)):
+        if forbidden_voice_request(text):return False,True
+        if explicit_voice_request(text):return True,False
+    return False,False
 
 
 def voice_note(state):
@@ -141,8 +161,7 @@ def install_voice_memory(plugin):
         if not lease.active or not getattr(event.get_result(),'chain',None):
             async for x in old_decorate(stage,event):yield x
             return
-        force=explicit_voice_request(event.get_message_str())
-        forbidden=forbidden_voice_request(event.get_message_str())
+        force,forbidden=current_voice_intent(event)
         event.set_extra('qqbot_voice_result_text',None)
         # Keep the native formatting/hooks but synthesize only once after them.
         original_stage=stage;stage=copy.copy(stage);stage.tts_trigger_probability=0.0

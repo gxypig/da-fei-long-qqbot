@@ -100,6 +100,8 @@ def install_fullchain(plugin):
         except BaseException:
             queue.finish(job,'failed','conversion_failed');raise
         finally:
+            from .chain_metrics import span
+            span('input_conversion',started,job=job)
             job.timings['conversion_ms']=(time.monotonic()-started)*1000
             _conversion.reset(token)
 
@@ -156,7 +158,8 @@ def install_fullchain(plugin):
             if learning:
                 try:learning.confirmed_job(job,ledger,profiles)
                 except Exception as exc:plugin._audit('learning_ingress',{'status':'failed','error':type(exc).__name__})
-            plugin._audit('reply_job_end',{'job_id':job.id,'state':job.state,'reason':job.reason,
+            from .chain_metrics import timeline
+            plugin._audit('reply_job_end',{'timeline':timeline(job),'job_id':job.id,'state':job.state,'reason':job.reason,
                 'admission':getattr(job,'admission',None),
                 'execution_result':job.execution_result,'delivery_result':job.delivery_result,'reply_purpose':job.reply_purpose,
                 'elapsed_ms':round((time.monotonic()-job.received)*1000),
@@ -198,6 +201,8 @@ def install_fullchain(plugin):
                 job.state='running';job.stage='preparing';job.timings['started']=time.monotonic()
                 queue.active[job.id]=job
                 queue.inflight[job.id]=job
+            from .chain_metrics import span
+            span('reply_queue',entered,job=job)
             job.timings['reply_queue_ms']=(time.monotonic()-entered)*1000
             manager=getattr(plugin.context,'conversation_manager',None)
             async with asyncio.timeout(5):

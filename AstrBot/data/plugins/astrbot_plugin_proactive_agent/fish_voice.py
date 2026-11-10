@@ -85,7 +85,12 @@ async def synthesize(provider,text,*,explicit=False,budget=None,expression=False
     except Exception as exc:
         reason,_=error_kind(exc);scope.update(state='failed',error=reason,elapsed_ms=round((time.monotonic()-started)*1000))
         return None,dict(scope)
-    finally:_call.reset(token)
+    finally:
+        _call.reset(token)
+        from .chain_metrics import add,span
+        ended=time.monotonic()
+        add('voice_synthesis_ms',(ended-started)*1000)
+        span('voice_synthesis',started,ended)
 
 def install_fish_guard(plugin):
     from astrbot.core.provider.sources.fishaudio_tts_api_source import ProviderFishAudioTTSAPI

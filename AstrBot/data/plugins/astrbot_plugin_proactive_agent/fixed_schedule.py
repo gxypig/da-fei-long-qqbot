@@ -34,6 +34,10 @@ def plans(plugin,include_disabled=False):
                     result[f"{lane}:{target}"] = interval
     if include_disabled or plugin._cfg("fixed_qzone_enabled", False) and plugin._cfg("allow_qzone", True):
         result["qzone:"] = max(5, int(plugin._cfg("fixed_qzone_interval_minutes", 360))) * 60
+    if not include_disabled:
+        from .reading_agency import enabled
+        if enabled(plugin):
+            result={key:value for key,value in result.items() if plugin._cfg('fixed_qzone_required' if key=='qzone:' else 'fixed_message_required',False)}
     return result
 
 

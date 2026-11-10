@@ -13,6 +13,7 @@ def register_memory_panel(plugin):
             else:
                 if kind=='experience':rows=[{**r,'id':k} for k,r in plugin._life.store.rows.items() if r.get('record_type') in {'event','reflection'}]
                 elif kind=='reading':rows=[r for r in service.store.rows.values() if r.get('type')=='material']
+                elif kind=='exploration':rows=[r for r in service.store.rows.values() if r.get('type')=='exploration']
                 elif kind=='work':rows=[r for r in service.store.rows.values() if r.get('type') in {'input','read'} and r.get('state')!='done']
                 else:raise ValueError('未知列表')
                 rows=sorted(rows,key=lambda r:(r.get('at',0),r.get('id','')),reverse=True)
@@ -21,6 +22,7 @@ def register_memory_panel(plugin):
                     stamp,key=json.loads(cursor);rows=[r for r in rows if (r.get('at',0),r.get('id',''))<(stamp,key)]
                 page=rows[:25];data={'rows':[{k:v for k,v in r.items() if k not in {'content','material','proposals','text'}} for r in page],
                     'next_cursor':json.dumps([page[-1].get('at',0),page[-1]['id']]) if len(rows)>25 else None}
+                if kind=='exploration':data['rows']=[{k:v for k,v in r.items() if k not in {'intent','offers','source','actions'}} for r in data['rows']]
             return jsonify(status='ok',data={**data,'service':service.snapshot()})
         except (ValueError,TypeError,KeyError) as exc:return jsonify(status='error',message=str(exc)),400
     async def detail():
@@ -30,6 +32,12 @@ def register_memory_panel(plugin):
             if kind=='memory':data=await asyncio.to_thread(service.db.detail,id_)
             elif kind=='experience':data=copy.deepcopy(plugin._life.store.rows.get(id_))
             elif kind in {'reading','work'}:data=copy.deepcopy(service.store.rows.get(id_))
+            elif kind=='exploration':
+                data=copy.deepcopy(service.store.rows.get('exploration:'+str(id_)))
+                if data:
+                    data.pop('intent',None)
+                    data['materials']=[{k:r.get(k) for k in ('id','title','url','scope','reading_level','reader','body_verified','recognized_images','thought','basis','links','visibility','duplicate_of')} for mid in data.get('pages',[]) if (r:=service.store.rows.get(mid))]
+                    data['shares']=[r for r in plugin._life.store.rows.values() if isinstance(r.get('basis'),dict) and r['basis'].get('extended_material') in data.get('pages',[]) and r.get('origin') and 'status' in r]
             else:raise ValueError('未知详情类型')
             if data is None:return jsonify(status='error',message='记录不存在'),404
             return jsonify(status='ok',data=data)
@@ -61,7 +69,7 @@ def register_memory_panel(plugin):
                         plugin._life.reflection.refresh()
                         for key in changed_keys:await plugin._life.store.flush(key)
                 elif op=='preview':
-                    origin=str(body.get('origin',''));candidate=plugin._life.candidate(origin,preview=True,extended_only=True)
+                    origin=str(body.get('origin',''));candidate=plugin._life.candidate(origin,mode='autonomous' if service.agency.active() else 'free',preview=True,extended_only=True)
                     if candidate:candidate={**candidate,'preview':True}
                     data={'candidate':candidate,**plugin._life.decide(candidate),'sent':False,'preview':True}
                 else:
@@ -72,7 +80,16 @@ def register_memory_panel(plugin):
                     if op=='discover':
                         if not service.enabled('active_reading_enabled') or not service.cfg('reading_discovery_enabled'):raise ValueError('请先启用主动阅读和自主发现')
                         service.discovery.report(next_at=service.clock(),state='waiting',reason='已预约一次空闲探索，仍受每日预算限制')
+                        if service.agency.active():
+                            service.agency.update(next_at=service.clock(),retry_at=0,state='waiting',manual_pause=False,manual_wake=True,reason='已预约一次自主判断')
+                            await service.agency.durable()
                         await service.store.flush('__discovery__');data=service.discovery.snapshot()
+                    elif kind=='exploration':
+                        task=service.store.rows.get('exploration:'+str(body.get('id')))
+                        if not task:raise ValueError('探索任务不存在')
+                        if task.get('revision')!=body.get('version'):raise RuntimeError('version_conflict')
+                        data=service.agency.request_resume(task['id'],op)
+                        await service.store.flush('exploration:'+task['id']);await service.store.flush('__reading_agency__')
                     elif op=='read':data=await service.queue_read(body.get('reader'),str(body.get('value','')),str(body.get('visibility','public')),rid)
                     elif kind=='experience':
                         key=str(body.get('id'));row=plugin._life.store.rows.get(key)

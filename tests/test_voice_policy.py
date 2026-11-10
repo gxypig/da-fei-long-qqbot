@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import AsyncMock,patch
 from test_maintenance import Main
 from test_async_emoji import Event
-from data.plugins.astrbot_plugin_proactive_agent.voice_memory import explicit_voice_request,install_voice_memory,prepare_voice_state,voice_note,voice_issues
+from data.plugins.astrbot_plugin_proactive_agent.voice_memory import explicit_voice_request,install_voice_memory,prepare_voice_state,voice_note,voice_issues,current_voice_intent
 from astrbot.api.message_components import Record,Plain
 from astrbot.core.config.default import DEFAULT_CONFIG
 from astrbot.core.pipeline.result_decorate.stage import ResultDecorateStage
@@ -40,7 +40,21 @@ class VoicePolicy(unittest.IsolatedAsyncioTestCase):
                     if wanted:self.assertEqual(e.get_extra('qqbot_voice_result_text'),reply)
                 self.assertEqual(stage.tts_trigger_probability,.1)
                 self.assertEqual(config['provider_tts_settings']['trigger_probability'],.1)
+                for batch,wanted in [(['聊聊今天','用语音说一句最想说的话'],True),(['用语音回答','还是只用文字吧'],False),(['不用语音','改成语音吧'],True),(['语音概率怎么设置','用语音说你好'],True)]:
+                    e=Event(text=batch[0]);e.result.chain=[Plain('本龙在呢')];e.set_extra('qqbot_chat_batch',batch)
+                    async for _ in stage.process(e):pass
+                    self.assertEqual(any(isinstance(p,Record) for p in e.result.chain),wanted,batch)
         finally:restore()
+
+    async def test_merged_followup_is_current_request_and_other_speaker_is_not(self):
+        e=Event('先聊聊今天');e.set_extra('qqbot_reply_job',SimpleNamespace(sender='owner',sources=[{'sender':'owner','text':'先聊聊今天'},{'sender':'owner','text':'用语音说一句话'},{'sender':'someone-else','text':'别发语音'}]))
+        self.assertEqual(current_voice_intent(e),(True,False))
+        provider=AsyncMock(return_value=object())
+        plugin=SimpleNamespace(context=SimpleNamespace(get_config=lambda **_: {'provider_tts_settings':{'enable':True}},get_using_tts_provider_async=provider),_audit=lambda *_:None)
+        state={}
+        with patch.object(SessionServiceManager,'should_process_tts_request',AsyncMock(return_value=True)):await prepare_voice_state(plugin,e,state)
+        self.assertTrue(state['voice_capability']['explicit']);self.assertTrue(state['voice_capability']['available'])
+        self.assertIn('明确要求语音',voice_note(state))
 
     async def test_capability_uses_local_session_and_provider_without_ordinary_turn_lookup(self):
         provider=AsyncMock(return_value=object())

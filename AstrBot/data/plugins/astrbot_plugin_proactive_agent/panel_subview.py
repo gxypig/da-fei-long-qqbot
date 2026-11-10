@@ -14,6 +14,8 @@ def bundled_view(name):
     html = (root / 'index.html').read_text('utf-8')
     style = root.parent/'persona'/'style.css' if name == 'sessions' else root/'style.css'
     css = style.read_text('utf-8').replace('</style', '<\\/style')
+    if name=='memory':
+        html=html.replace('<script src="./exploration.js"></script>','<script>'+ (root/'exploration.js').read_text('utf-8').replace('</script','<\\/script') +'</script>')
     js = (root / 'app.js').read_text('utf-8').replace('</script', '<\\/script')
     style_href = '../persona/style.css' if name == 'sessions' else './style.css'
     html=re.sub(r'<link rel="stylesheet" href="'+re.escape(style_href)+r'(?:\?[^"<>]*)?">',lambda _: '<style>'+css+'</style>',html)

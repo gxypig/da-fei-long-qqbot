@@ -1,0 +1,668 @@
+{
+  "date": "2026-11-11",
+  "timezone": "Asia/Hong_Kong",
+  "version": "1.25.0-rc3",
+  "release_status": "candidate_performance_not_passed",
+  "regressions": {
+    "deployed": {
+      "passed": true,
+      "tests": 1507,
+      "seconds": 172.812
+    },
+    "portable_source": {
+      "passed": true,
+      "tests": 1482,
+      "seconds": 172.206
+    }
+  },
+  "real_qq": {
+    "method": "Actual QQ UI input matched to incoming message IDs and confirmed platform receipts; no injected events or simulated receipts.",
+    "scope": "One authorized test account; ordinary and burst messages in the same conversation.",
+    "complete_three_pairs": true,
+    "settings_unchanged_except_exploration": true,
+    "phases": [
+      {
+        "round": 1,
+        "mode": "off",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 6969.0,
+          "p95_ms": 21578.0,
+          "max_ms": 35156.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 6969.0,
+          "p95_ms": 21578.0,
+          "max_ms": 35156.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 12375.0,
+          "p95_ms": 23953.0,
+          "max_ms": 35156.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 6929.5,
+          "p95_ms": 18734.0,
+          "max_ms": 18734.0
+        },
+        "voice_jobs": 7,
+        "review_jobs": 10
+      },
+      {
+        "round": 1,
+        "mode": "on",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 8266.0,
+          "p95_ms": 29156.0,
+          "max_ms": 44250.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 8266.0,
+          "p95_ms": 29156.0,
+          "max_ms": 44250.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 9485.0,
+          "p95_ms": 29156.0,
+          "max_ms": 44250.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 7336.5,
+          "p95_ms": 20890.0,
+          "max_ms": 20890.0
+        },
+        "voice_jobs": 8,
+        "review_jobs": 12
+      },
+      {
+        "round": 2,
+        "mode": "off",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 7375.0,
+          "p95_ms": 25750.0,
+          "max_ms": 34250.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 7375.0,
+          "p95_ms": 25750.0,
+          "max_ms": 34250.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 7375.0,
+          "p95_ms": 26891.0,
+          "max_ms": 34250.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 6492.5,
+          "p95_ms": 24687.0,
+          "max_ms": 24687.0
+        },
+        "voice_jobs": 6,
+        "review_jobs": 14
+      },
+      {
+        "round": 2,
+        "mode": "on",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 8328.0,
+          "p95_ms": 23297.0,
+          "max_ms": 34110.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 8328.0,
+          "p95_ms": 23297.0,
+          "max_ms": 34110.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 9203.0,
+          "p95_ms": 24531.0,
+          "max_ms": 34110.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 6702.5,
+          "p95_ms": 22531.0,
+          "max_ms": 22531.0
+        },
+        "voice_jobs": 11,
+        "review_jobs": 10
+      },
+      {
+        "round": 3,
+        "mode": "off",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 8312.0,
+          "p95_ms": 31031.0,
+          "max_ms": 47344.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 8312.0,
+          "p95_ms": 31031.0,
+          "max_ms": 47344.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 8578.0,
+          "p95_ms": 32328.0,
+          "max_ms": 47344.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 7304.5,
+          "p95_ms": 29750.0,
+          "max_ms": 29750.0
+        },
+        "voice_jobs": 12,
+        "review_jobs": 7
+      },
+      {
+        "round": 3,
+        "mode": "on",
+        "inputs": 36,
+        "states": {
+          "confirmed": 31,
+          "merged": 5
+        },
+        "first": {
+          "count": 31,
+          "median_ms": 7984.0,
+          "p95_ms": 28500.0,
+          "max_ms": 33141.0
+        },
+        "required": {
+          "count": 31,
+          "median_ms": 7984.0,
+          "p95_ms": 28500.0,
+          "max_ms": 33141.0
+        },
+        "all_including_optional": {
+          "count": 31,
+          "median_ms": 12094.0,
+          "p95_ms": 33141.0,
+          "max_ms": 34703.0
+        },
+        "ordinary_required": {
+          "count": 18,
+          "median_ms": 7875.0,
+          "p95_ms": 20140.0,
+          "max_ms": 20140.0
+        },
+        "voice_jobs": 10,
+        "review_jobs": 14
+      }
+    ],
+    "aggregate": {
+      "off": {
+        "inputs": 108,
+        "first": {
+          "count": 93,
+          "median_ms": 7579.0,
+          "p95_ms": 29750.0,
+          "max_ms": 47344.0
+        },
+        "required": {
+          "count": 93,
+          "median_ms": 7579.0,
+          "p95_ms": 29750.0,
+          "max_ms": 47344.0
+        },
+        "all_including_optional": {
+          "count": 93,
+          "median_ms": 7922.0,
+          "p95_ms": 31031.0,
+          "max_ms": 47344.0
+        },
+        "ordinary_required": {
+          "count": 54,
+          "median_ms": 7039.0,
+          "p95_ms": 18734.0,
+          "max_ms": 29750.0
+        },
+        "states": {
+          "confirmed": 93,
+          "merged": 15
+        },
+        "failed_or_unknown_jobs": 0,
+        "review_jobs": 31,
+        "voice_jobs": 25
+      },
+      "on": {
+        "inputs": 108,
+        "first": {
+          "count": 93,
+          "median_ms": 8140.0,
+          "p95_ms": 28500.0,
+          "max_ms": 44250.0
+        },
+        "required": {
+          "count": 93,
+          "median_ms": 8140.0,
+          "p95_ms": 28500.0,
+          "max_ms": 44250.0
+        },
+        "all_including_optional": {
+          "count": 93,
+          "median_ms": 9485.0,
+          "p95_ms": 29156.0,
+          "max_ms": 44250.0
+        },
+        "ordinary_required": {
+          "count": 54,
+          "median_ms": 7336.5,
+          "p95_ms": 20140.0,
+          "max_ms": 22531.0
+        },
+        "states": {
+          "confirmed": 93,
+          "merged": 15
+        },
+        "failed_or_unknown_jobs": 0,
+        "review_jobs": 36,
+        "voice_jobs": 29
+      }
+    },
+    "relative_change_percent": {
+      "first": {
+        "median_ms": 7.4,
+        "p95_ms": -4.2
+      },
+      "required": {
+        "median_ms": 7.4,
+        "p95_ms": -4.2
+      },
+      "all_including_optional": {
+        "median_ms": 19.73,
+        "p95_ms": -6.04
+      },
+      "ordinary_required": {
+        "median_ms": 4.23,
+        "p95_ms": 7.51
+      }
+    },
+    "performance_gate_passed": false,
+    "actual_confirmed_receipts": 242,
+    "failed_receipts": 0,
+    "unknown_receipts": 0,
+    "error_notification_receipts": 0,
+    "duplicate_required_payloads": 0,
+    "main_model_queue_ms_all_186": 0,
+    "provider_request_timing": [
+      {
+        "round": 1,
+        "mode": "off",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4046,
+          "p95": 5594,
+          "max": 6203
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 21819,
+          "p95": 24888,
+          "max": 25148
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 13158,
+          "p95": 15354,
+          "max": 15362
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 45,
+          "p95": 67,
+          "max": 82
+        }
+      },
+      {
+        "round": 1,
+        "mode": "on",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4469,
+          "p95": 5860,
+          "max": 6032
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 21755,
+          "p95": 25370,
+          "max": 25764
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 13042,
+          "p95": 15607,
+          "max": 15851
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 48,
+          "p95": 70,
+          "max": 74
+        }
+      },
+      {
+        "round": 2,
+        "mode": "off",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4078,
+          "p95": 5672,
+          "max": 5953
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 21293,
+          "p95": 23036,
+          "max": 24228
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 12864,
+          "p95": 14159,
+          "max": 15071
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 45,
+          "p95": 63,
+          "max": 75
+        }
+      },
+      {
+        "round": 2,
+        "mode": "on",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4297,
+          "p95": 5172,
+          "max": 5593
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 21119,
+          "p95": 24052,
+          "max": 24975
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 12755,
+          "p95": 15022,
+          "max": 15629
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 48,
+          "p95": 68,
+          "max": 82
+        }
+      },
+      {
+        "round": 3,
+        "mode": "off",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4140,
+          "p95": 5282,
+          "max": 5359
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 20978,
+          "p95": 24975,
+          "max": 26193
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 12846,
+          "p95": 15634,
+          "max": 15835
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 46,
+          "p95": 65,
+          "max": 74
+        }
+      },
+      {
+        "round": 3,
+        "mode": "on",
+        "calls": 31,
+        "provider_elapsed_ms": {
+          "count": 31,
+          "median": 4078,
+          "p95": 5625,
+          "max": 5907
+        },
+        "context_chars": {
+          "count": 31,
+          "median": 20995,
+          "p95": 24978,
+          "max": 25240
+        },
+        "input_tokens": {
+          "count": 31,
+          "median": 12889,
+          "p95": 15217,
+          "max": 15793
+        },
+        "output_tokens": {
+          "count": 31,
+          "median": 51,
+          "p95": 74,
+          "max": 74
+        }
+      }
+    ],
+    "interpretation": "Raw median and ordinary P95 gates failed. Random voice and review branches differed despite identical settings; request/output timings and same-conversation queue also differed. This does not establish an upstream-network cause.",
+    "revision_limit": "The final visible-source wake filter, restored-read source fallback and extra TTS spans were added after these QQ comparisons. They passed regression; no new three-pair real QQ comparison is claimed."
+  },
+  "controlled": {
+    "kind": "controlled_scheduler_io_with_simulated_model_and_transport",
+    "passed": true,
+    "rounds": [
+      {
+        "round": 1,
+        "summary": {
+          "off": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 295.4062500029977,
+            "p95_ms": 554.9229000025662,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0
+          },
+          "on": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 290.71050000129617,
+            "p95_ms": 540.9581999992952,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0.03719999949680641
+          }
+        },
+        "degradation_percent": {
+          "median_ms": -1.5895906067166399,
+          "p95_ms": -2.5165117538321846
+        }
+      },
+      {
+        "round": 2,
+        "summary": {
+          "off": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 297.9824499998358,
+            "p95_ms": 562.6995999991777,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0
+          },
+          "on": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 291.56179999699816,
+            "p95_ms": 547.1934999950463,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0.05989999772282317
+          }
+        },
+        "degradation_percent": {
+          "median_ms": -2.15470743422681,
+          "p95_ms": -2.7556621693269556
+        }
+      },
+      {
+        "round": 3,
+        "summary": {
+          "off": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 296.14054999910877,
+            "p95_ms": 566.6647000034573,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0
+          },
+          "on": {
+            "n": 30,
+            "valid": 30,
+            "median_ms": 291.36524999921676,
+            "p95_ms": 555.0461000020732,
+            "failure_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "max_yield_ms": 0.04669999907491729
+          }
+        },
+        "degradation_percent": {
+          "median_ms": -1.612511356484747,
+          "p95_ms": -2.050348292616988
+        }
+      }
+    ],
+    "production_idle_seconds": 10,
+    "controlled_idle_seconds": 0,
+    "limit": "Real scheduler/checkpoint logic, simulated model and transport. Multiple conversations, slow web and background-model contention were controlled cases, not a real multi-account QQ benchmark."
+  },
+  "real_reading": {
+    "actual_configured_provider_and_public_http": true,
+    "isolated_storage": true,
+    "qq_sends": 0,
+    "qzone_sends": 0,
+    "materials": [
+      {
+        "url": "https://www.uisdc.com/6-elements-impact-visual-center?s",
+        "reading_level": "full_body",
+        "body_verified": true,
+        "grounded_opinion_saved": true
+      },
+      {
+        "url": "http://msb.zjol.com.cn/html/2010-08/28/content_512075.htm?div=-1",
+        "reading_level": "full_body",
+        "body_verified": true,
+        "grounded_opinion_saved": true
+      },
+      {
+        "url": "https://www.getty.edu/art/exhibitions/poetry_paper/",
+        "reading_level": "page_fragment",
+        "body_verified": false,
+        "grounded_opinion_saved": true
+      }
+    ],
+    "decision": "Search additional independent sources, save qualified opinions and unresolved questions, then pause without sharing.",
+    "restart_preserved": true,
+    "body_link_follow_and_revisit": "Actual HTTP with action chosen by the acceptance harness; not evidence that the model chose the follow action.",
+    "failures_retained": "Oversized page, inaccessible PDF and missing original-interest source were recorded; the source fallback was fixed and the same persisted step retried successfully.",
+    "not_claimed": [
+      "Live public posting",
+      "Actual image interpretation in this probe",
+      "Live QQ interruption while exploration model was demonstrably still running",
+      "Unrestricted access to all websites"
+    ]
+  },
+  "ui": {
+    "actual_browser_checked": true,
+    "normal_and_narrow_layout": true,
+    "pause_resume": true,
+    "draft_preserved_on_refresh": true,
+    "legacy_detail_open": true,
+    "source_reading_level_visible": true
+  },
+  "test_cleanup": {
+    "remaining_test_incoming": 0,
+    "conversations_original_restored": true,
+    "preferences_original_restored": true,
+    "memories_original_restored": true,
+    "messages_original_restored": true,
+    "meme_library_unchanged": true,
+    "exploration_settings_restored": true
+  },
+  "deployment": {
+    "version": "1.25.0-rc3",
+    "loaded": true,
+    "configuration_preserved": true,
+    "checks_passed": 21,
+    "checks_total": 21
+  },
+  "preserved_autonomous_rules": [
+    "Unanswered-contact status does not force a block",
+    "Original contact cooldown does not force a block"
+  ],
+  "remaining_acceptance": [
+    "Real end-to-end median/P95 regression must both meet 5% under comparable settings and stochastic branches",
+    "Real multi-account and demonstrably in-flight exploration interruption coverage remains incomplete"
+  ],
+  "privacy": "No account identifiers, credentials, configuration values, chat texts, raw browsing history or recordings included."
+}

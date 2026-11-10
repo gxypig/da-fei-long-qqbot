@@ -117,8 +117,8 @@ class Discovery(unittest.IsolatedAsyncioTestCase):
         await self.s.reading();self.now+=61;await self.s.reading()
         self.assertEqual(self.s._read.await_count,0);self.assertEqual(self.s.store.rows[job['id']]['state'],'retry')
     async def test_web_failure_preserves_real_search_excerpt_without_claiming_body(self):
-        self.setup_discovery();self.enable(reading_web_enabled=True,reading_allowed_domains='www.zhihu.com')
-        url='https://www.zhihu.com/question/123';job=await self.s.queue_read('web',url)
+        self.setup_discovery();self.enable(reading_web_enabled=True,reading_allowed_domains='example.org')
+        url='https://example.org/article/123';job=await self.s.queue_read('web',url)
         job={**job,'search_excerpt':{'url':url,'title':'水墨画','excerpt':'水墨画的留白带来想象的空间。'*12}}
         with patch(MODULE+'safe_reader.read_web',AsyncMock(side_effect=ValueError('网站要求验证'))):result=await self.s._read(job)
         self.assertIn('未读原帖',result['scope']);self.assertIn('网站要求验证',result['read_error'])
@@ -139,16 +139,17 @@ class Discovery(unittest.IsolatedAsyncioTestCase):
         await self.read_fixture();self.p._generate_json.reset_mock()
         for _ in range(30):await self.s.projection(ORIGIN,'水墨画')
         self.p._generate_json.assert_not_called()
-    async def test_busy_cancels_slow_reader_promptly_without_failure_count(self):
+    async def test_busy_preserves_read_only_request_and_no_failure_count(self):
         self.setup_discovery();job=await self.s.queue_read('bili','动画')
-        started=asyncio.Event();cancelled=asyncio.Event()
+        started=asyncio.Event();complete=asyncio.Event()
         async def read(*a):
-            started.set()
-            try:await asyncio.sleep(20)
-            finally:cancelled.set()
+            started.set();await complete.wait()
+            return {'title':'动画','content':'实际取得的简介','url':'https://www.bilibili.com/video/BVtest','scope':'简介'}
         self.s._read=read;task=asyncio.create_task(self.s.reading());await started.wait();self.busy=True
+        await asyncio.sleep(.06);self.assertFalse(task.done());complete.set()
         with self.assertRaises(BackgroundPaused):await asyncio.wait_for(task,.5)
-        self.assertTrue(cancelled.is_set());self.assertEqual(self.s.store.rows[job['id']]['attempts'],0)
+        self.assertEqual(self.s.store.rows[job['id']]['attempts'],0)
+        self.assertEqual(self.s.store.rows[job['id']]['material']['content'],'实际取得的简介')
     async def test_irrelevant_search_hit_cannot_become_opinion_or_share(self):
         self.setup_discovery();job=await self.s.queue_read('bili','游戏叙事')
         self.s.store.put(job['id'],{**job,'automatic':True,'discovery':{'query':'游戏叙事'}})

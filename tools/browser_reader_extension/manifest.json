@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "大肥龙原帖正文阅读",
+  "version": "1.0.0",
+  "description": "只将大肥龙安排阅读的贴吧、知乎公开原帖正文传回本机，不读取账号凭据",
+  "permissions": ["alarms", "storage"],
+  "host_permissions": ["http://127.0.0.1:6197/*", "https://tieba.baidu.com/*", "https://www.zhihu.com/*", "https://zhuanlan.zhihu.com/*"],
+  "background": {"service_worker": "worker.js"},
+  "content_scripts": [{"matches": ["https://tieba.baidu.com/p/*", "https://www.zhihu.com/question/*", "https://zhuanlan.zhihu.com/p/*"], "js": ["content.js"], "run_at": "document_idle"}],
+  "action": {"default_title": "大肥龙正文阅读状态", "default_popup": "status.html"}
+}

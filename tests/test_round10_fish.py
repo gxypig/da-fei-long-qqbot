@@ -34,6 +34,22 @@ class FishTests(unittest.IsolatedAsyncioTestCase):
         audio,meta=await synthesize(p,'你好',budget=.01)
         self.assertIsNone(audio);self.assertEqual(meta['error'],'timeout');self.assertEqual(meta['bytes'],6)
 
+    async def test_timeout_records_one_real_voice_span_without_extra_request(self):
+        import time
+        from data.plugins.astrbot_plugin_proactive_agent.reply_jobs import current_job
+        from data.plugins.astrbot_plugin_proactive_agent.chain_metrics import timeline
+        p=provider()
+        async def slow(_):await asyncio.sleep(1)
+        p.get_audio=AsyncMock(side_effect=slow)
+        job=SimpleNamespace(received=time.monotonic(),timings={},spans=[])
+        token=current_job.set(job)
+        try:audio,meta=await synthesize(p,'你好',budget=.01)
+        finally:current_job.reset(token)
+        self.assertIsNone(audio);p.get_audio.assert_awaited_once()
+        self.assertEqual(len(job.spans),1);self.assertEqual(job.spans[0]['stage'],'voice_synthesis')
+        self.assertGreaterEqual(job.timings['voice_synthesis_ms'],9)
+        self.assertEqual(timeline(job)['overlap_ms'],0)
+
     async def test_free_failure_never_calls_paid_and_only_retryable_status_retries(self):
         from astrbot.core.provider.sources.fishaudio_tts_api_source import ProviderFishAudioTTSAPI as Fish
         for error,count in [('401 unauthorized api_key=secret',1),('402 balance',1),('404 missing voice',1),('429 rate limit',2),('503 unavailable',2)]:

@@ -432,6 +432,9 @@ def install_delivery_transport(plugin):
                 raise
             if not lease.active or ledger.store.closed:return result
             state,message_id=receipt_status(result);ledger.result(id_,state,message_id)
+            from .chain_metrics import span
+            span('platform_confirmation',started,job=job)
+            if job and state=='confirmed':job.timings.setdefault('first_confirmed_ms',(time.monotonic()-job.received)*1000)
             record=ledger.store.rows[id_]
             ledger.store.put(id_,{**record,'send_ms':(time.monotonic()-started)*1000,
                                   'elapsed_ms':(time.monotonic()-job.received)*1000 if job else None})

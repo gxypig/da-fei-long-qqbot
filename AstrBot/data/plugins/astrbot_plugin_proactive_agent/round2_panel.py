@@ -6,17 +6,19 @@ from .fixed_schedule import plans,STATE_KEY
 
 
 async def proactive_status(p):
+    from .reading_agency import enabled
+    autonomous=enabled(p)
     state=await p.get_kv_data(STATE_KEY,{})
     platform=p._cfg('platform_id','aiocqhttp');rules=[];scopes={}
     for lane,kind in [('group','GroupMessage'),('private','FriendMessage')]:
         selected=p._id_set(p._cfg(lane+'_ids',''))
         fixed=p._id_set(p._cfg('fixed_'+lane+'_ids','')) if p._cfg('fixed_messages_enabled',False) else set()
         actual=[{'id':uid,'name':row['name'],'availability':p._targets.status(f'{platform}:{kind}:{uid}')}
-            for uid,row in p._targets.contacts.get(kind,{}).items() if (not selected or uid in selected) and uid not in fixed]
+            for uid,row in p._targets.contacts.get(kind,{}).items() if (not selected or uid in selected or autonomous and uid in fixed) and (autonomous or uid not in fixed)]
         for uid in selected-fixed-{r['id'] for r in actual}:
             actual.append({'id':uid,'name':'当前列表未找到','availability':p._targets.status(f'{platform}:{kind}:{uid}')})
         scopes[lane]={'mode':'selected' if selected else 'all','label':'指定对象' if selected else '全部对象',
-            'selected':sorted(selected),'actual':actual,'excludes_fixed':p._cfg('fixed_messages_enabled',False)}
+            'selected':sorted(selected|fixed if autonomous and selected else selected),'actual':actual,'excludes_fixed':not autonomous and p._cfg('fixed_messages_enabled',False)}
         rules.append({'id':'free:'+lane,'type':'free','lane':lane,'targets':scopes[lane],
             'enabled':p._cfg('enable',True) and p._cfg('discretionary_enabled',True) and p._cfg('allow_'+lane,False),
             'interval':p._cfg('interval_minutes',30)*60,'next_at':getattr(p,'_next_free_check',None),'time_label':'下次检查',
@@ -36,7 +38,12 @@ async def proactive_status(p):
             'reason':available['reason'] or entry.get('reason',''),'availability':available})
     from .health_projection import runtime_health
     delivery=runtime_health(p)
+    if autonomous:
+        for rule in rules:
+            if rule['type']!='required':rule.update(enabled=False,status='autonomous',next_at=None,reason='原参数已保留，目前由自主决策选择时机与对象')
+    extension=getattr(p,'_memory_life',None)
     return {'enabled':p._cfg('enable',True),'quiet_now':p._quiet_now(),'scope':scopes,'rules':rules,
+        'agency':extension.agency.snapshot() if extension and hasattr(extension,'agency') else {'enabled':False},
         'life':p._life.activity(),'public_experiences':p._life.public.snapshot(),'reflections':p._life.reflection.snapshot(),'decisions':p._life.decisions(),'targets':p._targets.snapshot(),
         'pending_replies':len(p._reply_queue.pending),'delivery':delivery,
         'next_free_check':getattr(p,'_next_free_check',None),'clock':time.time()}
