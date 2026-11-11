@@ -1,0 +1,139 @@
+{
+  "date": "2026-11-11",
+  "version": "1.25.0-rc4",
+  "regression": {
+    "private": {
+      "passed": 1547,
+      "seconds": 194.77
+    },
+    "public": {
+      "passed": 1522,
+      "seconds": 194.761
+    }
+  },
+  "deployment": {
+    "checks_passed": 21,
+    "existing_configuration_preserved": true
+  },
+  "browser": {
+    "gallery_bridge_failure_reproduced_and_fixed": true,
+    "thumbnail_loading_observed": true,
+    "rapid_page_switch_rounds": 3,
+    "double_open_single_dialog": true,
+    "health_refresh_feedback_verified": true,
+    "console_stress_rows": 10000,
+    "console_render_bound": 1000,
+    "captured_browser_errors_after_fix": 0,
+    "exact_original_crash_cause_proven": false
+  },
+  "real_provider_isolated_probe": {
+    "restarted_cache": true,
+    "synthetic_elapsed_seconds": 148,
+    "correct_answers": 2,
+    "other_actor_images": 0,
+    "additional_classification_calls": 0,
+    "qq_sends": 0
+  },
+  "qq_smoke_test": {
+    "messages": 3,
+    "confirmed_receipts": 5,
+    "failures": 0,
+    "unknown": 0,
+    "duplicates": 0,
+    "image_to_followup_seconds": 24.098,
+    "followup_read_unmentioned_image_detail": true,
+    "voice_only_body_confirmed": true,
+    "optional_stickers_confirmed": 2,
+    "cases": [
+      {
+        "case": "image_message",
+        "required_confirmed_ms": 9360.0,
+        "all_confirmed_ms": 9360.0,
+        "queue_ms": 0.0,
+        "main_model_ms": 5266.0,
+        "review_ms": 2984.0,
+        "voice_ms": 0
+      },
+      {
+        "case": "delayed_text_about_image",
+        "required_confirmed_ms": 9813.0,
+        "all_confirmed_ms": 17594.0,
+        "queue_ms": 0.0,
+        "main_model_ms": 4657.0,
+        "review_ms": 2906.0,
+        "voice_ms": 0
+      },
+      {
+        "case": "explicit_voice_about_image",
+        "required_confirmed_ms": 14313.0,
+        "all_confirmed_ms": 19797.0,
+        "queue_ms": 0.0,
+        "main_model_ms": 4391.0,
+        "review_ms": 3047.0,
+        "voice_ms": 4938.0
+      }
+    ]
+  },
+  "controlled_media_preparation": {
+    "scope": "controlled_media_preparation_only",
+    "network_delay_per_image_ms": 40,
+    "images": 3,
+    "rounds": [
+      {
+        "before": {
+          "n": 30,
+          "median_ms": 130.796,
+          "p95_ms": 137.814,
+          "ordinary_median_ms": 0.045
+        },
+        "after": {
+          "n": 30,
+          "median_ms": 47.26,
+          "p95_ms": 55.644,
+          "ordinary_median_ms": 0.047
+        }
+      },
+      {
+        "before": {
+          "n": 30,
+          "median_ms": 130.838,
+          "p95_ms": 144.426,
+          "ordinary_median_ms": 0.044
+        },
+        "after": {
+          "n": 30,
+          "median_ms": 47.272,
+          "p95_ms": 55.768,
+          "ordinary_median_ms": 0.05
+        }
+      },
+      {
+        "before": {
+          "n": 30,
+          "median_ms": 137.601,
+          "p95_ms": 146.138,
+          "ordinary_median_ms": 0.043
+        },
+        "after": {
+          "n": 30,
+          "median_ms": 45.245,
+          "p95_ms": 54.596,
+          "ordinary_median_ms": 0.047
+        }
+      }
+    ]
+  },
+  "test_cleanup": {
+    "messages_removed_from_context_and_memory": 3,
+    "original_owner_context_restored": true,
+    "test_image_bindings_remaining": 0,
+    "receipts_archived_without_content": true
+  },
+  "limits": [
+    "Media benchmark covers local preparation, not total user wait.",
+    "Three real QQ replies are a smoke test, not the three-round 180-message performance gate.",
+    "Previous exploration-on/off end-to-end performance gate remains unpassed; this release does not claim otherwise.",
+    "No browser crash dump was available to prove the unique cause of the reported tab crash.",
+    "Full diagnostic records, account identifiers and screenshots stay local."
+  ]
+}

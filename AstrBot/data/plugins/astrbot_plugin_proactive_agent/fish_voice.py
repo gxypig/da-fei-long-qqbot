@@ -129,6 +129,35 @@ def paragraphs(text,limit=200):
     if remaining:out.append(remaining)
     return out
 
+async def review_before_synthesis(plugin,event,result):
+    """Use the existing text guard BEFORE spending TTS work on a draft.
+
+    Only pure text is moved forward. Mixed-media approval stays at its original
+    boundary. The exact scoped receipt is renewed, never a general review bypass.
+    """
+    from astrbot.api.message_components import Plain
+    reviewer=getattr(plugin,'_reviewer',None)
+    if not reviewer or not all(isinstance(p,Plain) for p in result.chain):return
+    # Long explicit speech is split into independently delivered paragraphs;
+    # keep its existing per-part guard instead of adding a whole-body review.
+    if len(''.join(p.text for p in result.chain))>200:return
+    from .review_modes import current
+    if not current(plugin._cfg)['enabled']:return
+    from .conversation_review import OutboundGuard,approve_once
+    from .stage_budgets import separate_stage
+    group=getattr(event,'get_group_id',lambda:None)()
+    sender=event.get_sender_id()
+    origin=f"{plugin._cfg('platform_id','aiocqhttp')}:{'GroupMessage' if group else 'FriendMessage'}:{group or sender}"
+    payload={'group_id' if group else 'user_id':group or sender,
+        'message':[{'type':'text','data':{'text':''.join(p.text for p in result.chain)}}]}
+    async with separate_stage('review',265):
+        checked=await OutboundGuard(plugin,reviewer).prepare('send_group_msg' if group else 'send_private_msg',payload)
+    text=''.join(p['data']['text'] for p in checked['message'] if p['type']=='text')
+    for i,part in enumerate(result.chain):part.text=text if i==0 else ''
+    approve_once(origin,text,policy_version=plugin.review_policy_version())
+    final_ready=event.get_extra('qqbot_emoji_final_ready')
+    if callable(final_ready):final_ready(text)
+
 async def transform(plugin,stage,event,*,force=False,forbidden=False):
     from astrbot.api.message_components import Plain,Record
     result=event.get_result()
@@ -144,6 +173,8 @@ async def transform(plugin,stage,event,*,force=False,forbidden=False):
     if not await SessionServiceManager.should_process_tts_request(event):return
     provider=await stage.ctx.plugin_manager.context.get_using_tts_provider_async(event.unified_msg_origin)
     if provider is None:return
+    await review_before_synthesis(plugin,event,result)
+    text=''.join(p.text for p in result.chain if isinstance(p,Plain))
     chain=[];texts=[];records=[]
     expression=cfg.get('fish_expression_enabled',True)
     deadline=time.monotonic()+(15 if force else 8)

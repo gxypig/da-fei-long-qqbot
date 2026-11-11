@@ -65,8 +65,10 @@ class IncomingVisual:
         self.plugin, self.clock = plugin, clock
         self.rows = OrderedDict()
         self.reference_waiters = {}
+        self.topic_breaks={}
+        self.cleanup_tasks=set()
         self.gate = asyncio.Semaphore(1)
-        self.stats = {'joined':0,'detail_images':0,'tiles':0,'unavailable':0,'max_prepare_ms':0}
+        self.stats = {'joined':0,'recalled':0,'detail_images':0,'tiles':0,'unavailable':0,'max_prepare_ms':0}
 
     def enabled(self):
         return self.plugin._cfg('incoming_visual_enabled', True)
@@ -94,11 +96,25 @@ class IncomingVisual:
             if not self.rows[old] or now-self.rows[old][-1]['at']>ttl:self.rows.pop(old,None)
         history=self.rows.setdefault(key,deque(maxlen=8))
         if history and history[-1]['epoch']!=epoch:history.clear()
-        row={'id':str(getattr(event.message_obj,'message_id','')), 'at':now, 'time':int(time.time()),
+        row={'id':str(getattr(event.message_obj,'message_id','')), 'at':now, 'time':time.time(),
              'sender':key[1], 'text':(event.get_message_str() or '')[:1200], 'images':direct,
              'quoted':quoted, 'has_quote':any(isinstance(c,Reply) for c in components),
              'local':{}, 'epoch':epoch, 'key':key, 'loading':set(), 'ready':asyncio.Event()}
         history.append(row);self.rows.move_to_end(key)
+        if TOPIC_BREAK.search(row['text']):
+            self.topic_breaks[key]=row['time']
+            if getattr(self,'cache',None):
+                async def forget():
+                    startup=getattr(self,'cache_startup',None)
+                    if startup:await startup
+                    await self.cache.forget_context(*key,before=row['time'])
+                task=asyncio.create_task(forget(),name='incoming-topic-break')
+                self.cleanup_tasks.add(task)
+                def done(task):
+                    self.cleanup_tasks.discard(task)
+                    if not task.cancelled() and task.exception():self.stats['unavailable']+=1
+                task.add_done_callback(done)
+        if len(self.topic_breaks)>256:self.topic_breaks.pop(next(iter(self.topic_breaks)))
         while len(self.rows)>128:self.rows.popitem(last=False)
         event.set_extra('qqbot_incoming_visual',row)
         waiting=self.reference_waiters.get(key)
@@ -213,6 +229,24 @@ class IncomingVisual:
         if not any(x['images'] for x in selected):return []
         return sorted((x for x in selected if x is not row),key=lambda x:x['at'])[:5]
 
+    async def recalled(self,event,row):
+        from .visual_continuity import may_refer,choose
+        if row['images'] or row['has_quote'] or TOPIC_BREAK.search(row['text']) or not may_refer(row['text']):return []
+        cutoff=self.topic_breaks.get(row['key'],0);records=[]
+        for other in self.rows.get(row['key'],()):
+            if other is row or other['epoch']!=row['epoch'] or other['time']<=cutoff:continue
+            for c in other['images']:
+                records.append({**other,'time':row['time']-(row['at']-other['at']),'origin':row['key'][0],'path':other['local'].get(id(c)) or c.path or c.file,'component':c})
+        cache=getattr(self,'cache',None)
+        if cache:records.extend(await cache.recent(*row['key']))
+        seen=set();selected=[]
+        for item in choose(records,now=row['time'],cutoff=cutoff,limit=6):
+            path=item.get('path');key=(item['id'],str(path))
+            if not path or key in seen:continue
+            seen.add(key);c=item.get('component') or Image.fromFileSystem(path)
+            selected.append({**item,'images':[c],'local':{id(c):str(path)},'sender':row['sender'],'at':row['at']-(row['time']-item['time']),'epoch':row['epoch'],'recalled':True})
+        return selected[-3:]
+
     async def enrich(self,event,req):
         if not self.enabled() or event.get_extra('qqbot_visual_enriched'):return
         row=self.observe(event)
@@ -225,6 +259,11 @@ class IncomingVisual:
             remaining=window-(self.clock()-row['at'])
             if remaining>0:await asyncio.sleep(remaining)
         companions=self.companions(row)
+        if not any(other['images'] for other in companions):
+            recalled=await self.recalled(event,row)
+            if recalled:
+                companions=[*recalled,*[other for other in companions if not other['images']]][-8:]
+                self.stats['recalled']+=1
         combined_text=' '.join([text]+[other['text'] for other in companions])
         current=[(row,c,row['sender'],False) for c in row['images']]
         current.extend((row,c,owner,True) for c,owner in row['quoted'])
@@ -251,20 +290,35 @@ class IncomingVisual:
         if self.plugin._cfg('image_generation_api_enabled',False):
             req.system_prompt+='\n图片与短循环动图创作已接入独立处理流程，当前工具列表没有绘图工具不代表不能创作；不能据此声称不会生图。只发来图片时先理解这张图与眼前要求，未收到创作结果不能声称已拍好。'
         budget=max(0,min(6,int(self.plugin._cfg('incoming_visual_detail_tiles',4))))
+        media=(current+additions)[:6]
+        async def resolve(owner,c):
+            try:
+                async with asyncio.timeout(3):
+                    path=owner['local'].get(id(c))
+                    if path and await asyncio.to_thread(Path(path).is_file):return path
+                    if id(c) in owner.get('loading',set()):
+                        await owner['ready'].wait();path=owner['local'].get(id(c))
+                        if path and await asyncio.to_thread(Path(path).is_file):return path
+                    path=await c.convert_to_file_path();owner['local'][id(c)]=path
+                    return path
+            except asyncio.CancelledError:raise
+            except Exception as exc:return exc
+        # Six missing companion images must share one bounded wait, not six
+        # sequential three-second delays. Current native originals are reused.
+        paths=await asyncio.gather(*(resolve(owner,c) for owner,c,_,_ in media))
         # Bound companion downloads and local detail processing. Main current
         # images were already prepared by AstrBot and remain available on failure.
-        for owner,c,sender,quoted in (current+additions)[:6]:
+        for (owner,c,sender,quoted),path in zip(media,paths):
             try:
-                path=owner['local'].get(id(c))
-                if not path or not await asyncio.to_thread(Path(path).is_file):
-                    async with asyncio.timeout(3):path=await c.convert_to_file_path()
-                    owner['local'][id(c)]=path
+                if isinstance(path,Exception):raise path
                 review_images.append(path)
                 is_addition=owner is not row
-                if is_addition:
+                if is_addition and path not in (req.image_urls or []):
                     req.image_urls=list(req.image_urls or [])+[path]
+                    req._qqbot_visual_owner=(*row['key'],row['id'],row['epoch'])
                 note={'消息':owner['id'],'发送者':sender,'引用图片':quoted,'来源':'相邻消息' if is_addition else '当前消息',
-                      '原消息图片序号':next((i for i,image in enumerate(owner['images'],1) if image is c),None)}
+                      '原消息图片序号':next((i for i,image in enumerate(owner['images'],1) if image is c),None),
+                      '回看此前图片':bool(owner.get('recalled')),'距当前消息秒':max(0,row['time']-owner['time'])}
                 if budget>0:
                     async with self.gate:
                         views,info=await asyncio.to_thread(detail_views,path,combined_text+' '+owner['text'],budget)
@@ -295,7 +349,7 @@ def install(plugin):
     from astrbot.core.pipeline.preprocess_stage.stage import PreProcessStage
     from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
     cache=IncomingCache(Path(plugin._data_dir)/'incoming-images',temp_root=get_astrbot_temp_path());service.cache=cache
-    startup=asyncio.create_task(cache.start());original_normalize=PreProcessStage._normalize_image_component
+    startup=asyncio.create_task(cache.start());service.cache_startup=startup;original_normalize=PreProcessStage._normalize_image_component
     from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
     original_transform=ProviderOpenAIOfficial._transform_content_part
     async def transform(provider,part):
@@ -345,17 +399,47 @@ def install(plugin):
             await startup
             # A newly received copy renews its materialized/compressed bytes too.
             # History saves never call this path and cannot revive expired media.
-            await cache.capture_message(message,fresh=True)
+            incoming=job.event.get_extra('qqbot_incoming_visual') or {}
+            await cache.capture_message(message,fresh=not incoming or bool(incoming.get('images') or incoming.get('quoted')))
         return message
     ProviderRequest.assemble_context=assemble
     manager=getattr(getattr(plugin,'context',None),'conversation_manager',None)
     original_update=getattr(manager,'update_conversation',None)
     async def update(*args,**kwargs):
+        cleared=active and kwargs.get('history',args[2] if len(args)>2 else None)==[]
         if active:
             if 'history' in kwargs:kwargs['history']=cache.portable_history(kwargs['history'])
             elif len(args)>2:args=(*args[:2],cache.portable_history(args[2]),*args[3:])
-        return await original_update(*args,**kwargs)
+        result=await original_update(*args,**kwargs)
+        if cleared:await clear_context(args[0] if args else kwargs.get('unified_msg_origin'))
+        return result
     if original_update:manager.update_conversation=update
+    async def clear_context(origin):
+        if not active:return
+        for key,(row,future) in list(service.reference_waiters.items()):
+            if key[0]==origin:
+                if not future.done():future.set_result(None)
+                service.reference_waiters.pop(key,None)
+        for key in list(service.rows):
+            if key[0]==origin:service.rows.pop(key,None)
+        for key in list(service.topic_breaks):
+            if key[0]==origin:service.topic_breaks.pop(key,None)
+        await startup
+        await cache.forget_context(origin)
+    reset_patches=[]
+    for name in ('new_conversation','switch_conversation','delete_conversation','delete_conversations_by_user_id'):
+        previous_reset=getattr(manager,name,None)
+        if not callable(previous_reset):continue
+        def reset_wrapper(previous_reset,name):
+            async def wrapped(origin=None,*args,**kwargs):
+                target=origin if origin is not None else kwargs.get('unified_msg_origin')
+                initial=False;getter=getattr(manager,'get_curr_conversation_id',None)
+                if active and name=='new_conversation' and callable(getter):initial=not await getter(target)
+                result=await previous_reset(origin,*args,**kwargs) if origin is not None else await previous_reset(*args,**kwargs)
+                if active and not initial:await clear_context(target)
+                return result
+            return wrapped
+        wrapped=reset_wrapper(previous_reset,name);setattr(manager,name,wrapped);reset_patches.append((name,wrapped,previous_reset))
     async def normalize(stage,event,component):
         row=service.observe(event) if active else None
         if row:row['loading'].add(id(component));row['ready'].clear()
@@ -363,7 +447,9 @@ def install(plugin):
             await original_normalize(stage,event,component)
             if not active:return
             await startup
-            path=await cache.retain(component.path or component.file)
+            binding={k:row[k] for k in ('id','sender','time','text')}|{'origin':row['key'][0]} if row and any(c is component for c in row['images']) else None
+            path=await cache.retain(component.path or component.file,binding=binding,binding_guard=lambda:not row or
+                row['epoch']==service.epoch(event) and row['time']>service.topic_breaks.get(row['key'],0))
             component.file=component.path=component.url=path
             service.captured(event,component,path)
         finally:
@@ -391,6 +477,8 @@ def install(plugin):
         if PreProcessStage._normalize_image_component is normalize:PreProcessStage._normalize_image_component=original_normalize
         if ProviderRequest.assemble_context is assemble:ProviderRequest.assemble_context=original_assemble
         if original_update and manager.update_conversation is update:manager.update_conversation=original_update
+        for name,wrapped,previous_reset in reversed(reset_patches):
+            if getattr(manager,name,None) is wrapped:setattr(manager,name,previous_reset)
         if Image.convert_to_file_path is capture:Image.convert_to_file_path=previous
         if ProviderOpenAIOfficial._transform_content_part is transform:ProviderOpenAIOfficial._transform_content_part=original_transform
     return restore

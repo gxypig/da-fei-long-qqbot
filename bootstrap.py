@@ -129,8 +129,11 @@ def main():
     configure(settings,container=args.container)
     from tools.repair_dashboard import inspect_view
     result = inspect_view(repair=True)
+    from tools.optimize_dashboard import inspect_console
+    console_result = inspect_console(repair=True)
     print('AstrBot configured; plugins bundled; outbound review:',bool(settings.get('review_enabled')))
     print('Dashboard compatibility:',result.get('ok'),result.get('detail'))
+    print('Console rendering:',console_result.get('ok'),console_result.get('detail'))
     print('Start: python manage.py start  |  Dashboard: http://127.0.0.1:6185 (user admin)')
     print('Read local OneBot token from AstrBot/data/cmd_config.json; do not share it')
 

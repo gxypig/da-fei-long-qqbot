@@ -18,6 +18,8 @@ if not config.exists():
     configure(json.loads((root/'local/settings.json').read_text(encoding='utf-8-sig')),container=True)
 from tools.repair_dashboard import inspect_view
 print(inspect_view(repair=True))
+from tools.optimize_dashboard import inspect_console
+print(inspect_console(repair=True))
 # Foreground supervisor gives Docker ownership of the whole process group.
 from manage import supervise, LOGS
 LOGS.mkdir(exist_ok=True)

@@ -67,7 +67,7 @@ class Routes(unittest.IsolatedAsyncioTestCase):
             service=IncomingVisual(self.plugin,lambda:now[0]);self.plugin._incoming_visual=service
             component=Image.fromFileSystem(str(p));first=Event(images=[component],mid='first');service.observe(first);service.captured(first,component,str(p))
             now[0]+=9;event=Event('生成你做出这个图片相同的动作',mid='second');req=ProviderRequest(prompt=event.text,image_urls=[],contexts=[])
-            await service.enrich(event,req);self.assertEqual(req.image_urls,[])
+            await service.enrich(event,req);self.assertEqual(req.image_urls,[str(p)])
             event.set_extra('qqbot_generation_request',req)
             await generate(self.plugin,self.provider,event)
             self.assertEqual(len(self.provider.text_chat.call_args_list[0].kwargs['image_urls']),1);self.edit.assert_awaited_once()

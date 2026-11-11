@@ -59,7 +59,7 @@ class Visual(unittest.IsolatedAsyncioTestCase):
         for sender,origin in [('two','bot:GroupMessage:g'),('one','bot:GroupMessage:other')]:
             req=await self.enrich(Event('这图什么意思',sender=sender,origin=origin,mid='2'))
             self.assertEqual(req.image_urls,[])
-        self.now+=20
+        self.now+=3601
         self.assertEqual((await self.enrich(Event('这图什么意思',mid='3'))).image_urls,[])
         self.service.observe(Event(images=[self.image()],mid='4'))
         self.service.observe(Event('换个话题',mid='5'))

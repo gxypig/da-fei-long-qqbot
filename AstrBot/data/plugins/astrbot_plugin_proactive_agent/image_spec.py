@@ -122,6 +122,11 @@ def reference_paths(event,req,plugin=None):
     from .image_followup import reset_reference,continuation
     if reset_reference(event.get_message_str()):return []
     current=list(getattr(req,'image_urls',[]) or [])[:3]
+    owner=getattr(req,'_qqbot_visual_owner',None)
+    if owner:
+        service=getattr(plugin,'_incoming_visual',None)
+        expected=(str(event.unified_msg_origin),str(event.get_sender_id()),str(getattr(event.message_obj,'message_id','')))
+        if tuple(owner[:3])!=expected or service and owner[3]!=service.epoch(event):return []
     if current or not (FOLLOW.search(event.get_message_str() or '') or continuation(event,req,plugin)):return current
     # Explicit "this picture's pose" can arrive after the short chat burst but
     # before the earlier reply commits its history. Read observed incoming media

@@ -1017,12 +1017,18 @@ async function directPluginApi(method, endpoint, body) {
 }
 
 async function pluginApiGet(endpoint) {
+  let api;
   try {
-    const api = await ensureBridgeReady();
-    return unwrapApiResponse(await withTimeout(api.apiGet(endpoint), 15000));
+    api = await ensureBridgeReady();
   } catch (bridgeError) {
     return directPluginApi("GET", endpoint);
   }
+  // The native bridge rejects '?' in endpoint paths. Its second argument is
+  // the supported query channel; fallback fetch cannot authenticate in srcdoc.
+  const split = endpoint.indexOf("?");
+  const path = split < 0 ? endpoint : endpoint.slice(0, split);
+  const params = split < 0 ? undefined : Object.fromEntries(new URLSearchParams(endpoint.slice(split + 1)));
+  return unwrapApiResponse(await withTimeout(api.apiGet(path, params), 15000));
 }
 
 async function pluginApiPost(endpoint, body) {
@@ -1201,7 +1207,9 @@ function setThumbnailSource(img, url, fallbackResolver) {
   return new Promise((resolve) => {
     let finished = false;
     let fallbackUsed = false;
+    const timeout = window.setTimeout(() => finish(false), 15000);
     const cleanup = () => {
+      window.clearTimeout(timeout);
       img.onload = null;
       img.onerror = null;
       if (img.__smartThumbnailCancel === cancel) {
@@ -1214,7 +1222,8 @@ function setThumbnailSource(img, url, fallbackResolver) {
       }
       finished = true;
       cleanup();
-      img.classList.toggle("is-loading", !loaded);
+      img.classList.remove("is-loading");
+      img.classList.toggle("is-load-error", !loaded);
       if (!loaded) {
         img.src = TRANSPARENT_IMAGE_SRC;
       }
@@ -1232,6 +1241,7 @@ function setThumbnailSource(img, url, fallbackResolver) {
       Promise.resolve()
         .then(fallbackResolver)
         .then((fallbackUrl) => {
+          if (finished || img.isConnected === false) { finish(false); return; }
           if (fallbackUrl && fallbackUrl !== url) {
             img.src = fallbackUrl;
             return;
@@ -1253,6 +1263,7 @@ function enqueueThumbnailLoad(load) {
 }
 
 function drainThumbnailLoadQueue() {
+  if (document.hidden) return;
   while (
     activeThumbnailLoads < MAX_ACTIVE_THUMBNAIL_LOADS &&
     thumbnailLoadQueue.length
@@ -1261,6 +1272,7 @@ function drainThumbnailLoadQueue() {
     activeThumbnailLoads += 1;
     Promise.resolve()
       .then(load)
+      .catch(() => false)
       .finally(() => {
         activeThumbnailLoads = Math.max(0, activeThumbnailLoads - 1);
         drainThumbnailLoadQueue();
@@ -1271,6 +1283,7 @@ function drainThumbnailLoadQueue() {
 function applyResolvedImageUrl(img, image, full = false) {
   setThumbnailLoading(img);
   const load = () => {
+    if (img.isConnected === false) return Promise.resolve(false);
     return resolveImageUrl(image, full).then(
       (url) => {
         return setThumbnailSource(img, url, () => {
@@ -1303,6 +1316,7 @@ function applyResolvedImageUrl(img, image, full = false) {
 function applyResolvedPendingImageUrl(img, image) {
   setThumbnailLoading(img);
   const load = () => {
+    if (img.isConnected === false) return Promise.resolve(false);
     return resolvePendingImageUrl(image).then(
       (url) => {
         return setThumbnailSource(img, url, () => {
@@ -6019,4 +6033,10 @@ async function pollGallery() {
   window.setTimeout(pollGallery, 5000);
 }
 window.setTimeout(pollGallery, 5000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { drainThumbnailLoadQueue(); refreshAll(); } });
+window.addEventListener("pagehide", () => {
+  thumbnailLoadQueue.length = 0;
+  imageLoadObserver?.disconnect();
+  document.querySelectorAll("img").forEach(img => img.__smartThumbnailCancel?.());
+  imageUrlCache.clear();
+});

@@ -65,7 +65,9 @@ class Burst(visual_base.Visual):
         self.service.observe(visual_base.Event('看这个',mid='a'));self.now+=1
         self.service.observe(visual_base.Event(images=[self.image()],mid='b'));self.now+=1
         self.service.observe(visual_base.Event('右边是我修改的',mid='c'));self.now+=1
-        self.service.observe(visual_base.Event(images=[self.image()],mid='d'));self.now+=1
+        second=self.path.with_name('modified.png');second.write_bytes(self.path.read_bytes())
+        from astrbot.api.message_components import Image
+        self.service.observe(visual_base.Event(images=[Image.fromFileSystem(str(second))],mid='d'));self.now+=1
         self.service.observe(visual_base.Event('另一个人说的话',sender='other',mid='foreign'))
         req=await self.enrich(visual_base.Event('两个哪个更好',mid='e'))
         self.assertEqual(len(req.image_urls),2)

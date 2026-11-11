@@ -21,8 +21,9 @@ class IncomingCache:
     async def start(self):
         await asyncio.to_thread(self._load);await self.cleanup()
         self.task=asyncio.create_task(self._worker(),name='incoming-images-expiry')
-    async def retain(self,path):
+    async def retain(self,path,binding=None,binding_guard=None):
         async with self.lock:
+            if binding_guard is not None and not binding_guard():binding=None
             def copy():
                 if Path(path).stat().st_size>24*1024*1024:raise ValueError('incoming_image_size_limit')
                 raw=Path(path).read_bytes()
@@ -35,10 +36,38 @@ class IncomingCache:
                 original=Path(path).resolve()
                 if self.temp_root and original.is_relative_to(self.temp_root) and original!=target:
                     sources=list(dict.fromkeys([*sources,str(original)]))
-                self.rows[target.name]={**self.rows.get(target.name,{}),'expires_at':self.clock()+3600,'bytes':len(raw),'sources':sources,'removed':False};self._save()
+                self.rows[target.name]={**self.rows.get(target.name,{}),'expires_at':self.clock()+3600,'bytes':len(raw),'sources':sources,'removed':False}
+                if binding:
+                    row=self.rows[target.name]
+                    bindings=[b for b in row.get('bindings',[]) if b.get('time',0)>self.clock()-3600
+                        and (b.get('origin'),b.get('sender'),b.get('id'))!=(binding['origin'],binding['sender'],binding['id'])]
+                    row['bindings']=[*bindings,binding][-128:]
+                self._save()
                 self.stats['retained']+=1
                 return str(target)
             return await asyncio.to_thread(copy)
+    async def recent(self,origin,sender):
+        async with self.lock:
+            def select():
+                now=self.clock();result=[]
+                for name,row in self.rows.items():
+                    if row.get('removed') or row['expires_at']<=now:continue
+                    for binding in row.get('bindings',[]):
+                        if binding.get('origin')==origin and binding.get('sender')==sender and now-binding.get('time',0)<3600:
+                            result.append({**binding,'path':str(self.root/name)})
+                return result
+            return await asyncio.to_thread(select)
+    async def forget_context(self,origin,sender=None,before=None):
+        async with self.lock:
+            def forget():
+                changed=False
+                for row in self.rows.values():
+                    old=row.get('bindings',[])
+                    kept=[b for b in old if b.get('origin')!=origin or sender is not None and b.get('sender')!=sender
+                        or before is not None and b.get('time',0)>before]
+                    if len(kept)!=len(old):row['bindings']=kept;changed=True
+                if changed:self._save()
+            await asyncio.to_thread(forget)
     async def capture_message(self,message,*,fresh=False):
         """Only CURRENT incoming content. Persist bytes once, never an extra model call."""
         if message.get('role')!='user' or not isinstance(message.get('content'),list):return
@@ -107,7 +136,7 @@ class IncomingCache:
                         if (self.temp_root and original.is_relative_to(self.temp_root) and original.is_file()
                             and hashlib.sha256(original.read_bytes()).hexdigest()==name.split('.')[0]):original.unlink()
                     path.unlink(missing_ok=True)
-                    if not row.get('removed'):row['removed']=True;row['sources']=[];changed=True;self.stats['expired']+=1
+                    if not row.get('removed'):row['removed']=True;row['sources']=[];row.pop('bindings',None);changed=True;self.stats['expired']+=1
                     # A bounded tombstone prevents a late history save from recreating expired bytes.
                     if row['expires_at']+86400<self.clock():
                         self.rows.pop(name);changed=True
