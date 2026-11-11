@@ -108,7 +108,8 @@
     "image_and_animation_not_within_30_seconds": true
   },
   "publication": {
-    "status": "pending_remote_verification",
-    "runtime_data_included": false
+    "status": "source_verified_on_remote",
+    "runtime_data_included": false,
+    "source_commit": "fcca023a10aab3c0d7ff4b61da96938416dbded9"
   }
 }
