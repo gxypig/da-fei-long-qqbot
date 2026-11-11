@@ -27,9 +27,9 @@ class Continuity(Visual):
         with patch('data.plugins.astrbot_plugin_proactive_agent.incoming_visual.time.time',return_value=self.wall):
             request=await self.enrich(Event('给你装上有没有搞头？',mid='question'))
         self.assertEqual(request.image_urls,[path])
-    async def test_cache_never_crosses_actor_origin_or_explicit_quote(self):
+    async def test_cache_never_crosses_private_origin_or_other_group(self):
         await self.prepare_cache();await self.remember();self.service.rows.clear()
-        for sender,origin in [('two','bot:GroupMessage:g'),('one','bot:GroupMessage:other')]:
+        for sender,origin in [('two','bot:FriendMessage:two'),('one','bot:GroupMessage:other')]:
             self.assertEqual((await self.enrich(Event('有没有搞头',sender=sender,origin=origin))).image_urls,[])
     async def test_one_hour_expiry_and_forget_remove_reference_without_gallery_delete(self):
         await self.prepare_cache();_,path=await self.remember();self.service.rows.clear()

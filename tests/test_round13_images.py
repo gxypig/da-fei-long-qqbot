@@ -111,6 +111,14 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x.kwargs['output_format'] for x in self.create.call_args_list],['gif','png'])
         raw=base64.b64decode(result.result_chain.chain[-1].file[9:]);self.assertEqual(validate_image(raw,True),'gif')
         self.assertEqual(event.get_extra('qqbot_image_provenance')['method'],'generated_action_frames')
+        from data.plugins.astrbot_plugin_proactive_agent.image_generation import review_media
+        from data.plugins.astrbot_plugin_proactive_agent.review_contract import original_evidence
+        facts=review_media(event,result)
+        self.assertEqual(facts['frames'],6);self.assertEqual(facts['format'],'gif')
+        self.assertEqual(facts['generation_state'],'ready');self.assertEqual(facts['delivery_state'],'pending')
+        evidence,_=original_evidence('case',[],[],{'generated_media':facts},'chat',1)
+        self.assertEqual(evidence['可信状态']['generated_media'],facts)
+        self.assertEqual(evidence['不可改变的事实']['本轮已完成媒体'],facts)
         from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
         segment=await AiocqhttpMessageEvent._from_segment_to_dict(result.result_chain.chain[-1])
         self.assertEqual(base64.b64decode(segment['data']['file'][9:]),raw)

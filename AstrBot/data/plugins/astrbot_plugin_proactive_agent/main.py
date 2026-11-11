@@ -1164,6 +1164,10 @@ class Main(ReplyPipelineMixin, PanelMixin, star.Star):
         chain = response.result_chain
         has_image = bool(chain and any(isinstance(p, Image) for p in chain.chain))
         state["generated_image"] = has_image and bool(getattr(response, "qqbot_generated_image", False))
+        from .image_generation import review_media
+        state.pop('generated_media',None)
+        if state['generated_image'] and (details:=review_media(event,response)):
+            state['generated_media']=details
         from .send_checks import own_style,issues
         raw=response.completion_text or ''
         exchanges=getattr(self,'_exchanges',None)

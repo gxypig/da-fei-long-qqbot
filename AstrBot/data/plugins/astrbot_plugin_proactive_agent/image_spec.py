@@ -51,12 +51,24 @@ def camera_mode(text,own,proposed='',*,follow_context=False):
     if proposed=='third_person' and (follow_context or re.search(r'动作|姿势|照着|参照',positive) or REFERENCE_CUE.search(positive)):return proposed
     return proposed if proposed in {'selfie','mirror_selfie'} else 'selfie'
 
+def independent_description(text):
+    """A new, detailed creation request needs no old visual requirements.
+
+    Deictic edits and terse 'make that a video' keep their existing history.
+    This only trims irrelevant history; the same planner still selects intent.
+    """
+    from .visual_intent import generation_kind
+    if FOLLOW.search(text) or REFERENCE_CUE.search(text) or generation_kind(text)=='none':return False
+    details=(r'穿|连衣裙|外套|卫衣|衬衫|衣服|服装',r'挥手|眨眼|微笑|转身|点头|跳舞|拿着|抱着|手里',
+             r'自拍|镜头|视角|近景|全身|立绘',r'背景|海边|森林|房间|桌旁|阳台')
+    return sum(bool(re.search(pattern,text)) for pattern in details)>=2
+
 def context_material(event,req,plugin=None):
     text=event.get_extra('qqbot_visual_followup_request') or event.get_message_str() or ''
     if len(text)>MAX_REQUEST:raise ValueError('image_request_too_long')
     from .image_followup import continuation,reset_reference,scoped_messages,needs_context,confirmed_visuals
     reset=reset_reference(text)
-    use_recent=not reset and (bool(FOLLOW.search(text)) or needs_context(event,req) or bool(event.get_extra('qqbot_visual_followup_request')))
+    use_recent=not reset and not independent_description(text) and (bool(FOLLOW.search(text)) or needs_context(event,req) or bool(event.get_extra('qqbot_visual_followup_request')))
     recent=[]
     # The provider payload is already projected by ContextWindow. Only the
     # requirement-extraction model receives this view; image rendering never does.
@@ -89,7 +101,7 @@ def context_material(event,req,plugin=None):
             except ValueError:continue
             adjacent.extend(str(r.get('原话',''))[:1200] for r in rows[:5])
     facts=[{'caption':r.get('text',''),'status':'confirmed','visual':r['visual']} for r in confirmed_visuals(plugin,event,req)] if use_recent else []
-    return {'request':text,'recent':recent if isinstance(projected,list) else recent[-6:],'adjacent_same_sender':[] if reset else adjacent,'reference_reset':reset,'confirmed_visual':facts}
+    return {'request':text,'recent':recent if isinstance(projected,list) else recent[-6:],'adjacent_same_sender':[] if reset or independent_description(text) else adjacent,'reference_reset':reset,'confirmed_visual':facts}
 
 def followup_request(event,req):
     """A newly supplied original resumes a request explicitly waiting for it."""
@@ -122,6 +134,11 @@ def reference_paths(event,req,plugin=None):
     from .image_followup import reset_reference,continuation
     if reset_reference(event.get_message_str()):return []
     current=list(getattr(req,'image_urls',[]) or [])[:3]
+    if independent_description(event.get_message_str() or ''):
+        # An image recalled for understanding a chat is not automatically a
+        # reference for a fully specified new artwork. Keep actual attachments.
+        direct=[c.path or c.file or c.url for c in getattr(event,'get_messages',lambda:[])() if type(c).__name__=='Image']
+        return [p for p in direct if isinstance(p,str) and p][:3]
     owner=getattr(req,'_qqbot_visual_owner',None)
     if owner:
         service=getattr(plugin,'_incoming_visual',None)
@@ -185,6 +202,7 @@ def prompt(plan,frames=False,failures=()):
     text+='画面要求：'+plan['scene']+'\n逐项必须满足：'+json.dumps(plan['requirements'],ensure_ascii=False)
     if plan.get('camera_mode')=='selfie':text+='\n拍摄方式必须是角色自持前置摄像头的自拍：近景或半身，脸靠近镜头、自然轻微俯角或倾斜，持机手臂伸向画外镜头并有前景透视；不是他人视角的肖像、站姿立绘或全身设计。手机本体在镜头后通常不入画。不要为了展示参考图全身而改变构图。'
     elif plan.get('camera_mode')=='mirror_selfie':text+='\n必须是镜前自拍：角色拿手机对着镜子，画面有明确镜面与持机动作；保持用户要求的取景范围。'
+    if plan.get('subject_self'):text+='\n动作按正常双臂安排：一只手持机时只有另一只手能挥动或持物；仅在用户未限定必须手持时，必要物件可放在画面内可见的位置，不能为了同时完成动作多画手臂。参考设定图的服饰装饰不能覆盖本轮明确的衣服要求。'
     if failures:text+='\n上一稿未满足的项目，本稿必须纠正：'+json.dumps(list(failures)[:8],ensure_ascii=False)
     if frames:
         text+='\n输出一张精确3列×2行的连续动画帧表，1536×1024像素，每格512×512，无边框、留白间隔、格号或字幕。六格是同一个主体完成请求动作的连续六帧，固定镜头和背景，每格按上述拍摄方式取景且位置一致，动作姿态/表情真实改变，尾帧自然接回首帧。不是六个不同角色，不是单张图平移/缩放。读序左到右、上到下。'

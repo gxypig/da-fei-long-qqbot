@@ -53,7 +53,7 @@ class IncomingCache:
                 for name,row in self.rows.items():
                     if row.get('removed') or row['expires_at']<=now:continue
                     for binding in row.get('bindings',[]):
-                        if binding.get('origin')==origin and binding.get('sender')==sender and now-binding.get('time',0)<3600:
+                        if binding.get('origin')==origin and (binding.get('sender')==sender or sender is None and ':GroupMessage:' in origin) and now-binding.get('time',0)<3600:
                             result.append({**binding,'path':str(self.root/name)})
                 return result
             return await asyncio.to_thread(select)

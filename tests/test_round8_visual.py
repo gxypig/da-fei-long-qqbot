@@ -56,7 +56,7 @@ class Visual(unittest.IsolatedAsyncioTestCase):
 
     async def test_senders_sessions_expiry_and_topic_boundaries(self):
         self.service.observe(Event(images=[self.image()]))
-        for sender,origin in [('two','bot:GroupMessage:g'),('one','bot:GroupMessage:other')]:
+        for sender,origin in [('two','bot:FriendMessage:two'),('one','bot:GroupMessage:other')]:
             req=await self.enrich(Event('这图什么意思',sender=sender,origin=origin,mid='2'))
             self.assertEqual(req.image_urls,[])
         self.now+=3601

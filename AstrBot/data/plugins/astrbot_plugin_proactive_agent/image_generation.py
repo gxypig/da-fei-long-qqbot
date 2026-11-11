@@ -20,6 +20,20 @@ def validate_image(data,animated=False):
         image.verify()
     return fmt
 
+def media_details(data):
+    """Read validated output metadata once; never infer animation from a request."""
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as image:
+        return {'format':image.format.lower(),'frames':getattr(image,'n_frames',1)}
+
+def review_media(event,response):
+    """Generation completed is distinct from the pending platform receipt."""
+    if not getattr(response,'qqbot_generated_image',False):return None
+    visual=event.get_extra('qqbot_image_provenance') or {}
+    if not visual.get('format') or not visual.get('frames'):return None
+    return {k:visual[k] for k in ('format','frames','method','intent','scene','camera_mode','checked') if k in visual} | {
+        'generation_state':'ready','delivery_state':'pending','transport':'image'}
+
 async def generate(plugin,provider,event):
     from astrbot.core.provider.entities import LLMResponse
     from astrbot.api.event import MessageChain
@@ -173,6 +187,7 @@ async def generate(plugin,provider,event):
         response.qqbot_generated_image=True
         event.set_extra('qqbot_generated_format',fmt)
         event.set_extra('qqbot_image_provenance',{'method':'generated_action_frames' if frames else 'native_gif' if animated else 'static',
+            **await asyncio.to_thread(media_details,data),
             'intent':plan['intent'],'scene':plan['scene'],'content_hash':hashlib.sha256(data).hexdigest(),
             'requirements':plan['requirements'],'camera_mode':plan['camera_mode'],'identity_sha256':canonical['sha256'] if canonical and plan['subject_self'] else None,'checked':checked})
         plugin._audit('image_generation',{'status':'ok','animated':animated,'format':fmt,'method':'generated_action_frames' if frames else 'native','checked':checked})

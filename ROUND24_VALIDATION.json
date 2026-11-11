@@ -1,0 +1,114 @@
+{
+  "date": "2026-11-11",
+  "version": "1.25.0-rc5",
+  "regression": {
+    "private": {
+      "passed": 1570,
+      "seconds": 189.771
+    },
+    "public": {
+      "passed": 1545,
+      "seconds": 189.729
+    }
+  },
+  "deployment": {
+    "checks_passed": 21,
+    "same_api_source_and_key": true,
+    "all_previous_sol_roles": "gpt-6.1-terra",
+    "image_and_tts_engines_preserved": true,
+    "other_settings_preserved": true
+  },
+  "provider_probe": [
+    {
+      "case": "text",
+      "ok": true,
+      "model": "gpt-6.1-terra",
+      "elapsed_ms": 1828
+    },
+    {
+      "case": "function",
+      "ok": true,
+      "model": "gpt-6.1-terra",
+      "elapsed_ms": 2578
+    },
+    {
+      "case": "responses_function",
+      "ok": true,
+      "model": "gpt-6.1-terra",
+      "elapsed_ms": 1954
+    }
+  ],
+  "qq_group_acceptance": {
+    "synthetic_inputs": 7,
+    "different_actor_followup_gap_seconds": 91.418,
+    "joint_image_first_confirmed_ms": 8000,
+    "speaker_identity_first_confirmed_ms": 7312,
+    "optional_sticker_confirmed_ms": [
+      16000,
+      15109
+    ],
+    "static_selfie": {
+      "confirmed_ms": 83266,
+      "format": "PNG",
+      "frames": 1,
+      "identity_and_apple_verified": true
+    },
+    "animation_final": {
+      "confirmed_ms": 70016,
+      "format": "GIF",
+      "frames": 6,
+      "platform_file_readback_verified": true,
+      "actual_qq_display_verified": true,
+      "caption_matches_actual_media": true,
+      "optional_review_enabled": true
+    },
+    "defects_found_during_acceptance": [
+      {
+        "case": "first_animation",
+        "outcome": "quality_rejected",
+        "reason": "old prop carried into independent request; extra arms",
+        "fixed": true
+      },
+      {
+        "case": "second_animation",
+        "outcome": "GIF delivered but caption falsely said unfinished",
+        "reason": "review had image message type without actual GIF format and frames",
+        "fixed": true
+      }
+    ],
+    "final_run_duplicate_sends": 0,
+    "synthetic_context_and_memory_removed": true,
+    "original_conversations_preserved": true,
+    "receipt_metadata_archived_without_content": true
+  },
+  "autonomous_exploration": {
+    "real_tools_used": true,
+    "manual_source_injection": false,
+    "old_focus_finished": true,
+    "searches": 2,
+    "read_pages": 4,
+    "body_pages": 2,
+    "fragment_only_pages": 2,
+    "finished_naturally": true,
+    "forced_share": false,
+    "progress_survived_restart_and_cleanup": true,
+    "body_sources": [
+      "https://tips.clip-studio.com/zh-tw/articles/6352",
+      "https://tips.clip-studio.com/zh-cn/articles/3000?recommended=b"
+    ],
+    "control_panel_sources_and_thoughts_verified": true,
+    "unanswered_and_cooldown_autonomy_exceptions_preserved": true
+  },
+  "performance_limitations": {
+    "global_five_percent_gate_passed": false,
+    "round22_gate_still_unpassed": true,
+    "new_full_latency_benchmark_performed": false,
+    "ordinary_reply_added_model_calls": 0,
+    "media_times_include_generation_review_and_platform_receipt": true,
+    "image_and_animation_not_within_30_seconds": true
+  },
+  "publication": {
+    "status": "pending_remote_verification",
+    "runtime_data_included": false
+  }
+}
