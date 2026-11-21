@@ -4,7 +4,9 @@
 
 版本号属于各插件，不代表 AstrBot 框架版本。具体代码以每条记录的提交链接为准；“待发布”不代表当前 GitHub 版本已经包含相应功能。
 
-## 待发布 · Magpie Agent 页面接管说明
+## 2026-11-21 · Magpie Agent 页面接管说明
+
+文档：[9bed22a](https://github.com/gxypig/da-fei-long-qqbot/commit/9bed22a704c339d7f940eeb72a4d748767b88d2b)，已核对 GitHub 远端。
 
 - 补充自定义 AstrBot 安装目录的发现方式、单份配置映射和官方自动接管流程。
 - 明确 Agent 状态与 API 连通的区别，以及切换模型后的安全重载、固定插件引用检查和撤销接管方式。
