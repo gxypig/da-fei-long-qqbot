@@ -4,7 +4,9 @@
 
 版本号属于各插件，不代表 AstrBot 框架版本。具体代码以每条记录的提交链接为准；“待发布”不代表当前 GitHub 版本已经包含相应功能。
 
-## 待发布 · Magpie 可选网关迁移说明
+## 2026-11-21 · Magpie 可选网关迁移说明
+
+文档：[2589df7](https://github.com/gxypig/da-fei-long-qqbot/commit/2589df769fa9bef347fba7754578a50eb913c7b7)，已核对 GitHub 远端。
 
 - 增加 [MAGPIE.md](MAGPIE.md)：模型完整 ID、聊天/审阅/图库/图片模型绑定、启动与健康检查迁移、隔离验收和回滚流程。
 - 说明原生 GIF 与连续动作帧后备的区别，以及仅目录可见不能代替实际生成验收。
