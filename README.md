@@ -15,6 +15,7 @@
 | 准备部署到云服务器 | [DEPLOYMENT.md](DEPLOYMENT.md) 的 Linux / Docker / QQ 连接方案 |
 | 配置定时发消息、概率接话 | AstrBot 左侧「扩展功能 → 大肥龙控制面板」 |
 | 排查不能聊天或不能生图 | [DEPLOYMENT.md](DEPLOYMENT.md) 的验收与故障表 |
+| 使用 Magpie 作为可选模型网关 | [MAGPIE.md](MAGPIE.md) |
 | 查看可用命令 | [COMMANDS.md](COMMANDS.md) |
 | 查找人格、审阅、标签和学习提示词 | [PROMPTS.md](PROMPTS.md) |
 | 查看每次更新了什么 | [CHANGELOG.md](CHANGELOG.md) |
